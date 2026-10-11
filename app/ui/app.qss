@@ -517,6 +517,19 @@ QPushButton {
     outline: none;
 }
 
+QPushButton:hover:!disabled {
+    border-color: #AFC8EF;
+}
+
+QPushButton:pressed:!disabled {
+    background-color: #EAF1FF;
+    border-color: #91B4EB;
+}
+
+QPushButton:focus:!disabled {
+    border-color: #8DB5F8;
+}
+
 /* ============================================================
    UPLOAD
    ============================================================ */

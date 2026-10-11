@@ -932,14 +932,15 @@ class MiniLineChart(QFrame):
 
         painter.setPen(QColor("#7C8BA0"))
         painter.setFont(sub_font)
-        max_labels = max(2, min(6, int(chart.width() // 70)))
+        # Keep enough horizontal space between year labels on compact cards.
+        max_labels = max(2, min(4, int(chart.width() // 145)))
         if n <= max_labels:
             label_indexes = list(range(n))
         else:
-            stride = max(1, (n - 1 + max_labels - 2) // (max_labels - 1))
-            label_indexes = list(range(0, n, stride))
-            if label_indexes[-1] != n - 1:
-                label_indexes.append(n - 1)
+            label_indexes = sorted({
+                round(index * (n - 1) / (max_labels - 1))
+                for index in range(max_labels)
+            })
 
         for i in label_indexes:
             label = self._labels[i]
@@ -988,7 +989,7 @@ class MiniBarChart(QFrame):
         self.update()
 
     def paintEvent(self, event):
-        from PySide6.QtGui import QPainter, QPen, QBrush, QColor, QFont
+        from PySide6.QtGui import QPainter, QPen, QBrush, QColor, QFont, QFontMetrics
         from PySide6.QtCore import QRectF
 
         painter = QPainter(self)
@@ -1011,7 +1012,7 @@ class MiniBarChart(QFrame):
         painter.setFont(sub_font)
         painter.drawText(16, 37, self._subtitle)
 
-        chart = QRectF(18, 52, max(40, self.width() - 36), max(64, self.height() - 82))
+        chart = QRectF(16, 50, max(40, self.width() - 32), max(64, self.height() - 62))
         painter.setPen(QPen(QColor("#E8EEF6"), 1))
         painter.drawLine(chart.left(), chart.bottom(), chart.right(), chart.bottom())
 
@@ -1023,23 +1024,52 @@ class MiniBarChart(QFrame):
 
         vmax = max(self._values) or 1.0
         count = len(self._values)
-        slot = chart.width() / max(1, count)
-        bar_width = max(12.0, min(40.0, slot * 0.58))
 
-        painter.setBrush(QBrush(QColor("#77A8FF")))
-        painter.setPen(Qt.NoPen)
-        painter.setFont(sub_font)
+        # Horizontal rows keep provider names readable at every dashboard width.
+        label_width = min(190.0, max(96.0, chart.width() * 0.40))
+        value_width = 42.0
+        bar_left = chart.left() + label_width + 8
+        bar_right = chart.right() - value_width - 8
+        bar_width = max(18.0, bar_right - bar_left)
+        row_height = chart.height() / max(1, count)
+        bar_height = min(10.0, row_height * 0.42)
+        label_font_metrics = QFontMetrics(sub_font)
+        for index, (label, value) in enumerate(zip(self._labels, self._values)):
+            center_y = chart.top() + row_height * (index + 0.5)
+            label_rect = QRectF(
+                chart.left(), center_y - row_height / 2,
+                label_width, row_height,
+            )
+            painter.setPen(QColor("#60728A"))
+            painter.drawText(
+                label_rect,
+                Qt.AlignLeft | Qt.AlignVCenter,
+                label_font_metrics.elidedText(
+                    label, Qt.ElideRight, int(label_width - 4)
+                ),
+            )
 
-        for i, (label, value) in enumerate(zip(self._labels, self._values)):
-            bar_h = (value / vmax) * (chart.height() - 12)
-            x = chart.left() + slot * i + (slot - bar_width) / 2
-            y = chart.bottom() - bar_h
-            painter.drawRoundedRect(QRectF(x, y, bar_width, bar_h), 4, 4)
-
-            painter.setPen(QColor("#718096"))
-            label_rect = QRectF(x - 18, chart.bottom() + 3, bar_width + 36, 18)
-            painter.drawText(label_rect, Qt.AlignHCenter | Qt.AlignTop, label[:10])
+            track_rect = QRectF(
+                bar_left, center_y - bar_height / 2, bar_width, bar_height
+            )
             painter.setPen(Qt.NoPen)
+            painter.setBrush(QBrush(QColor("#EDF2FA")))
+            painter.drawRoundedRect(track_rect, 4, 4)
+            fill_width = bar_width * max(0.0, value) / vmax
+            if fill_width > 0:
+                painter.setBrush(QBrush(QColor("#77A8FF")))
+                painter.drawRoundedRect(
+                    QRectF(bar_left, center_y - bar_height / 2, fill_width, bar_height),
+                    4, 4,
+                )
+
+            painter.setPen(QColor("#60728A"))
+            value_rect = QRectF(
+                chart.right() - value_width, center_y - row_height / 2,
+                value_width, row_height,
+            )
+            value_text = f"{value:g}"
+            painter.drawText(value_rect, Qt.AlignRight | Qt.AlignVCenter, value_text)
 
         painter.end()
 
@@ -1209,7 +1239,7 @@ class DashboardPage(QWidget):
         )
         self.source_chart = MiniBarChart(
             "Paper Sources",
-            "Distribution of academic sources",
+            "Paper candidates returned before deduplication",
         )
         self.metric_chart = MiniBarChart(
             "Research metrics",
@@ -1341,31 +1371,51 @@ class DashboardPage(QWidget):
         else:
             self.publication_chart.clear_data()
 
-        # Sources: prefer explicit search summary, otherwise paper source.
-        source_counts = {}
+        # Display every supported provider, including zero-result and unavailable
+        # providers, so this chart reports participation rather than only sources
+        # that happened to survive deduplication.
         search_info = result.get("search", {})
-        if isinstance(search_info, dict):
-            sources = search_info.get("sources", {})
-            if isinstance(sources, dict):
-                for source, count in sources.items():
-                    try:
-                        source_counts[str(source)] = int(count)
-                    except (TypeError, ValueError):
-                        pass
-        if not source_counts:
-            for paper in papers:
-                if not isinstance(paper, dict):
-                    continue
-                source = paper.get("source") or "Unknown"
-                source = str(source)
-                source_counts[source] = source_counts.get(source, 0) + 1
-        top_sources = sorted(source_counts.items(), key=lambda item: item[1], reverse=True)[:5]
-        if top_sources:
-            self.source_chart.set_data(
-                [name for name, _ in top_sources],
-                [value for _, value in top_sources],
-            )
+        search_info = search_info if isinstance(search_info, dict) else {}
+        academic_search = (result.get("pipeline") or {}).get("academic_search", {})
+        academic_search = academic_search if isinstance(academic_search, dict) else {}
+        source_counts = search_info.get("source_counts") or search_info.get("sources") or academic_search.get("sources") or {}
+        source_counts = source_counts if isinstance(source_counts, dict) else {}
+        provider_status = academic_search.get("provider_status", {})
+        provider_status = provider_status if isinstance(provider_status, dict) else {}
+        providers = ("OpenAlex", "Crossref", "Semantic Scholar", "Europe PMC", "OpenAIRE", "Scopus")
+        provider_labels = []
+        provider_values = []
+        status_text = {
+            "NOT_CONFIGURED": "not configured",
+            "DISABLED": "disabled",
+            "ERROR": "error",
+            "RATE_LIMITED": "rate limited",
+        }
+        for provider in providers:
+            try:
+                count = int(source_counts.get(provider, 0) or 0)
+            except (TypeError, ValueError):
+                count = 0
+            state = str(provider_status.get(provider, ""))
+            if state in status_text:
+                label = f"{provider} · {status_text[state]}"
+            elif state == "ENABLED" and count == 0:
+                label = f"{provider} · 0 results"
+            elif state == "ENABLED":
+                label = f"{provider} · {count}"
+            elif not state:
+                # Legacy saved results do not contain provider status; avoid
+                # presenting missing metadata as a provider failure.
+                label = f"{provider} · {count}" if count else f"{provider} · no data"
+            else:
+                label = f"{provider} · {state.lower().replace('_', ' ')}"
+            provider_labels.append(label)
+            provider_values.append(count)
+        if any(provider_status.values()) or source_counts:
+            self.source_chart._subtitle = "Provider participation · candidates before deduplication"
+            self.source_chart.set_data(provider_labels, provider_values)
         else:
+            self.source_chart._subtitle = "Provider participation and returned candidates"
             self.source_chart.clear_data()
 
         # Key metrics as a compact bar chart.
@@ -1724,6 +1774,7 @@ class AnalysisPage(QWidget):
         self._analysis_thread: QThread | None = None
         self._analysis_worker: DatasetAnalysisWorker | None = None
         self._analysis_started_at = 0.0
+        self._rendered_result_signature = None
 
         self.build_ui()
 
@@ -1897,6 +1948,7 @@ class AnalysisPage(QWidget):
     def show_empty_state(self):
 
         self.clear_results()
+        self._rendered_result_signature = None
 
         label = QLabel(
             "No analysis results yet.\n\n"
@@ -2174,6 +2226,10 @@ class AnalysisPage(QWidget):
         self.add_cell_gemini(result)
 
         self.result_layout.addStretch()
+        self._rendered_result_signature = (
+            id(result),
+            id(self.main_window.current_dataset),
+        )
 
     # =====================================================
     # VISUALIZATION
@@ -2692,6 +2748,9 @@ class AnalysisPage(QWidget):
         result = getattr(self.main_window, "analysis_result", {})
         if result:
             self._update_readiness(result)
+            signature = (id(result), id(dataframe))
+            if signature == self._rendered_result_signature:
+                return
             self.display_results(result)
         else:
             self._update_readiness()
@@ -4467,6 +4526,7 @@ class MLIntelligencePage(QWidget):
         self.last_task_result = {}
         self.last_method_result = {}
         self.last_intelligence_result = {}
+        self._rendered_result_signature = None
 
         self.build_ui()
 
@@ -4609,6 +4669,7 @@ class MLIntelligencePage(QWidget):
         self.last_task_result = {}
         self.last_method_result = {}
         self.last_intelligence_result = {}
+        self._rendered_result_signature = None
         self.refresh_button.setText("Run ML")
 
         self.clear_content()
@@ -5356,6 +5417,11 @@ class MLIntelligencePage(QWidget):
         )
 
         self.content_layout.addStretch()
+        self._rendered_result_signature = (
+            id(result),
+            id(method_result),
+            id(self.main_window.current_dataset),
+        )
 
     # ======================================================
     # ERROR
@@ -5434,6 +5500,13 @@ class MLIntelligencePage(QWidget):
             self.show_ready_state()
         else:
             self.show_empty_state()
+
+    def is_result_displayed(self) -> bool:
+        return self._rendered_result_signature == (
+            id(self.last_task_result),
+            id(self.last_method_result),
+            id(self.main_window.current_dataset),
+        ) and bool(self.last_task_result and self.last_method_result)
 
     def restore_saved_result(self) -> bool:
         """Restore completed ML output for the active local dataset project."""
@@ -6056,7 +6129,8 @@ class ResearchPage(QWidget):
         toolbar.addWidget(self.paper_count_label)
 
         self.provider_status_label = QLabel(
-            "Sumber: OpenAlex, Crossref, Europe PMC, OpenAIRE, Semantic Scholar; Scopus memerlukan Elsevier API key."
+            "Sumber: OpenAlex, Crossref, Europe PMC, OpenAIRE, dan Semantic Scholar. "
+            "Scopus memerlukan API key/akses Elsevier; UCL Discovery membuka pencarian eksternal."
         )
         self.provider_status_label.setObjectName("cardDescription")
         self.provider_status_label.setWordWrap(True)
@@ -6543,7 +6617,7 @@ class ResearchPage(QWidget):
         self.paper_count_label.setText("0 papers | 0 need screening")
         self.provider_status_label.setText(
             "Sources: OpenAlex, Crossref, Semantic Scholar, Europe PMC, and OpenAIRE. "
-            "Scopus requires a configured API key and access entitlement."
+            "Scopus requires Elsevier API key/access; UCL Discovery is external-only."
         )
         self.sinta_status_combo.setCurrentIndex(0)
         self.sinta_period_confirmed.setChecked(False)
@@ -6803,16 +6877,20 @@ class ResearchPage(QWidget):
             state = provider_status.get(provider)
             count = provider_counts.get(provider)
             if state == "NOT_CONFIGURED":
-                provider_parts.append(f"{provider}: API key required")
+                requirement = "Elsevier key/access needed" if provider == "Scopus" else "key/access needed"
+                provider_parts.append(f"{provider}: {requirement}")
             elif state == "DISABLED":
                 provider_parts.append(f"{provider}: off")
             elif state == "ERROR":
-                provider_parts.append(f"{provider}: unavailable")
+                provider_parts.append(f"{provider}: temporarily unavailable")
+            elif state == "RATE_LIMITED":
+                provider_parts.append(f"{provider}: rate limited")
             elif state == "ENABLED":
-                provider_parts.append(f"{provider}: {int(count or 0)}")
+                candidate_count = int(count or 0)
+                provider_parts.append(f"{provider} {candidate_count}")
         if provider_parts:
             self.provider_status_label.setText(
-                "Provider candidates before deduplication  |  " + "  |  ".join(provider_parts)
+                "Candidates before deduplication  |  " + "  |  ".join(provider_parts)
             )
 
         keywords_result = result.get(
@@ -7347,7 +7425,7 @@ class ResearchPage(QWidget):
         if lookup_status == "PERIOD_UNVERIFIED":
             rank = str(screening.get("rank") or "")
             if rank in {f"S{value}" for value in range(1, 7)}:
-                return f"SINTA {rank[1:]}*"
+                return f"SINTA {rank[1:]}"
             return "Perlu Verifikasi Tahun"
         if lookup_status == "NO_MATCH":
             return "Jurnal Belum Cocok"
@@ -7368,6 +7446,11 @@ class ResearchPage(QWidget):
 
     @classmethod
     def _sinta_table_status_label(cls, paper):
+        screening = cls._sinta_screening(paper)
+        if str(screening.get("lookup_status") or "") == "PERIOD_UNVERIFIED":
+            rank = str(screening.get("rank") or "")
+            if rank in {f"S{value}" for value in range(1, 7)}:
+                return f"SINTA {rank[1:]}"
         label = cls._sinta_status_label(paper)
         compact_labels = {
             "Perlu Dicoba Lagi": "Coba Lagi",
@@ -8395,6 +8478,7 @@ class PapersToolPage(QWidget):
         self.main_window = main_window
         self.papers = []
         self.filtered_papers = []
+        self._result_signature = None
         self._build_ui()
 
     def _build_ui(self):
@@ -8576,6 +8660,7 @@ class PapersToolPage(QWidget):
     # =====================================================
 
     def show_empty_state(self):
+        self._result_signature = None
         self.papers = []
         self.filtered_papers = []
         self.paper_table.setSortingEnabled(False)
@@ -8596,6 +8681,24 @@ class PapersToolPage(QWidget):
         papers = result.get("papers", [])
         if not isinstance(papers, list):
             papers = []
+
+        paper_signatures = []
+        for paper in papers:
+            if not isinstance(paper, dict):
+                continue
+            screening = ResearchPage._sinta_screening(paper)
+            paper_signatures.append((
+                id(paper),
+                str(paper.get("doi") or ""),
+                str(screening.get("status") or ""),
+                str(screening.get("lookup_status") or ""),
+                str(screening.get("rank") or ""),
+                str(screening.get("checked_at") or ""),
+            ))
+        signature = (id(result), tuple(paper_signatures))
+        if signature == self._result_signature:
+            return
+        self._result_signature = signature
 
         self.papers = [
             dict(paper)
@@ -8901,6 +9004,7 @@ class ResearchLandscapeToolPage(QWidget):
     def __init__(self, main_window):
         super().__init__()
         self.main_window = main_window
+        self._rendered_result_id = None
         self._build_ui()
 
     def _build_ui(self):
@@ -8956,6 +9060,7 @@ class ResearchLandscapeToolPage(QWidget):
 
     def show_empty_state(self):
         self._clear()
+        self._rendered_result_id = None
         card = QFrame()
         card.setObjectName("contentCard")
         layout = QVBoxLayout(card)
@@ -8983,6 +9088,7 @@ class ResearchLandscapeToolPage(QWidget):
         if not result:
             self.show_empty_state()
             return
+        self._rendered_result_id = None
         self.update_from_result(result)
 
     @staticmethod
@@ -9112,6 +9218,11 @@ class ResearchLandscapeToolPage(QWidget):
         self.content.addWidget(card)
 
     def update_from_result(self, result):
+        if not isinstance(result, dict) or not result:
+            self.show_empty_state()
+            return
+        if id(result) == self._rendered_result_id:
+            return
         self._clear()
 
         landscape = self._safe_dict(result.get("landscape"))
@@ -9197,6 +9308,7 @@ class ResearchLandscapeToolPage(QWidget):
                 self._add_text_card("Additional Landscape Details", self._format_mapping(details))
 
         self.content.addStretch()
+        self._rendered_result_id = id(result)
 
 
 
@@ -9211,6 +9323,7 @@ class ResearchGapToolPage(QWidget):
         self._explanation_thread: QThread | None = None
         self._explanation_worker: ResearchGapExplanationWorker | None = None
         self._attempted_explanation_this_session = False
+        self._rendered_result_signature = None
         self._build_ui()
 
     def _build_ui(self):
@@ -9263,6 +9376,7 @@ class ResearchGapToolPage(QWidget):
 
     def show_empty_state(self):
         self.research_result = {}
+        self._rendered_result_signature = None
         self.status.setText("Jalankan Academic Research terlebih dahulu untuk menemukan kandidat gap.")
         self.explain_button.setEnabled(False)
         self.clear_content()
@@ -9292,6 +9406,16 @@ class ResearchGapToolPage(QWidget):
     def update_from_result(self, result):
         self.research_result = result if isinstance(result, dict) else {}
         gaps = self.research_result.get("gaps", {})
+        explanation = self.research_result.get("gap_explanation")
+        signature = (
+            id(self.research_result),
+            id(gaps),
+            id(explanation),
+            self._explanation_thread is not None,
+        )
+        if signature == self._rendered_result_signature:
+            return
+        self._rendered_result_signature = signature
         summary = gaps.get("summary", {}) if isinstance(gaps, dict) else {}
         items = []
         if isinstance(gaps, dict):
@@ -9420,17 +9544,12 @@ class ResearchGapToolPage(QWidget):
     def ensure_explanation(self):
         explanation = self.research_result.get("gap_explanation", {})
         has_key = bool(get_saved_api_key())
-        needs_generation = (
-            not isinstance(explanation, dict)
-            or not explanation.get("text")
-            or explanation.get("source") == "error"
-            or (
-                explanation.get("source") == "local"
-                and has_key
-                and not self._attempted_explanation_this_session
-            )
+        needs_generation = not isinstance(explanation, dict) or not explanation.get("text")
+        needs_generation = needs_generation or explanation.get("source") == "error"
+        needs_generation = needs_generation or (
+            explanation.get("source") == "local" and has_key
         )
-        if self.research_result and needs_generation:
+        if self.research_result and needs_generation and not self._attempted_explanation_this_session:
             self.explain_gaps()
 
     def explain_gaps(self):
@@ -9503,6 +9622,9 @@ class ResearchReportToolPage(QWidget):
         self._pending_pdf_path = None
         self._report_project_id = None
         self._report_dataset_title = None
+        self._preview_signature = None
+        self._generating_report_signature = None
+        self._workflow_source_objects = ()
         self.build_ui()
 
     def build_ui(self):
@@ -9523,7 +9645,9 @@ class ResearchReportToolPage(QWidget):
 
         self.generate_button = QPushButton("Perbarui Pratinjau")
         self.generate_button.setObjectName("primaryButton")
-        self.generate_button.clicked.connect(self.generate_preview)
+        self.generate_button.clicked.connect(
+            lambda _checked=False: self.generate_preview(force=True)
+        )
         header.addWidget(self.generate_button)
 
         self.export_button = QPushButton("Simpan sebagai PDF")
@@ -9555,6 +9679,8 @@ class ResearchReportToolPage(QWidget):
     def show_empty_state(self):
         self.research_result = {}
         self.current_html = ""
+        self._preview_signature = None
+        self._generating_report_signature = None
         self.status.setText("Jalankan semua tahap penelitian sebelum mengekspor laporan.")
         self.preview.setPlainText(
             "Laporan penelitian belum tersedia.\n\n"
@@ -9568,6 +9694,80 @@ class ResearchReportToolPage(QWidget):
 
     def refresh_from_main(self):
         self.research_result = getattr(self.main_window.research_page, "research_result", {}) or {}
+
+    def _workflow_signature(self):
+        """Identify the exact in-memory workflow state used by the report."""
+        main = self.main_window
+        research = (
+            getattr(main.research_page, "research_result", {})
+            or self.research_result
+            or {}
+        )
+        ml_page = main.ml_page
+        papers = research.get("papers", []) if isinstance(research, dict) else []
+        paper_signatures = []
+        for paper in papers if isinstance(papers, list) else []:
+            if not isinstance(paper, dict):
+                continue
+            screening = ResearchPage._sinta_screening(paper)
+            authors = paper.get("authors") or []
+            if isinstance(authors, str):
+                authors = [authors]
+            elif not isinstance(authors, (list, tuple)):
+                authors = [authors]
+            paper_signatures.append((
+                str(paper.get("doi") or ""),
+                str(paper.get("title") or ""),
+                str(paper.get("year") or ""),
+                str(paper.get("venue") or ""),
+                str(paper.get("abstract") or ""),
+                str(paper.get("issn") or ""),
+                tuple(str(author) for author in authors),
+                str(screening.get("status") or ""),
+                str(screening.get("rank") or ""),
+                str(screening.get("checked_at") or ""),
+            ))
+        explanation = research.get("gap_explanation") or {}
+        if isinstance(explanation, dict):
+            explanation_signature = (
+                str(explanation.get("source") or ""),
+                str(explanation.get("text") or ""),
+            )
+        else:
+            explanation_signature = ("", str(explanation or ""))
+        dataset = getattr(main, "current_dataset", None)
+        analysis = getattr(main, "analysis_result", None)
+        task_result = getattr(ml_page, "last_task_result", None)
+        method_result = getattr(ml_page, "last_method_result", None)
+        ml_result = getattr(ml_page, "last_intelligence_result", None)
+        sources = (
+            dataset,
+            analysis,
+            task_result,
+            method_result,
+            ml_result,
+            research,
+            research.get("papers") if isinstance(research, dict) else None,
+            research.get("landscape") if isinstance(research, dict) else None,
+            research.get("trend") if isinstance(research, dict) else None,
+            research.get("gaps") if isinstance(research, dict) else None,
+        )
+        signature = (
+            getattr(main, "current_project_id", None),
+            id(dataset),
+            main._current_filename(),
+            id(analysis),
+            id(task_result),
+            id(method_result),
+            id(ml_result),
+            id(research),
+            tuple(paper_signatures),
+            explanation_signature,
+        )
+        # Hold references so Python cannot recycle an old result object's id
+        # and accidentally treat a new workflow as the cached report.
+        self._workflow_source_objects = sources
+        return signature
 
     def _workflow_missing(self):
         missing = []
@@ -9593,7 +9793,14 @@ class ResearchReportToolPage(QWidget):
             missing.append("Penjelasan Research Gap belum dibuat")
         return missing
 
-    def generate_preview(self):
+    def _release_chart_tempdir(self):
+        tempdir = self._chart_tempdir
+        self._chart_tempdir = None
+        self.chart_dir = None
+        if tempdir is not None:
+            tempdir.cleanup()
+
+    def generate_preview(self, force=False):
         if self._report_thread is not None:
             return
         if not self.research_result:
@@ -9611,18 +9818,30 @@ class ResearchReportToolPage(QWidget):
 
         missing = self._workflow_missing()
         if missing:
-            self._chart_tempdir = None
-            self.chart_dir = None
+            self._release_chart_tempdir()
             self.current_html = ""
+            self._preview_signature = None
+            self._generating_report_signature = None
             self.status.setText("Selesaikan semua tahap penelitian untuk membuka ekspor PDF.")
             self.preview.setPlainText("Laporan belum siap. Selesaikan tahap berikut:\n\n" + "\n".join(f"- {item}" for item in missing))
             self.export_button.setEnabled(False)
             return
 
+        workflow_signature = self._workflow_signature()
+        if (
+            not force
+            and self.current_html
+            and self._preview_signature == workflow_signature
+        ):
+            self.export_button.setEnabled(True)
+            return
+
         try:
             dataset_title = Path(filename).stem or filename
+            self._generating_report_signature = workflow_signature
             self._report_project_id = getattr(self.main_window, "current_project_id", None)
             self._report_dataset_title = dataset_title
+            self._release_chart_tempdir()
             self._chart_tempdir = tempfile.TemporaryDirectory(prefix="dataset_research_report_")
             self.chart_dir = Path(self._chart_tempdir.name)
             self.current_html = ""
@@ -9664,15 +9883,22 @@ class ResearchReportToolPage(QWidget):
     def _on_report_generated(self, content, chart_dir):
         current_project_id = getattr(self.main_window, "current_project_id", None)
         current_dataset_title = Path(self.main_window._current_filename()).stem
-        if current_project_id != self._report_project_id or current_dataset_title != self._report_dataset_title:
+        if (
+            current_project_id != self._report_project_id
+            or current_dataset_title != self._report_dataset_title
+            or self._generating_report_signature != self._workflow_signature()
+        ):
             self.current_html = ""
-            self._chart_tempdir = None
-            self.chart_dir = None
+            self._preview_signature = None
+            self._generating_report_signature = None
+            self._release_chart_tempdir()
             self.status.setText("Dataset berubah saat laporan disusun. Perbarui pratinjau untuk dataset aktif.")
             self._finish_report_busy()
             self.export_button.setEnabled(False)
             return
         self.current_html = content
+        self._preview_signature = self._generating_report_signature
+        self._generating_report_signature = None
         self.chart_dir = Path(chart_dir)
         self.preview.setSearchPaths([str(self.chart_dir)])
         self.preview.setHtml(self.current_html)
@@ -9691,6 +9917,10 @@ class ResearchReportToolPage(QWidget):
 
     def _on_report_worker_failed(self, error):
         operation = self._report_operation
+        if operation == "preview":
+            self._preview_signature = None
+            self._generating_report_signature = None
+            self._release_chart_tempdir()
         self._finish_report_busy()
         self.export_button.setEnabled(bool(self.current_html) and not self._workflow_missing())
         self.status.setText("Gagal membuat pratinjau laporan." if operation == "preview" else "Gagal menyimpan PDF.")
@@ -9894,6 +10124,12 @@ class MainWindow(QMainWindow):
         self.current_dataset = None
         self.current_file_path = None
         self.analysis_result = {}
+        self._shutdown_pending = False
+        self._shutdown_idle_checks = 0
+        self._session_data_cleaned = False
+        self._shutdown_timer = QTimer(self)
+        self._shutdown_timer.setInterval(50)
+        self._shutdown_timer.timeout.connect(self._poll_shutdown)
 
         self.loader = DatasetLoader()
         self.profiler = DatasetProfiler()
@@ -9916,6 +10152,113 @@ class MainWindow(QMainWindow):
         self._build_window()
         self._restore_latest_project()
         get_telemetry().track("app_open", status="started")
+
+    def _active_worker_threads(self):
+        """Return running background workers that could still write session data."""
+        worker_fields = {
+            "dataset_search_page": ("_search_thread", "_download_thread"),
+            "analysis_page": ("_analysis_thread", "_gemini_thread"),
+            "ml_page": ("_ml_thread",),
+            "research_page": ("_research_thread", "_sinta_thread"),
+            "gap_tool_page": ("_explanation_thread",),
+            "report_tool_page": ("_report_thread",),
+        }
+        active = []
+        for page_name, attributes in worker_fields.items():
+            page = getattr(self, page_name, None)
+            if page is None:
+                continue
+            for attribute in attributes:
+                thread = getattr(page, attribute, None)
+                if thread is not None and thread.isRunning():
+                    active.append(thread)
+        return active
+
+    def _poll_shutdown(self):
+        if self._active_worker_threads():
+            self._shutdown_idle_checks = 0
+            self.statusBar().showMessage(
+                "Menunggu proses yang sedang berjalan sebelum menghapus data sesi…"
+            )
+            return
+
+        # Give queued worker-finished slots a short chance to run before cleanup.
+        self._shutdown_idle_checks += 1
+        if self._shutdown_idle_checks < 2:
+            return
+
+        self._shutdown_timer.stop()
+        try:
+            self._clear_session_workspace()
+        except Exception as error:
+            self._shutdown_pending = False
+            self._shutdown_idle_checks = 0
+            self.setWindowTitle("Dataset Research")
+            if self.centralWidget() is not None:
+                self.centralWidget().setEnabled(True)
+            self.statusBar().clearMessage()
+            QMessageBox.warning(
+                self,
+                "Data sesi belum terhapus",
+                "Aplikasi tidak jadi ditutup karena data sesi lokal belum dapat "
+                f"dibersihkan. Periksa penyimpanan lalu coba tutup kembali.\n\n{error}",
+            )
+            return
+
+        self.close()
+
+    def _clear_session_workspace(self):
+        """Delete app-managed project copies/results while preserving user files and settings."""
+        report_page = getattr(self, "report_tool_page", None)
+        if report_page is not None:
+            report_tempdir = getattr(report_page, "_chart_tempdir", None)
+            if report_tempdir is not None:
+                report_tempdir.cleanup()
+            report_page._chart_tempdir = None
+            report_page.chart_dir = None
+            report_page.current_html = ""
+            report_page._preview_signature = None
+            report_page._workflow_source_objects = ()
+            report_page._generating_report_signature = None
+
+        for project in self.repository.list_projects():
+            project_id = project.get("id")
+            if project_id is None:
+                continue
+            project_id = int(project_id)
+            projects_root = (Path(self.version_manager.data_dir) / "projects").resolve()
+            project_dir = (projects_root / str(project_id)).resolve()
+            if projects_root not in project_dir.parents:
+                raise RuntimeError("Lokasi data proyek berada di luar folder kerja aplikasi.")
+            self.version_manager.delete_project_files(project_id)
+
+        # Cascades clear each project's workflow/results; journal screening is cleared too.
+        self.database.clear_session_data()
+
+        self.current_dataset = None
+        self.current_file_path = None
+        self.current_project_id = None
+        self.analysis_result = {}
+        self._session_data_cleaned = True
+
+    def closeEvent(self, event):
+        if self._session_data_cleaned:
+            event.accept()
+            return
+
+        event.ignore()
+        if self._shutdown_pending:
+            return
+
+        self._shutdown_pending = True
+        self._shutdown_idle_checks = 0
+        self.setWindowTitle("Dataset Research — Menutup sesi")
+        if self.centralWidget() is not None:
+            self.centralWidget().setEnabled(False)
+        self.statusBar().showMessage(
+            "Menyelesaikan proses dan menghapus dataset serta hasil kerja sesi…"
+        )
+        self._shutdown_timer.start()
 
 
     # =========================================================
@@ -10281,9 +10624,10 @@ class MainWindow(QMainWindow):
         if self.current_dataset is None:
             self.ml_page.show_empty_state()
         elif self.ml_page.last_task_result and self.ml_page.last_method_result:
-            self.ml_page.display_result(
-                self.ml_page.last_task_result, self.ml_page.last_method_result
-            )
+            if not self.ml_page.is_result_displayed():
+                self.ml_page.display_result(
+                    self.ml_page.last_task_result, self.ml_page.last_method_result
+                )
         elif self.ml_page.restore_saved_result():
             pass
         elif self.analysis_result:

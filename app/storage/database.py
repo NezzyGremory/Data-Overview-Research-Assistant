@@ -362,6 +362,21 @@ class Database:
         finally:
             connection.close()
 
+    def clear_session_data(self) -> None:
+        """Securely delete all local project and journal-screening rows in one transaction."""
+        connection = self.connect()
+        try:
+            connection.execute("PRAGMA secure_delete = ON")
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute("DELETE FROM journal_screening")
+            connection.execute("DELETE FROM projects")
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
     # ============================================================
     # FETCH ONE
     # ============================================================

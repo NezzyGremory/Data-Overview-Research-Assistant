@@ -702,11 +702,7 @@ class DatasetVersionManager:
         Dipanggil saat project dihapus.
         """
 
-        # Hapus file
-        project_dir = self._project_dir(project_id)
-
-        if project_dir.exists():
-            shutil.rmtree(str(project_dir))
+        self.delete_project_files(project_id)
 
         # Hapus record database
         # (CASCADE dari projects juga akan menghapus,
@@ -726,6 +722,13 @@ class DatasetVersionManager:
             """,
             (project_id,),
         )
+
+    def delete_project_files(self, project_id: int) -> None:
+        """Remove only the app-managed files for a project."""
+        project_dir = self._project_dir(project_id)
+
+        if project_dir.exists():
+            shutil.rmtree(str(project_dir))
 
     # ============================================================
     # INTERNAL HELPERS
