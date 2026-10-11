@@ -146,6 +146,18 @@ QScrollArea { background: var(--canvas); border: none; }
 QAbstractScrollArea { background: var(--canvas); }
 QAbstractScrollArea::viewport { background: var(--canvas); }
 
+/* Help page */
+#helpPageTitle { color: var(--heading); font-size: 24px; font-weight: 700; }
+#helpPageSubtitle { color: var(--muted); font-size: 14px; }
+#helpHero { background: var(--blue-active); border: 1px solid var(--blue-bright); border-radius: var(--card-radius); }
+#helpHeroTitle { color: var(--blue); font-size: 17px; font-weight: 700; }
+#helpHeroBody, #helpBody { color: var(--body); font-size: 13px; }
+#helpInfoCard { background: var(--surface); border: 1px solid var(--border); border-radius: var(--card-radius); }
+#helpCardTitle { color: var(--heading); font-size: 15px; font-weight: 700; }
+QPushButton#helpShortcut { background: var(--surface); border: 1px solid var(--blue-bright); border-radius: var(--button-radius); color: var(--blue); font-size: 13px; font-weight: 600; min-height: 38px; padding: 0 12px; }
+QPushButton#helpShortcut:hover { background: var(--blue-active); }
+QPushButton#helpShortcut:pressed { background: var(--blue-bright); color: var(--surface); }
+
 /* Shared cards, form controls, buttons, and tables */
 #contentCard,
 #statCard,

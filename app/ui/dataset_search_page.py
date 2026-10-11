@@ -8,6 +8,7 @@ from PySide6.QtCore import QObject, QThread, Qt, Signal, QUrl, QTimer, QStandard
 from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QComboBox,
+    QBoxLayout,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -142,8 +143,21 @@ class DatasetSearchPage(QWidget):
 
     def _build_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(36, 29, 28, 16)
-        root.setSpacing(18)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        self.scroll = QScrollArea()
+        self.scroll.setObjectName("datasetSearchScroll")
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.NoFrame)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        root.addWidget(self.scroll)
+
+        self.container = QWidget()
+        self.container.setObjectName("datasetSearchContainer")
+        body = QVBoxLayout(self.container)
+        body.setContentsMargins(36, 29, 28, 16)
+        body.setSpacing(18)
 
         title = QLabel("Dataset Search")
         title.setObjectName("pageTitle")
@@ -155,24 +169,27 @@ class DatasetSearchPage(QWidget):
         )
         subtitle.setObjectName("datasetSearchSubtitle")
         subtitle.setWordWrap(True)
+        subtitle.setMinimumWidth(0)
+        subtitle.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
 
-        root.addWidget(title)
+        body.addWidget(title)
         subtitle.setTextFormat(Qt.RichText)
         subtitle.setText(
             "Search for public datasets on Hugging Face Hub and Kaggle, check their file formats, "
             "and then download them directly to DORA workspace. <b>Examples: Titanic, Iris, agriculture, "
             "students, healthcare, stocks, and home prices.</b>"
         )
-        root.addWidget(subtitle)
+        body.addWidget(subtitle)
 
         search_card = QFrame()
         search_card.setObjectName("datasetSearchCard")
-        search_card.setMinimumHeight(163)
+        search_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         search_layout = QVBoxLayout(search_card)
         search_layout.setContentsMargins(22, 26, 22, 22)
         search_layout.setSpacing(14)
 
         row = QHBoxLayout()
+        self.search_controls_layout = row
         row.setSpacing(10)
 
         self.search_input = QLineEdit()
@@ -184,7 +201,8 @@ class DatasetSearchPage(QWidget):
 
         self.source_combo = QComboBox()
         self.source_combo.setMinimumHeight(66)
-        self.source_combo.setMinimumWidth(260)
+        self.source_combo.setMinimumWidth(0)
+        self.source_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.source_combo.setObjectName("datasetProviderCombo")
         self.source_combo.addItem("Kaggle dataset", "kaggle")
         self.source_combo.addItem("Hugging Face dataset", "huggingface")
@@ -194,7 +212,7 @@ class DatasetSearchPage(QWidget):
         self.search_button.setObjectName("primaryButton")
         self.search_button.setProperty("datasetSearch", True)
         self.search_button.setMinimumHeight(66)
-        self.search_button.setMinimumWidth(150)
+        self.search_button.setMinimumWidth(120)
         search_icon = Path(__file__).resolve().parent / "assets" / "icons" / "search-white.svg"
         if search_icon.exists():
             self.search_button.setIcon(QIcon(str(search_icon)))
@@ -211,18 +229,13 @@ class DatasetSearchPage(QWidget):
         self.status_label.setWordWrap(True)
         search_layout.addWidget(self.status_label)
         apply_card_shadow(search_card)
-        root.addWidget(search_card)
+        body.addWidget(search_card)
 
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)
         self.progress.setVisible(False)
         self.progress.setFixedHeight(6)
-        root.addWidget(self.progress)
-
-        self.scroll = QScrollArea()
-        self.scroll.setWidgetResizable(True)
-        self.scroll.setFrameShape(QFrame.NoFrame)
-        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        body.addWidget(self.progress)
 
         self.results_container = QWidget()
         self.results_container.setObjectName("datasetSearchResults")
@@ -239,8 +252,24 @@ class DatasetSearchPage(QWidget):
         self.results_layout.addWidget(self.empty_label)
         self.results_layout.addStretch()
 
-        self.scroll.setWidget(self.results_container)
-        root.addWidget(self.scroll, 1)
+        body.addWidget(self.results_container, 1)
+        body.addStretch(1)
+        self.scroll.setWidget(self.container)
+        self._result_rows = []
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        width = event.size().width()
+        stacked_controls = width < 900
+        self.search_controls_layout.setDirection(
+            QBoxLayout.TopToBottom if stacked_controls else QBoxLayout.LeftToRight
+        )
+        self.search_input.setMinimumHeight(50 if stacked_controls else 66)
+        self.source_combo.setMinimumHeight(50 if stacked_controls else 66)
+        self.search_button.setMinimumHeight(50 if stacked_controls else 66)
+        direction = QBoxLayout.TopToBottom if width < 1000 else QBoxLayout.LeftToRight
+        for row in self._result_rows:
+            row.layout().setDirection(direction)
 
     def search_datasets(self):
         query = self.search_input.text().strip()
@@ -315,14 +344,18 @@ class DatasetSearchPage(QWidget):
         for start in range(0, len(self.results), 2):
             row = QWidget()
             row_layout = QHBoxLayout(row)
+            row_layout.setDirection(
+                QBoxLayout.TopToBottom
+                if self.width() < 1000
+                else QBoxLayout.LeftToRight
+            )
             row_layout.setContentsMargins(0, 0, 0, 0)
             row_layout.setSpacing(12)
             row_layout.addWidget(self._build_result_card(self.results[start]), 1)
             if start + 1 < len(self.results):
                 row_layout.addWidget(self._build_result_card(self.results[start + 1]), 1)
-            else:
-                row_layout.addStretch(1)
             self.results_layout.addWidget(row)
+            self._result_rows.append(row)
 
         self.results_layout.addStretch()
 
@@ -606,6 +639,7 @@ class DatasetSearchPage(QWidget):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(destination)))
 
     def _clear_results(self):
+        self._result_rows = []
         while self.results_layout.count():
             item = self.results_layout.takeAt(0)
             widget = item.widget()

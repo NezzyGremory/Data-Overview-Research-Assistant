@@ -22,10 +22,12 @@ from PySide6.QtPrintSupport import QPrinter
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
+    QBoxLayout,
     QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QLayout,
     QMainWindow,
     QPushButton,
     QScrollArea,
@@ -1107,6 +1109,7 @@ class DashboardPage(QWidget):
         hero.setMinimumHeight(186)
 
         hero_layout = QHBoxLayout(hero)
+        self.hero_layout = hero_layout
         hero_layout.setContentsMargins(30, 22, 30, 22)
         hero_layout.setSpacing(24)
 
@@ -1165,15 +1168,18 @@ class DashboardPage(QWidget):
         self.columns_card.setObjectName("heroMetricCard")
         hero_stats.addWidget(self.rows_card)
         hero_stats.addWidget(self.columns_card)
+        self.hero_stats_layout = hero_stats
         hero_layout.addLayout(hero_stats)
         layout.addWidget(hero)
 
         # WORKFLOW ---------------------------------------------
         pipeline_header = QHBoxLayout()
+        self.pipeline_header_layout = pipeline_header
         pipeline_title = QLabel("Research progress")
         pipeline_title.setObjectName("sectionTitle")
         self.pipeline_description = QLabel("Follow the steps in your research workflow")
         self.pipeline_description.setObjectName("sectionDescription")
+        self.pipeline_description.setWordWrap(True)
         pipeline_header.addWidget(pipeline_title)
         pipeline_header.addSpacing(8)
         pipeline_header.addWidget(self.pipeline_description)
@@ -1222,10 +1228,12 @@ class DashboardPage(QWidget):
         layout.addLayout(self.actions_layout)
         # RESEARCH SNAPSHOT -------------------------------------
         snapshot_header = QHBoxLayout()
+        self.snapshot_header_layout = snapshot_header
         snapshot_title = QLabel("Research overview")
         snapshot_title.setObjectName("sectionTitle")
         snapshot_desc = QLabel("A quick view of your academic research results")
         snapshot_desc.setObjectName("sectionDescription")
+        snapshot_desc.setWordWrap(True)
         snapshot_header.addWidget(snapshot_title)
         snapshot_header.addSpacing(8)
         snapshot_header.addWidget(snapshot_desc)
@@ -1277,6 +1285,25 @@ class DashboardPage(QWidget):
         compact = width < 760
         margins = 16 if compact else 22 if width < 980 else 30
         self.layout().setContentsMargins(margins, 16, margins, 20)
+
+        stacked = width < 760
+        self.hero_layout.setDirection(
+            QBoxLayout.TopToBottom if stacked else QBoxLayout.LeftToRight
+        )
+        self.hero_stats_layout.setDirection(
+            QBoxLayout.TopToBottom if stacked else QBoxLayout.LeftToRight
+        )
+        self.pipeline_layout.setDirection(
+            QBoxLayout.TopToBottom if stacked else QBoxLayout.LeftToRight
+        )
+        self.pipeline_header_layout.setDirection(
+            QBoxLayout.TopToBottom if stacked else QBoxLayout.LeftToRight
+        )
+        self.snapshot_header_layout.setDirection(
+            QBoxLayout.TopToBottom if stacked else QBoxLayout.LeftToRight
+        )
+        for connector in self.workflow_connectors:
+            connector.setVisible(not stacked)
 
         action_columns = 4 if width >= 1100 else 2 if width >= 660 else 1
         chart_columns = 3 if width >= 1080 else 2 if width >= 700 else 1
@@ -1607,7 +1634,7 @@ class UploadDatasetDialog(QDialog):
         fields.setHorizontalSpacing(10 if self.compact_layout else 14)
         fields.setVerticalSpacing(14 if self.compact_layout else 22)
         fields.addWidget(self._field("DATASET NAME", dataset_name), 0, 0)
-        fields.addWidget(self._field("DEMILITER", delimiter), 0, 1)
+        fields.addWidget(self._field("DELIMITER", delimiter), 0, 1)
         fields.addWidget(self._field("TARGET COLUMN", target), 1, 0)
         fields.addWidget(self._field("ENCODING", encoding), 1, 1)
         fields.setColumnStretch(0, 1)
@@ -1688,6 +1715,7 @@ class UploadPage(QWidget):
         layout.setSpacing(32)
 
         header = QHBoxLayout()
+        self.header_layout = header
         title_block = QVBoxLayout()
         title_block.setSpacing(4)
         title = QLabel("Dataset")
@@ -1710,8 +1738,10 @@ class UploadPage(QWidget):
         layout.addLayout(header)
 
         content_row = QHBoxLayout()
+        self.content_row = content_row
         content_row.setSpacing(22)
         upload_card = QFrame()
+        self.upload_card = upload_card
         upload_card.setObjectName("uploadCard")
         upload_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         apply_card_shadow(upload_card)
@@ -1744,24 +1774,27 @@ class UploadPage(QWidget):
         drop_title = QLabel("Drag & drop your file CSV file here")
         drop_title.setObjectName("uploadDropTitle")
         drop_title.setAlignment(Qt.AlignCenter)
+        drop_title.setWordWrap(True)
         drop_layout.addWidget(drop_title)
 
-        description_row = QHBoxLayout()
+        description_row = QGridLayout()
+        self.drop_description_layout = description_row
         description_row.setSpacing(5)
-        description_row.addStretch(1)
         prefix = QLabel("or")
         prefix.setObjectName("uploadDropDescription")
-        description_row.addWidget(prefix)
+        prefix.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         browse_link = QPushButton("browse from your computer.")
         browse_link.setObjectName("uploadBrowseLink")
         browse_link.setFlat(True)
         browse_link.setCursor(Qt.PointingHandCursor)
         browse_link.clicked.connect(self.select_dataset)
-        description_row.addWidget(browse_link)
+        description_row.addWidget(browse_link, 0, 1, Qt.AlignLeft | Qt.AlignVCenter)
         suffix = QLabel("csv up to 200 MB")
         suffix.setObjectName("uploadDropDescription")
-        description_row.addWidget(suffix)
-        description_row.addStretch(1)
+        suffix.setObjectName("uploadDropSizeLimit")
+        self.drop_size_label = suffix
+        description_row.addWidget(prefix, 0, 0, Qt.AlignRight | Qt.AlignVCenter)
+        description_row.addWidget(suffix, 0, 2, Qt.AlignLeft | Qt.AlignVCenter)
         drop_layout.addLayout(description_row)
         drop_layout.addStretch(1)
         dropzone_wrap = QWidget()
@@ -1773,10 +1806,12 @@ class UploadPage(QWidget):
         upload_layout.addWidget(dropzone_wrap)
 
         steps_wrap = QWidget()
-        steps_wrap.setFixedHeight(65)
-        steps_row = QHBoxLayout(steps_wrap)
+        steps_row = QGridLayout(steps_wrap)
+        self.steps_layout = steps_row
+        self.upload_steps = []
         steps_row.setContentsMargins(0, 0, 0, 0)
-        steps_row.setSpacing(5)
+        steps_row.setHorizontalSpacing(5)
+        steps_row.setVerticalSpacing(5)
         for number, heading, detail in (
             ("1", "Upload CSV", "Choose your file"),
             ("2", "Preview", "Check the first rows"),
@@ -1785,7 +1820,8 @@ class UploadPage(QWidget):
         ):
             step = QFrame()
             step.setObjectName("uploadStep")
-            step.setFixedHeight(65)
+            step.setMinimumHeight(65)
+            step.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
             step_layout = QHBoxLayout(step)
             step_layout.setContentsMargins(9, 8, 8, 8)
             step_layout.setSpacing(9)
@@ -1804,7 +1840,8 @@ class UploadPage(QWidget):
             text_layout.addWidget(step_detail)
             step_layout.addWidget(badge)
             step_layout.addLayout(text_layout, 1)
-            steps_row.addWidget(step, 1)
+            self.upload_steps.append(step)
+            steps_row.addWidget(step, 0, len(self.upload_steps) - 1)
         upload_layout.addWidget(steps_wrap)
         upload_layout.addStretch(1)
         content_row.addWidget(upload_card, 215)
@@ -1830,7 +1867,7 @@ class UploadPage(QWidget):
         search_title.setObjectName("cardTitle")
         search_layout.addWidget(search_title)
         search_description = QLabel(
-            "Find public dataset form Kaggle and Hugging Face, then send them straight to DORA"
+            "Find public dataset from Kaggle and Hugging Face, then send them straight to DORA"
         )
         search_description.setObjectName("cardDescription")
         search_description.setWordWrap(True)
@@ -1870,6 +1907,34 @@ class UploadPage(QWidget):
         self.info_label.setObjectName("cardDescription")
         self.scroll.setWidget(container)
         root.addWidget(self.scroll)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        width = event.size().width()
+        self.header_layout.setDirection(
+            QBoxLayout.TopToBottom if width < 700 else QBoxLayout.LeftToRight
+        )
+        self.content_row.setDirection(
+            QBoxLayout.TopToBottom if width < 990 else QBoxLayout.LeftToRight
+        )
+
+        description_columns = 1 if width < 480 else 3
+        self.drop_description_layout.removeWidget(self.drop_size_label)
+        if description_columns == 1:
+            self.drop_description_layout.addWidget(
+                self.drop_size_label, 1, 0, 1, 2, Qt.AlignHCenter
+            )
+        else:
+            self.drop_description_layout.addWidget(
+                self.drop_size_label, 0, 2, Qt.AlignLeft | Qt.AlignVCenter
+            )
+
+        card_width = self.upload_card.width()
+        columns = 4 if card_width >= 900 else 2 if card_width >= 500 else 1
+        for step in self.upload_steps:
+            self.steps_layout.removeWidget(step)
+        for index, step in enumerate(self.upload_steps):
+            self.steps_layout.addWidget(step, index // columns, index % columns)
 
     # =====================================================
     # SELECT DATASET
@@ -1981,7 +2046,20 @@ class AnalysisPage(QWidget):
 
     def build_ui(self):
 
-        root_layout = QVBoxLayout(self)
+        page_layout = QVBoxLayout(self)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.setSpacing(0)
+
+        self.page_scroll = QScrollArea(self)
+        self.page_scroll.setObjectName("analysisPageScroll")
+        self.page_scroll.setWidgetResizable(True)
+        self.page_scroll.setFrameShape(QFrame.NoFrame)
+        self.page_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        content = QWidget()
+        content.setObjectName("analysisPageContent")
+        root_layout = QVBoxLayout(content)
+        self._root_layout = root_layout
 
         root_layout.setContentsMargins(36, 29, 28, 16)
         root_layout.setSpacing(18)
@@ -1990,13 +2068,17 @@ class AnalysisPage(QWidget):
         # HEADER
         # =================================================
 
-        header_layout = QHBoxLayout()
+        header_widget = QWidget()
+        self._header_widget = header_widget
+        header_layout = QHBoxLayout(header_widget)
+        self._header_layout = header_layout
 
         title_layout = QVBoxLayout()
 
         title = QLabel(
             "Dataset Analysis"
         )
+        self._title_label = title
 
         title.setObjectName(
             "pageTitle"
@@ -2006,6 +2088,7 @@ class AnalysisPage(QWidget):
             "Understand the structure, quality, "
             "statistics, and relationships within your dataset."
         )
+        self._subtitle_label = subtitle
 
         subtitle.setObjectName(
             "analysisSubtitle"
@@ -2041,9 +2124,7 @@ class AnalysisPage(QWidget):
             self.analyze_button
         )
 
-        root_layout.addLayout(
-            header_layout
-        )
+        root_layout.addWidget(header_widget)
 
         # =================================================
         # DATASET READINESS SUMMARY
@@ -2056,6 +2137,7 @@ class AnalysisPage(QWidget):
         readiness_layout.setSpacing(10)
 
         readiness_header = QHBoxLayout()
+        self.readiness_header_layout = readiness_header
         readiness_title = QLabel("Kesiapan dataset")
         readiness_title.setObjectName("readinessTitle")
         readiness_header.addWidget(readiness_title)
@@ -2064,6 +2146,7 @@ class AnalysisPage(QWidget):
         self.readiness_status.setObjectName("readinessStatus")
         self.readiness_status.setTextFormat(Qt.PlainText)
         self.readiness_status.setProperty("state", "waiting")
+        self.readiness_status.setWordWrap(True)
         readiness_header.addWidget(self.readiness_status)
         readiness_layout.addLayout(readiness_header)
 
@@ -2099,12 +2182,15 @@ class AnalysisPage(QWidget):
             "analysisDatasetBanner"
         )
         dataset_banner_layout = QHBoxLayout(self.dataset_label)
+        self.dataset_banner_layout = dataset_banner_layout
         dataset_banner_layout.setContentsMargins(32, 0, 32, 0)
         dataset_banner_layout.setSpacing(12)
         self.dataset_name_label = QLabel("No dataset loaded")
         self.dataset_name_label.setObjectName("analysisDatasetName")
+        self.dataset_name_label.setWordWrap(True)
         self.dataset_metrics_label = QLabel("")
         self.dataset_metrics_label.setObjectName("analysisDatasetMetrics")
+        self.dataset_metrics_label.setWordWrap(True)
         dataset_banner_layout.addWidget(self.dataset_name_label)
         dataset_banner_layout.addStretch(1)
         dataset_banner_layout.addWidget(self.dataset_metrics_label)
@@ -2121,7 +2207,8 @@ class AnalysisPage(QWidget):
         scroll.setWidgetResizable(
             True
         )
-        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
         scroll.setFrameShape(
             QFrame.NoFrame
@@ -2145,6 +2232,9 @@ class AnalysisPage(QWidget):
         root_layout.addWidget(
             scroll
         )
+
+        self.page_scroll.setWidget(content)
+        page_layout.addWidget(self.page_scroll)
 
         self.show_empty_state()
 
@@ -2174,6 +2264,50 @@ class AnalysisPage(QWidget):
         )
 
         self.result_layout.addStretch()
+
+    def _apply_responsive_layout(self, width):
+        compact = width < 760
+        self._title_label.setMinimumHeight(self._title_label.sizeHint().height())
+        self._subtitle_label.setMinimumWidth(0)
+        self._subtitle_label.setSizePolicy(
+            QSizePolicy.Ignored, QSizePolicy.Preferred
+        )
+        subtitle_height = self._subtitle_label.heightForWidth(max(1, width - 32))
+        if subtitle_height > 0:
+            self._subtitle_label.setMinimumHeight(subtitle_height)
+        if compact:
+            self._header_widget.setMinimumHeight(
+                self._title_label.minimumHeight()
+                + self._subtitle_label.minimumHeight()
+                + self.analyze_button.minimumHeight()
+                + 18
+            )
+        else:
+            self._header_widget.setMinimumHeight(0)
+        self._root_layout.setContentsMargins(
+            16 if compact else 36,
+            16 if compact else 29,
+            16 if compact else 28,
+            12 if compact else 16,
+        )
+        self._header_layout.setDirection(
+            QBoxLayout.TopToBottom if compact else QBoxLayout.LeftToRight
+        )
+        self.readiness_header_layout.setDirection(
+            QBoxLayout.TopToBottom
+            if width < 560
+            else QBoxLayout.LeftToRight
+        )
+        self.dataset_banner_layout.setDirection(
+            QBoxLayout.TopToBottom
+            if width < 720
+            else QBoxLayout.LeftToRight
+        )
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._apply_responsive_layout(self.width())
+        self._apply_overview_layout(self.width())
 
     @staticmethod
     def _readiness_metric(label):
@@ -2400,16 +2534,19 @@ class AnalysisPage(QWidget):
         overview.setObjectName("analysisOverview")
         overview.setMinimumHeight(682)
         overview_layout = QHBoxLayout(overview)
+        self._overview_layout = overview_layout
         overview_layout.setContentsMargins(0, 0, 0, 0)
         overview_layout.setSpacing(16)
         overview_layout.addWidget(self.visualization_card, 68)
 
-        side_column = QVBoxLayout()
+        side_panel = QWidget()
+        side_column = QVBoxLayout(side_panel)
         side_column.setContentsMargins(0, 0, 0, 0)
         side_column.setSpacing(18)
         side_column.addWidget(self._build_fingerprint_card(fingerprint))
         side_column.addWidget(self._build_quality_summary_card(), 1)
-        overview_layout.addLayout(side_column, 32)
+        overview_layout.addWidget(side_panel, 32)
+        self._overview_side_column = side_panel
         self.result_layout.addWidget(overview)
 
         # Keep the analyzer's detailed result views and their action handlers
@@ -2452,6 +2589,23 @@ class AnalysisPage(QWidget):
             id(result),
             id(self.main_window.current_dataset),
         )
+        self._apply_overview_layout(self.width())
+
+    def _apply_overview_layout(self, width):
+        overview_layout = getattr(self, "_overview_layout", None)
+        if overview_layout is None:
+            return
+        stacked = width < 1050
+        overview_layout.setDirection(
+            QBoxLayout.TopToBottom if stacked else QBoxLayout.LeftToRight
+        )
+        overview_layout.setStretch(0, 68)
+        overview_layout.setStretch(1, 32)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._apply_responsive_layout(event.size().width())
+        self._apply_overview_layout(event.size().width())
 
     def _build_fingerprint_card(self, fingerprint):
         card = QFrame()
@@ -4834,6 +4988,7 @@ class MLIntelligencePage(QWidget):
         root_layout = QVBoxLayout(
             self
         )
+        self._root_layout = root_layout
 
         root_layout.setContentsMargins(
             30,
@@ -4851,6 +5006,7 @@ class MLIntelligencePage(QWidget):
         # --------------------------------------------------
 
         header = QHBoxLayout()
+        self.header_layout = header
 
         title_layout = QVBoxLayout()
 
@@ -4879,6 +5035,8 @@ class MLIntelligencePage(QWidget):
         description.setWordWrap(
             True
         )
+        description.setMinimumWidth(0)
+        description.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
 
         title_layout.addWidget(
             title
@@ -4954,6 +5112,26 @@ class MLIntelligencePage(QWidget):
         )
 
         self.show_empty_state()
+
+    def _apply_responsive_layout(self, width):
+        compact = width < 760
+        self._root_layout.setContentsMargins(
+            16 if compact else 30,
+            16 if compact else 25,
+            16 if compact else 30,
+            16 if compact else 25,
+        )
+        self.header_layout.setDirection(
+            QBoxLayout.TopToBottom if compact else QBoxLayout.LeftToRight
+        )
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._apply_responsive_layout(event.size().width())
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._apply_responsive_layout(self.width())
 
     # ======================================================
     # EMPTY STATE
@@ -5939,6 +6117,7 @@ class ResearchPage(QWidget):
     def _build_ui(self):
 
         root = QVBoxLayout(self)
+        self.root_layout = root
 
         root.setContentsMargins(
             30,
@@ -5953,13 +6132,17 @@ class ResearchPage(QWidget):
         # HEADER
         # -----------------------------------------------------
 
-        header_layout = QHBoxLayout()
+        header_widget = QWidget()
+        self.header_widget = header_widget
+        header_layout = QHBoxLayout(header_widget)
+        self.header_layout = header_layout
 
         title_layout = QVBoxLayout()
 
         title = QLabel(
             "Academic Research"
         )
+        self.title_label = title
 
         title.setObjectName(
             "pageTitle"
@@ -5968,12 +6151,14 @@ class ResearchPage(QWidget):
         subtitle = QLabel(
             "Research intelligence based on your dataset"
         )
+        self.subtitle_label = subtitle
 
         subtitle.setObjectName(
             "pageSubtitle"
         )
 
         title_layout.addWidget(title)
+        subtitle.setWordWrap(True)
         title_layout.addWidget(subtitle)
 
         header_layout.addLayout(
@@ -5981,6 +6166,7 @@ class ResearchPage(QWidget):
         )
 
         header_layout.addStretch()
+        self.header_spacer_index = header_layout.count() - 1
 
         self.run_button = QPushButton(
             "Run Academic Research"
@@ -6006,9 +6192,7 @@ class ResearchPage(QWidget):
             self.run_button
         )
 
-        root.addLayout(
-            header_layout
-        )
+        root.addWidget(header_widget)
 
         # -----------------------------------------------------
         # STATUS
@@ -6094,23 +6278,23 @@ class ResearchPage(QWidget):
         )
 
         self.overview_tab = (
-            self._create_overview_tab()
+            self._scroll_tab(self._create_overview_tab())
         )
 
         self.papers_tab = (
-            self._create_papers_tab()
+            self._scroll_tab(self._create_papers_tab())
         )
 
         self.landscape_tab = (
-            self._create_landscape_tab()
+            self._scroll_tab(self._create_landscape_tab())
         )
 
         self.trend_tab = (
-            self._create_trend_tab()
+            self._scroll_tab(self._create_trend_tab())
         )
 
         self.gap_tab = (
-            self._create_gap_tab()
+            self._scroll_tab(self._create_gap_tab())
         )
 
         self.tabs.addTab(
@@ -6146,6 +6330,59 @@ class ResearchPage(QWidget):
         # Initial state
         self.show_empty_state()
 
+    @staticmethod
+    def _scroll_tab(content_widget):
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setWidget(content_widget)
+        return scroll
+
+    def _apply_responsive_layout(self, width):
+        compact = width < 760
+        self.title_label.setMinimumHeight(self.title_label.sizeHint().height())
+        self.subtitle_label.setMinimumWidth(0)
+        self.subtitle_label.setSizePolicy(
+            QSizePolicy.Ignored, QSizePolicy.Preferred
+        )
+        subtitle_height = self.subtitle_label.heightForWidth(max(1, width - 32))
+        if subtitle_height > 0:
+            self.subtitle_label.setMinimumHeight(subtitle_height)
+        if compact:
+            self.header_widget.setMinimumHeight(
+                self.title_label.minimumHeight()
+                + self.subtitle_label.minimumHeight()
+                + self.run_button.minimumHeight()
+                + 18
+            )
+        else:
+            self.header_widget.setMinimumHeight(0)
+        self.root_layout.setContentsMargins(
+            16 if compact else 30,
+            16 if compact else 25,
+            16 if compact else 30,
+            16 if compact else 25,
+        )
+        self.header_layout.setDirection(
+            QBoxLayout.TopToBottom if compact else QBoxLayout.LeftToRight
+        )
+        self.header_layout.setStretch(self.header_spacer_index, 0 if compact else 1)
+        overview_cards = getattr(self, "_overview_cards_layout", None)
+        if overview_cards is not None:
+            overview_cards.setDirection(
+                QBoxLayout.TopToBottom if width < 1000 else QBoxLayout.LeftToRight
+            )
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._apply_responsive_layout(event.size().width())
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._apply_responsive_layout(self.width())
+
     # =========================================================
     # TAB FACTORIES
     # =========================================================
@@ -6172,6 +6409,7 @@ class ResearchPage(QWidget):
         # -----------------------------------------------------
 
         cards = QHBoxLayout()
+        self._overview_cards_layout = cards
 
         self.papers_card = (
             self._create_metric_card(
@@ -9303,18 +9541,37 @@ class ResearchLandscapeToolPage(QWidget):
         self._build_ui()
 
     def _build_ui(self):
-        root = QVBoxLayout(self)
+        page_layout = QVBoxLayout(self)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.setSpacing(0)
+
+        self.page_scroll = QScrollArea(self)
+        self.page_scroll.setObjectName("researchLandscapePageScroll")
+        self.page_scroll.setWidgetResizable(True)
+        self.page_scroll.setFrameShape(QFrame.NoFrame)
+        self.page_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        page_layout.addWidget(self.page_scroll)
+
+        page_content = QWidget()
+        page_content.setObjectName("researchLandscapePageContent")
+        root = QVBoxLayout(page_content)
+        self.root_layout = root
         root.setContentsMargins(36, 20, 28, 16)
         root.setSpacing(0)
 
-        header = QHBoxLayout()
+        header_widget = QWidget()
+        self.header_widget = header_widget
+        header = QHBoxLayout(header_widget)
+        self.header_layout = header
+        header.setContentsMargins(0, 0, 0, 0)
         title_layout = QVBoxLayout()
         title = QLabel("Research Landscape")
         title.setObjectName("pageTitle")
-        title.setFixedHeight(40)
         subtitle = QLabel(
             "Explore the methods, topics, and publication structure found in the analyzed literature."
         )
+        self.subtitle_label = subtitle
+        self.title_label = title
         subtitle.setObjectName("pageSubtitle")
         subtitle.setWordWrap(True)
         title_layout.setContentsMargins(0, 9, 0, 0)
@@ -9332,8 +9589,8 @@ class ResearchLandscapeToolPage(QWidget):
             self.refresh_button.setIcon(QIcon(str(search_icon)))
             self.refresh_button.setIconSize(QSize(24, 24))
         self.refresh_button.clicked.connect(self.refresh)
-        header.addWidget(self.refresh_button, 0, Qt.AlignTop)
-        root.addLayout(header)
+        header.addWidget(self.refresh_button, 0, Qt.AlignTop | Qt.AlignRight)
+        root.addWidget(header_widget)
         root.addSpacing(5)
 
         self.status_label = QLabel("No academic research result available.")
@@ -9342,22 +9599,16 @@ class ResearchLandscapeToolPage(QWidget):
         root.addWidget(self.status_label)
         root.addSpacing(25)
 
-        scroll = QScrollArea()
-        scroll.setObjectName("landscapeScroll")
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
         self.container = QWidget()
         self.container.setObjectName("researchLandscapeContainer")
         self.container.setAttribute(Qt.WA_StyledBackground, True)
         self.content = QVBoxLayout(self.container)
         self.content.setContentsMargins(0, 0, 0, 14)
         self.content.setSpacing(25)
-        scroll.setWidget(self.container)
-        root.addWidget(scroll, 1)
+        root.addWidget(self.container, 1)
 
         self.show_empty_state()
+        self.page_scroll.setWidget(page_content)
 
     def _clear(self):
         while self.content.count():
@@ -9385,6 +9636,7 @@ class ResearchLandscapeToolPage(QWidget):
         desc.setObjectName("cardDescription")
         desc.setAlignment(Qt.AlignCenter)
         desc.setWordWrap(True)
+        title.setWordWrap(True)
         layout.addWidget(title)
         layout.addWidget(desc)
         self.content.addWidget(card)
@@ -9440,6 +9692,7 @@ class ResearchLandscapeToolPage(QWidget):
 
         title_label = QLabel(title.upper())
         title_label.setObjectName("landscapeMetricTitle")
+        title_label.setWordWrap(True)
         value_label = QLabel(self._pretty(value))
         value_label.setObjectName("landscapeMetricValue")
         value_label.setWordWrap(True)
@@ -9522,8 +9775,8 @@ class ResearchLandscapeToolPage(QWidget):
     def _add_distribution_card(self, title, rows, show_values=True):
         card = QFrame()
         card.setObjectName("landscapeDistributionCard")
-        card.setFixedWidth(805)
         card.setMinimumHeight(418)
+        card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         apply_card_shadow(card)
         layout = QVBoxLayout(card)
         layout.setContentsMargins(24, 22, 16, 24)
@@ -9539,7 +9792,8 @@ class ResearchLandscapeToolPage(QWidget):
                 row.setSpacing(12)
                 name = QLabel(label)
                 name.setObjectName("landscapeMethodLabel")
-                name.setFixedWidth(259)
+                name.setMinimumWidth(100)
+                name.setMaximumWidth(259)
 
                 bar = QProgressBar()
                 bar.setObjectName("landscapeMethodBar")
@@ -9609,6 +9863,7 @@ class ResearchLandscapeToolPage(QWidget):
         cards_widget = QWidget()
         cards_widget.setObjectName("landscapeMetricsRow")
         cards = QHBoxLayout(cards_widget)
+        self._metrics_layout = cards
         cards.setContentsMargins(0, 0, 0, 0)
         cards.setSpacing(14)
         cards.addWidget(self._metric_card("Papers", paper_count, "Literature analyzed"))
@@ -9619,18 +9874,9 @@ class ResearchLandscapeToolPage(QWidget):
         cards.setStretch(2, 50)
         self.content.addWidget(cards_widget)
 
-        distribution_area = QScrollArea()
-        distribution_area.setObjectName("landscapeDistributionViewport")
-        distribution_area.setWidgetResizable(False)
-        distribution_area.setFrameShape(QFrame.NoFrame)
-        distribution_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        distribution_area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        distribution_area.setFixedHeight(418)
-        distribution_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-
         distribution_widget = QWidget()
         distribution_widget.setObjectName("landscapeDistributionRow")
-        distribution_widget.setFixedSize(1628, 418)
+        distribution_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         distribution = QHBoxLayout(distribution_widget)
         distribution.setContentsMargins(0, 0, 0, 0)
         distribution.setSpacing(18)
@@ -9640,10 +9886,78 @@ class ResearchLandscapeToolPage(QWidget):
         distribution.addWidget(
             self._add_distribution_card("Method Distribution", method_rows, show_values=False)
         )
-        distribution_area.setWidget(distribution_widget)
-        self.content.addWidget(distribution_area)
+        distribution.setStretch(0, 1)
+        distribution.setStretch(1, 1)
+        self._distribution_layout = distribution
+        self._distribution_widget = distribution_widget
+        self._distribution_area = distribution_widget
+        self.content.addWidget(distribution_widget)
         self.content.addStretch()
         self._rendered_result_id = id(result)
+        self._apply_responsive_layout(self.width())
+
+    def _apply_responsive_layout(self, width):
+        compact = width < 760
+        self.title_label.setFixedHeight(self.title_label.sizeHint().height())
+        self.subtitle_label.setMinimumWidth(0)
+        self.subtitle_label.setSizePolicy(
+            QSizePolicy.Ignored, QSizePolicy.Fixed
+        )
+        content_width = max(1, width - (32 if compact else 64))
+        if not compact:
+            content_width = max(
+                1, content_width - self.refresh_button.minimumWidth() - 6
+            )
+        subtitle_height = self.subtitle_label.heightForWidth(content_width)
+        if subtitle_height > 0:
+            self.subtitle_label.setFixedHeight(subtitle_height)
+        if compact:
+            self.header_widget.setMinimumHeight(
+                self.title_label.minimumHeight()
+                + self.subtitle_label.minimumHeight()
+                + self.refresh_button.minimumHeight()
+                + 34
+            )
+        else:
+            self.header_widget.setMinimumHeight(0)
+        self.root_layout.setContentsMargins(
+            16 if compact else 36,
+            16 if compact else 20,
+            16 if compact else 28,
+            12 if compact else 16,
+        )
+        header = getattr(self, "header_layout", None)
+        if header is not None:
+            header.setDirection(
+                QBoxLayout.TopToBottom
+                if compact
+                else QBoxLayout.LeftToRight
+            )
+            header.setSpacing(14 if compact else 6)
+            header.setSpacing(14 if compact else 6)
+        metrics = getattr(self, "_metrics_layout", None)
+        if metrics is not None:
+            metrics.setDirection(
+                QBoxLayout.TopToBottom
+                if width < 820
+                else QBoxLayout.LeftToRight
+            )
+        distribution = getattr(self, "_distribution_layout", None)
+        if distribution is None:
+            return
+        distribution.setDirection(
+            QBoxLayout.TopToBottom
+            if width < 1100
+            else QBoxLayout.LeftToRight
+        )
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._apply_responsive_layout(event.size().width())
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._apply_responsive_layout(self.width())
 
 
 
@@ -9661,16 +9975,38 @@ class ResearchGapToolPage(QWidget):
         self._build_ui()
 
     def _build_ui(self):
-        root = QVBoxLayout(self)
+        page_layout = QVBoxLayout(self)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.setSpacing(0)
+
+        self.page_scroll = QScrollArea(self)
+        self.page_scroll.setObjectName("researchGapPageScroll")
+        self.page_scroll.setWidgetResizable(True)
+        self.page_scroll.setFrameShape(QFrame.NoFrame)
+        self.page_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        page_layout.addWidget(self.page_scroll)
+
+        page_content = QWidget()
+        page_content.setObjectName("researchGapPageContent")
+        root = QVBoxLayout(page_content)
+        self.root_layout = root
         root.setContentsMargins(30, 25, 30, 25)
         root.setSpacing(14)
-        header = QHBoxLayout()
+        header_widget = QWidget()
+        self.header_widget = header_widget
+        header = QHBoxLayout(header_widget)
+        self.header_layout = header
+        header.setContentsMargins(0, 0, 0, 0)
         title_box = QVBoxLayout()
         title = QLabel("Research Gap")
+        self.title_label = title
         title.setObjectName("pageTitle")
         subtitle = QLabel("Pahami celah riset yang terindikasi dan tentukan langkah penelitian berikutnya.")
+        self.subtitle_label = subtitle
         subtitle.setObjectName("pageSubtitle")
         subtitle.setWordWrap(True)
+        subtitle.setMinimumWidth(0)
+        subtitle.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         title_box.addWidget(title)
         title_box.addWidget(subtitle)
         header.addLayout(title_box, 1)
@@ -9679,22 +10015,66 @@ class ResearchGapToolPage(QWidget):
         self.explain_button.setMinimumHeight(40)
         self.explain_button.clicked.connect(self.explain_gaps)
         header.addWidget(self.explain_button, 0, Qt.AlignTop)
-        root.addLayout(header)
+        root.addWidget(header_widget)
         self.status = QLabel("Jalankan Academic Research untuk melihat kandidat celah riset.")
         self.status.setObjectName("statusLabel")
         self.status.setWordWrap(True)
         root.addWidget(self.status)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
         self.container = QWidget()
         self.content = QVBoxLayout(self.container)
         self.content.setContentsMargins(0, 4, 8, 16)
         self.content.setSpacing(14)
-        scroll.setWidget(self.container)
-        root.addWidget(scroll, 1)
+        root.addWidget(self.container, 1)
         self.show_empty_state()
+        self.page_scroll.setWidget(page_content)
+
+    def _apply_responsive_layout(self, width):
+        compact = width < 760
+        self.root_layout.setContentsMargins(
+            16 if compact else 30,
+            16 if compact else 25,
+            16 if compact else 30,
+            16 if compact else 25,
+        )
+        self.title_label.setFixedHeight(self.title_label.sizeHint().height())
+        self.subtitle_label.setMinimumWidth(0)
+        self.subtitle_label.setSizePolicy(
+            QSizePolicy.Ignored, QSizePolicy.Fixed
+        )
+        text_width = max(1, width - (32 if compact else 64))
+        if not compact:
+            text_width = max(
+                1, text_width - self.explain_button.sizeHint().width() - 14
+            )
+        subtitle_height = self.subtitle_label.heightForWidth(text_width)
+        if subtitle_height > 0:
+            self.subtitle_label.setFixedHeight(subtitle_height)
+        self.header_layout.setDirection(
+            QBoxLayout.TopToBottom if compact else QBoxLayout.LeftToRight
+        )
+        self.header_layout.setSpacing(14 if compact else 6)
+        self.header_layout.setAlignment(
+            self.explain_button,
+            Qt.AlignLeft if compact else Qt.AlignTop | Qt.AlignRight,
+        )
+        if compact:
+            self.header_widget.setMinimumHeight(
+                self.title_label.minimumHeight()
+                + self.subtitle_label.minimumHeight()
+                + self.explain_button.minimumHeight()
+                + 34
+            )
+        else:
+            self.header_widget.setMinimumHeight(0)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._apply_responsive_layout(event.size().width())
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._apply_responsive_layout(self.width())
 
     def clear_content(self):
         while self.content.count():
@@ -9962,34 +10342,60 @@ class ResearchReportToolPage(QWidget):
         self.build_ui()
 
     def build_ui(self):
-        root = QVBoxLayout(self)
+        page_layout = QVBoxLayout(self)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.setSpacing(0)
+
+        self.page_scroll = QScrollArea(self)
+        self.page_scroll.setObjectName("researchReportPageScroll")
+        self.page_scroll.setWidgetResizable(True)
+        self.page_scroll.setFrameShape(QFrame.NoFrame)
+        self.page_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        page_layout.addWidget(self.page_scroll)
+
+        content = QWidget()
+        content.setObjectName("researchReportContent")
+        root = QVBoxLayout(content)
+        self._content_layout = root
         root.setContentsMargins(30, 25, 30, 25)
         root.setSpacing(16)
 
-        header = QHBoxLayout()
+        header_widget = QWidget()
+        self.header_widget = header_widget
+        header = QHBoxLayout(header_widget)
+        self.header_layout = header
+        header.setContentsMargins(0, 0, 0, 0)
         box = QVBoxLayout()
+        box.setContentsMargins(0, 0, 0, 0)
         title = QLabel("Laporan Penelitian")
+        self.title_label = title
         title.setObjectName("pageTitle")
         subtitle = QLabel("Laporan gabungan analisis dataset, evaluasi machine learning, dan telaah literatur akademik.")
+        self.subtitle_label = subtitle
         subtitle.setObjectName("pageSubtitle")
         subtitle.setWordWrap(True)
+        subtitle.setMinimumWidth(0)
+        subtitle.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         box.addWidget(title)
         box.addWidget(subtitle)
         header.addLayout(box, 1)
 
+        self.header_actions = QHBoxLayout()
+        self.header_actions.setSpacing(10)
         self.generate_button = QPushButton("Perbarui Pratinjau")
         self.generate_button.setObjectName("primaryButton")
         self.generate_button.clicked.connect(
             lambda _checked=False: self.generate_preview(force=True)
         )
-        header.addWidget(self.generate_button)
+        self.header_actions.addWidget(self.generate_button)
 
         self.export_button = QPushButton("Simpan sebagai PDF")
         self.export_button.setObjectName("primaryButton")
         self.export_button.clicked.connect(self.export_pdf)
         self.export_button.setEnabled(False)
-        header.addWidget(self.export_button)
-        root.addLayout(header)
+        self.header_actions.addWidget(self.export_button)
+        header.addLayout(self.header_actions)
+        root.addWidget(header_widget)
 
         self.status = QLabel("Dataset atau analisis belum dimuat.")
         self.status.setObjectName("statusLabel")
@@ -10008,7 +10414,31 @@ class ResearchReportToolPage(QWidget):
         self.preview.setOpenLinks(False)
         self.preview.setOpenExternalLinks(False)
         root.addWidget(self.preview, 1)
+        self.page_scroll.setWidget(content)
         self.show_empty_state()
+
+    def _apply_responsive_layout(self, width):
+        compact = width < 760
+        self._content_layout.setContentsMargins(
+            16 if compact else 30,
+            16 if compact else 25,
+            16 if compact else 30,
+            16 if compact else 25,
+        )
+        self.header_layout.setDirection(
+            QBoxLayout.TopToBottom if compact else QBoxLayout.LeftToRight
+        )
+        self.header_actions.setDirection(
+            QBoxLayout.TopToBottom if width < 480 else QBoxLayout.LeftToRight
+        )
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._apply_responsive_layout(event.size().width())
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._apply_responsive_layout(self.width())
 
     def show_empty_state(self):
         self.research_result = {}
@@ -10327,19 +10757,29 @@ class AboutPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         root = QVBoxLayout(self)
-        root.setContentsMargins(28, 24, 28, 28)
-        root.setSpacing(16)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        container = QWidget()
+        content = QVBoxLayout(container)
+        content.setContentsMargins(28, 24, 28, 28)
+        content.setSpacing(16)
+        scroll.setWidget(container)
+        root.addWidget(scroll)
 
         heading = QLabel("About")
         heading.setObjectName("aboutPageTitle")
-        root.addWidget(heading)
+        content.addWidget(heading)
 
         subtitle = QLabel(
             "Informasi singkat tentang aplikasi, pengembang, dan lisensinya."
         )
         subtitle.setObjectName("aboutPageSubtitle")
         subtitle.setWordWrap(True)
-        root.addWidget(subtitle)
+        content.addWidget(subtitle)
 
         hero = QFrame()
         hero.setObjectName("aboutHero")
@@ -10375,12 +10815,14 @@ class AboutPage(QWidget):
         version_label.setObjectName("aboutVersion")
         identity.addWidget(version_label)
         hero_layout.addLayout(identity, 1)
-        root.addWidget(hero)
+        content.addWidget(hero)
 
         cards = QGridLayout()
         cards.setHorizontalSpacing(14)
         cards.setVerticalSpacing(14)
-        root.addLayout(cards)
+        content.addLayout(cards)
+        self._about_cards_layout = cards
+        self._about_cards = []
 
         def add_card(row, column, title, body):
             card = QFrame()
@@ -10397,6 +10839,7 @@ class AboutPage(QWidget):
             card_layout.addWidget(card_body)
             card_layout.addStretch()
             cards.addWidget(card, row, column)
+            self._about_cards.append(card)
 
         add_card(0, 0, "Pengembang", "Abdul Muhis\nSains Data, UIN K.H. Abdurrahman Wahid Pekalongan")
         add_card(
@@ -10415,7 +10858,18 @@ class AboutPage(QWidget):
             "Profil dan kualitas dataset, evaluasi machine learning, pencarian paper, "
             "research landscape dan gap, serta laporan penelitian.",
         )
-        root.addStretch()
+        content.addStretch()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        cards = getattr(self, "_about_cards_layout", None)
+        if cards is None:
+            return
+        columns = 2 if event.size().width() >= 1000 else 1
+        for card in self._about_cards:
+            cards.removeWidget(card)
+        for index, card in enumerate(self._about_cards):
+            cards.addWidget(card, index // columns, index % columns)
 
 
 class CopyrightPage(QWidget):
@@ -10424,17 +10878,27 @@ class CopyrightPage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         root = QVBoxLayout(self)
-        root.setContentsMargins(28, 24, 28, 28)
-        root.setSpacing(16)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        container = QWidget()
+        content = QVBoxLayout(container)
+        content.setContentsMargins(28, 24, 28, 28)
+        content.setSpacing(16)
+        scroll.setWidget(container)
+        root.addWidget(scroll)
 
         heading = QLabel("Copyright")
         heading.setObjectName("aboutPageTitle")
-        root.addWidget(heading)
+        content.addWidget(heading)
 
         subtitle = QLabel("Informasi hak cipta untuk pratinjau aplikasi.")
         subtitle.setObjectName("aboutPageSubtitle")
         subtitle.setWordWrap(True)
-        root.addWidget(subtitle)
+        content.addWidget(subtitle)
 
         card = QFrame()
         card.setObjectName("aboutInfoCard")
@@ -10454,8 +10918,169 @@ class CopyrightPage(QWidget):
         copyright_text.setWordWrap(True)
         card_layout.addWidget(copyright_text)
         card_layout.addStretch(1)
-        root.addWidget(card)
-        root.addStretch(1)
+        content.addWidget(card)
+        content.addStretch(1)
+
+
+class HelpPage(QWidget):
+    """Panduan penggunaan yang bisa dibuka dari menu Help."""
+
+    def __init__(self, main_window):
+        super().__init__()
+        self.main_window = main_window
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        self.scroll = QScrollArea()
+        self.scroll.setObjectName("helpScroll")
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.NoFrame)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        root.addWidget(self.scroll)
+
+        self.container = QWidget()
+        self.container.setObjectName("helpContainer")
+        self.content = QVBoxLayout(self.container)
+        self.content.setContentsMargins(28, 24, 28, 28)
+        self.content.setSpacing(16)
+        self.scroll.setWidget(self.container)
+
+        heading = QLabel("Help")
+        heading.setObjectName("helpPageTitle")
+        self.content.addWidget(heading)
+
+        subtitle = QLabel(
+            "Panduan singkat untuk memakai DORA dari memuat dataset sampai menyimpan laporan."
+        )
+        subtitle.setObjectName("helpPageSubtitle")
+        subtitle.setWordWrap(True)
+        self.content.addWidget(subtitle)
+
+        hero = QFrame()
+        hero.setObjectName("helpHero")
+        hero_layout = QVBoxLayout(hero)
+        hero_layout.setContentsMargins(22, 20, 22, 20)
+        hero_layout.setSpacing(6)
+        hero_title = QLabel("Alur kerja yang disarankan")
+        hero_title.setObjectName("helpHeroTitle")
+        hero_body = QLabel(
+            "Mulai dari satu file CSV. Setelah dataset dimuat, lanjutkan ke Analysis, "
+            "lalu gunakan ML Intelligence dan Academic Research sesuai kebutuhan."
+        )
+        hero_body.setObjectName("helpHeroBody")
+        hero_body.setWordWrap(True)
+        hero_layout.addWidget(hero_title)
+        hero_layout.addWidget(hero_body)
+        self.content.addWidget(hero)
+
+        self.cards_layout = QGridLayout()
+        self.cards_layout.setHorizontalSpacing(14)
+        self.cards_layout.setVerticalSpacing(14)
+        self.cards = []
+        self.content.addLayout(self.cards_layout)
+
+        guides = (
+            (
+                "1. Muat dataset dari komputer",
+                "Buka Dataset, pilih Upload Dataset, lalu pilih file CSV. Pada jendela konfirmasi, "
+                "periksa nama dataset, pemisah kolom, encoding, dan kolom target. Pastikan pilihan "
+                "First row contains column names sesuai isi file, lalu pilih Upload & Preview.",
+                "Buka Dataset",
+                self.main_window.open_datasets_page,
+            ),
+            (
+                "2. Cari dataset online",
+                "Buka Dataset Search, ketik kata kunci, pilih Kaggle dataset, Hugging Face dataset, "
+                "atau All providers, lalu tekan Search. Pilih berkas CSV yang tersedia dan tekan "
+                "Download & Analyze untuk mengunduh dan membukanya.",
+                "Buka Dataset Search",
+                self.main_window.open_dataset_search_page,
+            ),
+            (
+                "3. Pratinjau dan rapikan data",
+                "Di halaman Dataset, periksa beberapa baris, daftar kolom, nilai kosong, dan duplikat. "
+                "Gunakan pilihan Quick Cleaning yang tersedia bila diperlukan, lalu pilih "
+                "Continue to Analysis.",
+                "Buka pratinjau Dataset",
+                self.main_window.open_datasets_page,
+            ),
+            (
+                "4. Jalankan analisis dataset",
+                "Pada Analysis, tekan Run Analysis. Tinjau ringkasan dataset, statistik kolom, "
+                "kualitas data, nilai kosong, duplikat, pencilan, dan hubungan antar kolom. "
+                "Gunakan hasilnya untuk menentukan langkah berikutnya.",
+                "Buka Analysis",
+                self.main_window.open_analysis_page,
+            ),
+            (
+                "5. Tinjau ML Intelligence",
+                "Setelah dataset dimuat, buka ML Intelligence untuk melihat perkiraan jenis tugas "
+                "machine learning dan metode yang disarankan. Periksa alasan dan keterbatasan "
+                "rekomendasi sebelum memilih metode penelitian.",
+                "Buka ML Intelligence",
+                self.main_window.open_ml_page,
+            ),
+            (
+                "6. Cari referensi penelitian",
+                "Setelah analisis tersedia, buka Academic Research dan tekan Run Academic Research. "
+                "Tinjau kata kunci, query, dan hasil paper. Periksa sumber dan relevansi paper "
+                "sebelum menggunakannya dalam tulisan.",
+                "Buka Academic Research",
+                self.main_window.open_research_page,
+            ),
+            (
+                "7. Tinjau paper dan temuan riset",
+                "Gunakan Papers untuk melihat kandidat paper. Research Landscape merangkum pola "
+                "metode dan publikasi; Research Gap menampilkan kandidat celah riset yang bisa "
+                "ditinjau lebih lanjut.",
+                "Buka Papers",
+                self.main_window.open_papers_tool,
+            ),
+            (
+                "8. Buat laporan",
+                "Buka Research Report, pilih Perbarui Pratinjau, lalu tekan Simpan sebagai PDF "
+                "jika tombol ekspor sudah aktif. Laporan gabungan membutuhkan dataset, Analisis "
+                "Dataset, ML Intelligence, dan Academic Research.",
+                "Buka Research Report",
+                self.main_window.open_report_tool,
+            ),
+        )
+        for title, body, action, callback in guides:
+            self._add_guide_card(title, body, action, callback)
+        self.content.addStretch(1)
+        self._card_columns = 0
+
+    def _add_guide_card(self, title, body, action_text, callback):
+        card = QFrame()
+        card.setObjectName("helpInfoCard")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(18, 16, 18, 18)
+        layout.setSpacing(9)
+        heading = QLabel(title)
+        heading.setObjectName("helpCardTitle")
+        description = QLabel(body)
+        description.setObjectName("helpBody")
+        description.setWordWrap(True)
+        action = QPushButton(action_text)
+        action.setObjectName("helpShortcut")
+        action.setCursor(Qt.PointingHandCursor)
+        action.clicked.connect(callback)
+        layout.addWidget(heading)
+        layout.addWidget(description, 1)
+        layout.addWidget(action, 0, Qt.AlignLeft)
+        self.cards.append(card)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        columns = 2 if event.size().width() >= 1000 else 1
+        if columns == self._card_columns:
+            return
+        for card in self.cards:
+            self.cards_layout.removeWidget(card)
+        for index, card in enumerate(self.cards):
+            self.cards_layout.addWidget(card, index // columns, index % columns)
+        self._card_columns = columns
 
 
 class MainWindow(QMainWindow):
@@ -10484,13 +11109,17 @@ class MainWindow(QMainWindow):
             avail = screen.availableGeometry()
             max_w = max(480, avail.width() - 32)
             max_h = max(400, avail.height() - 48)
-            min_w = min(760, max(560, int(max_w * 0.72)))
-            min_h = min(540, max(420, int(max_h * 0.72)))
+            min_w = min(760, max(520, int(max_w * 0.55)))
+            min_h = min(540, max(400, int(max_h * 0.55)))
             initial_w = min(1920, max(min_w, int(max_w * 0.98)))
             initial_h = min(1080, max(min_h, int(max_h * 0.96)))
+            self._responsive_min_size = (min_w, min_h)
+            self._initial_window_size = (initial_w, initial_h)
             self.resize(initial_w, initial_h)
             self.setMinimumSize(min_w, min_h)
         else:
+            self._responsive_min_size = (560, 420)
+            self._initial_window_size = (1100, 680)
             self.resize(1100, 680)
             self.setMinimumSize(560, 420)
 
@@ -10524,6 +11153,8 @@ class MainWindow(QMainWindow):
 
         self._build_window()
         self._restore_latest_project()
+        self.setMinimumSize(*self._responsive_min_size)
+        self.resize(*self._initial_window_size)
         get_telemetry().track("app_open", status="started")
 
     def _active_worker_threads(self):
@@ -10695,6 +11326,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(root)
 
         root_layout = QHBoxLayout(root)
+        root_layout.setSizeConstraint(QLayout.SetNoConstraint)
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
 
@@ -10703,6 +11335,7 @@ class MainWindow(QMainWindow):
         content = QWidget()
         content.setObjectName("contentContainer")
         content_layout = QVBoxLayout(content)
+        content_layout.setSizeConstraint(QLayout.SetNoConstraint)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(0)
 
@@ -10711,6 +11344,7 @@ class MainWindow(QMainWindow):
 
         self.page_stack = QStackedWidget()
         self.page_stack.setObjectName("pageStack")
+        self.page_stack.setMinimumSize(0, 0)
         self.page_stack.setAttribute(Qt.WA_StyledBackground, True)
         content_layout.addWidget(self.page_stack, 1)
 
@@ -10751,6 +11385,7 @@ class MainWindow(QMainWindow):
         self.report_tool_page = ResearchReportToolPage(self)
         self.about_page = AboutPage()
         self.copyright_page = CopyrightPage()
+        self.help_page = HelpPage(self)
 
         self.pages = {
             "dashboard": self.dashboard,
@@ -10761,11 +11396,15 @@ class MainWindow(QMainWindow):
             "research": self.research_page,
             "papers": self.research_page,
             "insights": self.research_insights_page,
-            "landscape": self.landscape_tool_page,
-            "gap": self.gap_tool_page,
+            # Landscape and gap are tabs inside Research Insights. Reusing
+            # their parent page here keeps Qt from pulling the tab widgets
+            # out into separate entries in the main page stack.
+            "landscape": self.research_insights_page,
+            "gap": self.research_insights_page,
             "report": self.report_tool_page,
             "about": self.about_page,
             "copyright": self.copyright_page,
+            "help": self.help_page,
         }
 
         for page in self.pages.values():
@@ -10786,6 +11425,7 @@ class MainWindow(QMainWindow):
             "report": "Research Report",
             "about": "About",
             "copyright": "Copyright",
+            "help": "Help",
         }
 
         for widget in (root, content, self.page_stack, self.datasets_page, self.datasets_tabs, self.datasets_tab_pages):
@@ -10945,6 +11585,7 @@ class MainWindow(QMainWindow):
 
         layout = QHBoxLayout(topbar)
         layout.setContentsMargins(34, 0, 42, 0)
+        self.topbar_layout = layout
         self.page_title = QLabel("Dashboard")
         self.page_title.setObjectName("topbarTitle")
         self.page_title.hide()
@@ -10957,6 +11598,7 @@ class MainWindow(QMainWindow):
         about.clicked.connect(self.open_about)
         layout.addWidget(about)
         self.topbar_links = {"about": about}
+        self.topbar_link_labels = {"about": "About"}
         for key, label, icon_name in (
             ("copyright", "Copyright", "copyright.svg"),
             ("help", "Help", "help.svg"),
@@ -10967,16 +11609,21 @@ class MainWindow(QMainWindow):
             link.setFlat(True)
             link.setProperty("active", False)
             self.topbar_links[key] = link
+            self.topbar_link_labels[key] = label
             if key == "copyright":
                 link.clicked.connect(self.open_copyright)
+            elif key == "help":
+                link.clicked.connect(self.open_help)
             layout.addWidget(link)
         divider = QFrame()
         divider.setObjectName("topbarDivider")
         divider.setFixedSize(1, 34)
+        self.topbar_divider = divider
         layout.addSpacing(10)
         layout.addWidget(divider)
         version = QLabel("2026 UIN HIJAU v5")
         version.setObjectName("topbarVersion")
+        self.topbar_version = version
         layout.addSpacing(18)
         layout.addWidget(version)
         return topbar
@@ -10987,8 +11634,9 @@ class MainWindow(QMainWindow):
         if sidebar is None:
             return
 
-        compact = event.size().width() < 1180
-        sidebar.setFixedWidth(76 if compact else 418)
+        sidebar_width = min(418, max(76, round(event.size().width() * 0.23)))
+        compact = sidebar_width < 288
+        sidebar.setFixedWidth(sidebar_width)
         self.sidebar_layout.setContentsMargins(
             8 if compact else 28,
             20 if compact else 78,
@@ -11000,6 +11648,21 @@ class MainWindow(QMainWindow):
             label.setVisible(not compact)
         for label in self.sidebar_section_labels:
             label.setVisible(not compact)
+
+        compact_topbar = event.size().width() < 850
+        self.topbar.setFixedHeight(78 if event.size().height() < 620 else 124)
+        self.topbar_layout.setContentsMargins(
+            12 if compact_topbar else 34,
+            0,
+            12 if compact_topbar else 42,
+            0,
+        )
+        for key, link in self.topbar_links.items():
+            link.setText("" if compact_topbar else self.topbar_link_labels[key])
+            link.setToolTip(self.topbar_link_labels[key])
+            link.setIconSize(QSize(20 if compact_topbar else 22, 20 if compact_topbar else 22))
+        self.topbar_divider.setVisible(not compact_topbar)
+        self.topbar_version.setVisible(not compact_topbar)
 
     # =========================================================
     # NAVIGATION
@@ -11013,7 +11676,7 @@ class MainWindow(QMainWindow):
         self._set_topbar_active(key)
 
     def _set_topbar_active(self, page_key):
-        active_link = page_key if page_key in ("about", "copyright") else None
+        active_link = page_key if page_key in ("about", "copyright", "help") else None
         for key, link in self.topbar_links.items():
             link.setProperty("active", key == active_link)
             link.style().unpolish(link)
@@ -11088,10 +11751,12 @@ class MainWindow(QMainWindow):
 
     def open_landscape_tool(self):
         self.open_insights_page()
+        self.research_insights_page.tabs.setCurrentWidget(self.landscape_tool_page)
         self._show_page("landscape")
 
     def open_gap_tool(self):
         self.open_insights_page()
+        self.research_insights_page.tabs.setCurrentWidget(self.gap_tool_page)
         self._show_page("gap")
 
     def open_report_tool(self):
@@ -11112,6 +11777,9 @@ class MainWindow(QMainWindow):
 
     def open_copyright(self):
         self._show_page("copyright")
+
+    def open_help(self):
+        self._show_page("help")
 
     def _current_filename(self):
         if self.current_project_id is not None:

@@ -10,12 +10,16 @@ from PySide6.QtGui import QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
+    QBoxLayout,
     QFrame,
+    QGridLayout,
     QHeaderView,
     QHBoxLayout,
     QLabel,
+    QLayout,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QTableView,
     QVBoxLayout,
     QWidget,
@@ -96,13 +100,26 @@ class DatasetPreviewPage(QWidget):
         self._dataset_name = ""
         self._dataframe: pd.DataFrame | None = None
 
-        root = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+        self.page_scroll = QScrollArea()
+        self.page_scroll.setObjectName("datasetPreviewScroll")
+        self.page_scroll.setWidgetResizable(True)
+        self.page_scroll.setFrameShape(QFrame.NoFrame)
+        self.page_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        container = QWidget()
+        container.setMinimumWidth(0)
+        root = QVBoxLayout(container)
+        root.setSizeConstraint(QLayout.SetNoConstraint)
+        self.root_layout = root
         root.setContentsMargins(36, 22, 28, 16)
         root.setSpacing(14)
 
         header = QFrame()
         header.setObjectName("datasetPreviewHeader")
         header_layout = QHBoxLayout(header)
+        self.header_layout = header_layout
         header_layout.setContentsMargins(0, 0, 0, 2)
         title_block = QVBoxLayout()
         title_block.setSpacing(4)
@@ -112,6 +129,8 @@ class DatasetPreviewPage(QWidget):
         self.summary = QLabel("Upload, preview and clean your CSV before analysis.")
         self.summary.setObjectName("pageSubtitle")
         self.summary.setWordWrap(True)
+        self.summary.setMinimumWidth(0)
+        self.summary.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         title_block.addWidget(self.summary)
         header_layout.addLayout(title_block, 1)
         self.loaded_badge = QLabel("●  LOADED")
@@ -119,12 +138,17 @@ class DatasetPreviewPage(QWidget):
         header_layout.addWidget(self.loaded_badge, 0, Qt.AlignTop)
         root.addWidget(header)
 
-        overview = QHBoxLayout()
-        overview.setSpacing(12)
+        overview = QWidget()
+        overview.setObjectName("datasetPreviewOverview")
+        self.overview_layout = QGridLayout(overview)
+        self.overview_layout.setHorizontalSpacing(12)
+        self.overview_layout.setVerticalSpacing(12)
         file_card = QFrame()
+        self.file_card = file_card
         file_card.setObjectName("datasetPreviewFileCard")
         file_card.setMinimumHeight(132)
         file_layout = QHBoxLayout(file_card)
+        self.file_layout = file_layout
         file_layout.setContentsMargins(20, 16, 20, 16)
         file_layout.setSpacing(16)
         file_icon = QLabel()
@@ -139,6 +163,7 @@ class DatasetPreviewPage(QWidget):
         file_text_layout.setSpacing(6)
         self.file_name = QLabel("No dataset loaded")
         self.file_name.setObjectName("datasetPreviewFileName")
+        self.file_name.setWordWrap(True)
         self.file_details = QLabel("Select a CSV file to preview your dataset.")
         self.file_details.setObjectName("datasetPreviewFileDetails")
         self.file_details.setWordWrap(True)
@@ -156,17 +181,19 @@ class DatasetPreviewPage(QWidget):
         self.upload_new_button.clicked.connect(self._open_upload)
         file_layout.addWidget(self.upload_new_button)
         apply_card_shadow(file_card)
-        overview.addWidget(file_card, 3)
+        self.overview_layout.addWidget(file_card, 0, 0, 1, 4)
 
-        self.rows_value = self._create_metric_card(overview, "ROWS", "—")
-        self.columns_value = self._create_metric_card(overview, "COLUMNS", "—")
-        self.missing_value = self._create_metric_card(overview, "MISSING CELLS", "—")
-        self.duplicates_value = self._create_metric_card(overview, "DUPLICATES", "—")
-        root.addLayout(overview)
+        self.metric_cards = []
+        self.rows_value = self._create_metric_card(self.overview_layout, "ROWS", "—")
+        self.columns_value = self._create_metric_card(self.overview_layout, "COLUMNS", "—")
+        self.missing_value = self._create_metric_card(self.overview_layout, "MISSING CELLS", "—")
+        self.duplicates_value = self._create_metric_card(self.overview_layout, "DUPLICATES", "—")
+        root.addWidget(overview)
 
         tabs = QFrame()
         tabs.setObjectName("datasetPreviewTabs")
-        tabs_layout = QHBoxLayout(tabs)
+        tabs_layout = QGridLayout(tabs)
+        self.tabs_layout = tabs_layout
         tabs_layout.setContentsMargins(18, 0, 18, 0)
         tabs_layout.setSpacing(30)
         self.tab_buttons: list[QPushButton] = []
@@ -176,11 +203,11 @@ class DatasetPreviewPage(QWidget):
             button.setProperty("active", index == 0)
             button.setCheckable(False)
             self.tab_buttons.append(button)
-            tabs_layout.addWidget(button)
-        tabs_layout.addStretch(1)
+            tabs_layout.addWidget(button, 0, index)
         root.addWidget(tabs)
 
         body = QHBoxLayout()
+        self.body_layout = body
         body.setSpacing(16)
         preview_card = QFrame()
         preview_card.setObjectName("datasetPreviewTableCard")
@@ -260,6 +287,7 @@ class DatasetPreviewPage(QWidget):
         footer = QFrame()
         footer.setObjectName("datasetPreviewFooter")
         footer_layout = QHBoxLayout(footer)
+        self.footer_layout = footer_layout
         footer_layout.setContentsMargins(0, 2, 0, 0)
         footer_label = QLabel("Quick Cleaning:")
         footer_label.setObjectName("datasetPreviewFooterText")
@@ -272,6 +300,70 @@ class DatasetPreviewPage(QWidget):
         footer_layout.addWidget(self.continue_button)
         root.addWidget(footer)
         self.update_dataset(None)
+        self.page_scroll.setWidget(container)
+        outer.addWidget(self.page_scroll)
+        self._layout_columns = 0
+        self._apply_responsive_layout(self.width())
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._apply_responsive_layout(event.size().width())
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._apply_responsive_layout(self.width())
+
+    def _apply_responsive_layout(self, width: int):
+        compact = width < 760
+        self.root_layout.setContentsMargins(
+            16 if compact else 36,
+            16 if compact else 22,
+            16 if compact else 28,
+            12 if compact else 16,
+        )
+        self.header_layout.setDirection(
+            QBoxLayout.TopToBottom if width < 540 else QBoxLayout.LeftToRight
+        )
+        self.file_layout.setDirection(
+            QBoxLayout.TopToBottom if width < 600 else QBoxLayout.LeftToRight
+        )
+        columns = 4 if width >= 1100 else 2 if width >= 600 else 1
+        if columns != self._layout_columns:
+            for column in range(self.overview_layout.columnCount()):
+                self.overview_layout.setColumnMinimumWidth(column, 0)
+                self.overview_layout.setColumnStretch(column, 0)
+            self.overview_layout.removeWidget(self.file_card)
+            for card in self.metric_cards:
+                self.overview_layout.removeWidget(card)
+            self.overview_layout.addWidget(self.file_card, 0, 0, 1, columns)
+            for index, card in enumerate(self.metric_cards):
+                self.overview_layout.addWidget(
+                    card, 1 + index // columns, index % columns
+                )
+            for column in range(columns):
+                self.overview_layout.setColumnStretch(column, 1)
+            self.overview_layout.invalidate()
+            self._layout_columns = columns
+
+        self.body_layout.setDirection(
+            QBoxLayout.TopToBottom if width < 1050 else QBoxLayout.LeftToRight
+        )
+        self.footer_layout.setDirection(
+            QBoxLayout.TopToBottom if width < 520 else QBoxLayout.LeftToRight
+        )
+        tab_columns = 3 if width >= 900 else 2 if width >= 600 else 1
+        for column in range(self.tabs_layout.columnCount()):
+            self.tabs_layout.setColumnMinimumWidth(column, 0)
+            self.tabs_layout.setColumnStretch(column, 0)
+        for button in self.tab_buttons:
+            self.tabs_layout.removeWidget(button)
+        for index, button in enumerate(self.tab_buttons):
+            self.tabs_layout.addWidget(button, index // tab_columns, index % tab_columns)
+        for column in range(tab_columns):
+            self.tabs_layout.setColumnStretch(column, 1)
+        self.tabs_layout.invalidate()
+        self.file_layout.invalidate()
+        self.root_layout.invalidate()
 
     @staticmethod
     def _small_label(text: str, object_name: str) -> QLabel:
@@ -279,8 +371,7 @@ class DatasetPreviewPage(QWidget):
         label.setObjectName(object_name)
         return label
 
-    @staticmethod
-    def _create_metric_card(layout, title, value):
+    def _create_metric_card(self, layout, title, value):
         card = QFrame()
         card.setObjectName("datasetPreviewMetricCard")
         card.setMinimumHeight(132)
@@ -294,7 +385,8 @@ class DatasetPreviewPage(QWidget):
         card_layout.addWidget(heading)
         card_layout.addWidget(value_label)
         card_layout.addStretch(1)
-        layout.addWidget(card, 1)
+        self.metric_cards.append(card)
+        layout.addWidget(card, 1, len(self.metric_cards) - 1)
         apply_card_shadow(card)
         return value_label
 
