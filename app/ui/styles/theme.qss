@@ -209,3 +209,51 @@ QWidget {
 #datasetPreviewFooter {
     border: none;
 }
+
+/* Dataset analysis screen */
+#analysisDatasetBanner,
+#readinessCard {
+    background: #ffffff;
+    border: 1px solid rgba(0, 107, 184, 0.3);
+    border-radius: 12px;
+    color: #222222;
+    padding: 14px 16px;
+}
+
+#readinessTitle {
+    color: #111111;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+#readinessMetric {
+    background: #f8fbff;
+    border: 1px solid #c9e0ff;
+    border-radius: 10px;
+}
+
+#readinessMetricValue {
+    color: #222222;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+#readinessMetricLabel,
+#readinessRecommendation {
+    color: #757575;
+}
+
+#readinessStatus {
+    border-radius: 10px;
+    padding: 5px 9px;
+}
+
+#contentCard {
+    background: #ffffff;
+    border: 1px solid rgba(0, 107, 184, 0.3);
+    border-radius: 12px;
+}
+
+#chartCanvas {
+    background: #ffffff;
+}

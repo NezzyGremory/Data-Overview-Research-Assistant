@@ -1756,10 +1756,10 @@ class AnalysisPage(QWidget):
         root_layout = QVBoxLayout(self)
 
         root_layout.setContentsMargins(
-            35, 30, 35, 30
+            20, 18, 20, 18
         )
 
-        root_layout.setSpacing(20)
+        root_layout.setSpacing(12)
 
         # =================================================
         # HEADER
@@ -1873,12 +1873,10 @@ class AnalysisPage(QWidget):
         )
 
         self.dataset_label.setObjectName(
-            "contentCard"
+            "analysisDatasetBanner"
         )
 
-        root_layout.addWidget(
-            self.dataset_label
-        )
+        root_layout.insertWidget(1, self.dataset_label)
 
         # =================================================
         # RESULT AREA
@@ -2314,7 +2312,7 @@ class AnalysisPage(QWidget):
                 if len(values) < 2 or values.nunique() < 2:
                     self._show_chart_message("Kolom ini belum memiliki variasi untuk histogram.")
                     return
-                axis.hist(values, bins="auto", color="#4F8CFF", edgecolor="white")
+                axis.hist(values, bins="auto", color="#0D99FF", edgecolor="white")
                 axis.set(title=f"Distribusi {column_name}", xlabel=column_name, ylabel="Jumlah")
             elif chart_type == "box":
                 if values.empty:
