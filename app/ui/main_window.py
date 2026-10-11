@@ -6964,7 +6964,7 @@ class ResearchPage(QWidget):
         chart_card.setObjectName("researchCard")
         chart_layout = QVBoxLayout(chart_card)
         chart_layout.setContentsMargins(12, 10, 12, 10)
-        self.landscape_figure = Figure(figsize=(11, 3.6), tight_layout=True)
+        self.landscape_figure = Figure(figsize=(11, 3.6))
         self.landscape_axes = self.landscape_figure.subplots(1, 3)
         self.landscape_canvas = FigureCanvasQTAgg(self.landscape_figure)
         chart_layout.addWidget(self.landscape_canvas)
@@ -7813,7 +7813,12 @@ class ResearchPage(QWidget):
             axis.set_axisbelow(True)
             for bar, value in zip(bars, percentages):
                 axis.text(value + 0.8, bar.get_y() + bar.get_height() / 2, f"{value:g}%", va="center", fontsize=8, color="#344158")
-        self.landscape_figure.tight_layout()
+        # The three side-by-side horizontal charts can have long category
+        # names. Reserve room for their y-axis labels explicitly instead of
+        # asking tight_layout to shrink each axes until it becomes too narrow.
+        self.landscape_figure.subplots_adjust(
+            left=0.28, right=0.98, bottom=0.22, top=0.90, wspace=0.55
+        )
         self.landscape_canvas.draw_idle()
 
     def _render_trend_chart(self, trend, landscape):
