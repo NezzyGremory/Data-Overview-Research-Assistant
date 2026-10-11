@@ -257,3 +257,37 @@ QWidget {
 #chartCanvas {
     background: #ffffff;
 }
+
+/* Dataset Search screen */
+#datasetSearchCard,
+#datasetResultCard {
+    background: #ffffff;
+    border: 1px solid rgba(0, 107, 184, 0.3);
+    border-radius: 12px;
+}
+
+#datasetSearchInput,
+#datasetProviderCombo {
+    background: #ffffff;
+    border: 1px solid #c9e0ff;
+    border-radius: 10px;
+    color: #222222;
+    padding: 0 12px;
+}
+
+#datasetSearchInput:focus,
+#datasetProviderCombo:focus {
+    border: 1px solid #0d99ff;
+}
+
+#datasetResultCard #sectionTitle {
+    color: #111111;
+    font-size: 13px;
+}
+
+#datasetResultCard #scoreBadge {
+    background: #d8f8dd;
+    border: none;
+    border-radius: 10px;
+    color: #098e00;
+}

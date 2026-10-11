@@ -141,15 +141,16 @@ class DatasetSearchPage(QWidget):
 
     def _build_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(24, 22, 24, 22)
-        root.setSpacing(14)
+        root.setContentsMargins(20, 16, 20, 18)
+        root.setSpacing(12)
 
-        title = QLabel("Find a dataset online")
+        title = QLabel("Dataset Search")
         title.setObjectName("pageTitle")
 
         subtitle = QLabel(
-            "Cari dataset publik di Hugging Face atau Kaggle, lalu unduh ke workspace "
-            "untuk dianalisis."
+            "Search for public datasets on Hugging Face Hub and Kaggle, check their "
+            "file formats, and download them directly to DORA. Examples: Titanic, "
+            "Iris, agriculture, students, healthcare, stocks, and home prices."
         )
         subtitle.setObjectName("pageSubtitle")
         subtitle.setWordWrap(True)
@@ -158,7 +159,7 @@ class DatasetSearchPage(QWidget):
         root.addWidget(subtitle)
 
         search_card = QFrame()
-        search_card.setObjectName("contentCard")
+        search_card.setObjectName("datasetSearchCard")
         search_layout = QVBoxLayout(search_card)
         search_layout.setContentsMargins(20, 18, 20, 18)
         search_layout.setSpacing(12)
@@ -167,6 +168,7 @@ class DatasetSearchPage(QWidget):
         row.setSpacing(10)
 
         self.search_input = QLineEdit()
+        self.search_input.setObjectName("datasetSearchInput")
         self.search_input.setPlaceholderText(
             "Contoh: titanic, dataset pertanian, crop yield, diabetes, student performance..."
         )
@@ -215,14 +217,6 @@ class DatasetSearchPage(QWidget):
         download_location.addWidget(open_downloads_button)
         search_layout.addLayout(download_location)
 
-        hint = QLabel(
-            "Mendukung pencarian dataset global & lokal. "
-            "Contoh: titanic, iris, pertanian, mahasiswa, kesehatan, saham, house price."
-        )
-        hint.setObjectName("cardDescription")
-        hint.setWordWrap(True)
-        root.addWidget(hint)
-
         root.addWidget(search_card)
 
         self.progress = QProgressBar()
@@ -234,6 +228,7 @@ class DatasetSearchPage(QWidget):
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QFrame.NoFrame)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
         self.results_container = QWidget()
         self.results_layout = QVBoxLayout(self.results_container)
@@ -322,16 +317,23 @@ class DatasetSearchPage(QWidget):
     def _render_results(self):
         self._clear_results()
 
-        for result in self.results:
-            self.results_layout.addWidget(
-                self._build_result_card(result)
-            )
+        for start in range(0, len(self.results), 2):
+            row = QWidget()
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(12)
+            row_layout.addWidget(self._build_result_card(self.results[start]), 1)
+            if start + 1 < len(self.results):
+                row_layout.addWidget(self._build_result_card(self.results[start + 1]), 1)
+            else:
+                row_layout.addStretch(1)
+            self.results_layout.addWidget(row)
 
         self.results_layout.addStretch()
 
     def _build_result_card(self, result: DatasetSearchResult) -> QFrame:
         card = QFrame()
-        card.setObjectName("contentCard")
+        card.setObjectName("datasetResultCard")
 
         layout = QVBoxLayout(card)
         layout.setContentsMargins(20, 18, 20, 18)
