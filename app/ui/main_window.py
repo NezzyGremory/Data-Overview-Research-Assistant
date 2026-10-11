@@ -8980,8 +8980,8 @@ class ResearchLandscapeToolPage(QWidget):
 
     def _build_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(30, 25, 30, 25)
-        root.setSpacing(16)
+        root.setContentsMargins(20, 18, 20, 18)
+        root.setSpacing(10)
 
         header = QHBoxLayout()
         title_layout = QVBoxLayout()
@@ -9015,8 +9015,8 @@ class ResearchLandscapeToolPage(QWidget):
 
         self.container = QWidget()
         self.content = QVBoxLayout(self.container)
-        self.content.setContentsMargins(0, 0, 10, 20)
-        self.content.setSpacing(14)
+        self.content.setContentsMargins(0, 0, 0, 14)
+        self.content.setSpacing(12)
         scroll.setWidget(self.container)
         root.addWidget(scroll, 1)
 
@@ -9093,7 +9093,9 @@ class ResearchLandscapeToolPage(QWidget):
         return str(value)
 
     def _metric_card(self, title, value, subtitle=""):
-        return InfoCard(title, self._pretty(value), subtitle)
+        card = InfoCard(title, self._pretty(value), subtitle)
+        card.setObjectName("metricCard")
+        return card
 
     def _add_text_card(self, title, content):
         card = QFrame()
@@ -9155,7 +9157,7 @@ class ResearchLandscapeToolPage(QWidget):
             labels = [row[0] for row in reversed(chart_rows)]
             values = [row[1] for row in reversed(chart_rows)]
             is_percent = all(row[2] for row in chart_rows)
-            bars = axis.barh(labels, values, color="#4F8CFF", height=0.62)
+            bars = axis.barh(labels, values, color="#0D99FF", height=0.62)
             axis.set_xlabel("Papers (%)" if is_percent else "Number of papers", fontsize=9, color="#64748B")
             axis.tick_params(axis="both", labelsize=9, colors="#53667D")
             for spine in ("top", "right", "left"):
@@ -9186,7 +9188,12 @@ class ResearchLandscapeToolPage(QWidget):
             empty = QLabel("Belum ada data distribusi untuk ditampilkan.")
             empty.setObjectName("cardDescription")
             layout.addWidget(empty)
-        self.content.addWidget(card)
+        if getattr(self, "_distribution_grid", None) is not None:
+            index = self._distribution_card_index
+            self._distribution_grid.addWidget(card, index // 2, index % 2)
+            self._distribution_card_index += 1
+        else:
+            self.content.addWidget(card)
 
     def update_from_result(self, result):
         if not isinstance(result, dict) or not result:
@@ -9223,12 +9230,24 @@ class ResearchLandscapeToolPage(QWidget):
             f"Landscape loaded from Academic Research • {paper_count} papers analyzed"
         )
 
-        cards = QHBoxLayout()
+        cards_widget = QWidget()
+        cards = QHBoxLayout(cards_widget)
+        cards.setContentsMargins(0, 0, 0, 0)
         cards.setSpacing(12)
         cards.addWidget(self._metric_card("Papers", paper_count, "Literature analyzed"))
         cards.addWidget(self._metric_card("Dominant Method", dominant_method, "Most represented method"))
         cards.addWidget(self._metric_card("Latest Publication", latest_year, "Newest publication year"))
-        self.content.addLayout(cards)
+        self.content.addWidget(cards_widget)
+
+        distribution_widget = QWidget()
+        self._distribution_grid = QGridLayout(distribution_widget)
+        self._distribution_grid.setContentsMargins(0, 0, 0, 0)
+        self._distribution_grid.setHorizontalSpacing(12)
+        self._distribution_grid.setVerticalSpacing(12)
+        self._distribution_grid.setColumnStretch(0, 1)
+        self._distribution_grid.setColumnStretch(1, 1)
+        self._distribution_card_index = 0
+        self.content.addWidget(distribution_widget)
 
         # Common analyzer field names + generic aliases.
         methods = self._pick(
@@ -9279,6 +9298,7 @@ class ResearchLandscapeToolPage(QWidget):
                 self._add_text_card("Additional Landscape Details", self._format_mapping(details))
 
         self.content.addStretch()
+        self._distribution_grid = None
         self._rendered_result_id = id(result)
 
 

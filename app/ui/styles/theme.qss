@@ -291,3 +291,27 @@ QWidget {
     border-radius: 10px;
     color: #098e00;
 }
+
+/* Research Landscape screen */
+#statusLabel {
+    color: #564e4e;
+    font-size: 11px;
+}
+
+#metricCard {
+    background: #ffffff;
+    border: 1px solid rgba(0, 107, 184, 0.3);
+    border-radius: 12px;
+}
+
+#metricTitle {
+    color: #564e4e;
+    font-size: 9px;
+    font-weight: 700;
+}
+
+#metricValue {
+    color: #111111;
+    font-size: 20px;
+    font-weight: 700;
+}
