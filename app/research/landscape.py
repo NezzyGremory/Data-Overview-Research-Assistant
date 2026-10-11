@@ -64,7 +64,13 @@ class ResearchLandscapeAnalyzer:
             )
 
             if source:
-                sources[str(source)] += 1
+                provider_names = [
+                    name.strip()
+                    for name in str(source).split(",")
+                    if name.strip()
+                ]
+                for provider_name in provider_names:
+                    sources[provider_name] += 1
 
             self._extract_methods(
                 paper,
@@ -91,7 +97,7 @@ class ResearchLandscapeAnalyzer:
 
             "sources": self._percentages(
                 sources,
-                total,
+                sum(sources.values()),
             ),
 
             "methods": self._percentages(

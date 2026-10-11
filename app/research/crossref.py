@@ -43,22 +43,15 @@ class CrossrefClient:
                 f"DatasetResearch/1.0 (mailto:{self.email})"
             )
 
-        try:
-            response = httpx.get(
-                self.BASE_URL,
-                params=params,
-                headers=headers,
-                timeout=self.timeout,
-            )
+        response = httpx.get(
+            self.BASE_URL,
+            params=params,
+            headers=headers,
+            timeout=self.timeout,
+        )
 
-            response.raise_for_status()
-            data = response.json()
-
-        except httpx.HTTPError:
-            return []
-
-        except ValueError:
-            return []
+        response.raise_for_status()
+        data = response.json()
 
         message = data.get("message", {})
         items = message.get("items", [])

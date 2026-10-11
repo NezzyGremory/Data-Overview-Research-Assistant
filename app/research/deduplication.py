@@ -76,6 +76,18 @@ class PaperDeduplicator:
                 first.keywords.append(keyword)
                 existing_keywords.add(keyword.lower())
 
+        existing_issns = {
+            "".join(character for character in issn.upper() if character.isalnum())
+            for issn in first.issn
+        }
+        for issn in second.issn:
+            normalized_issn = "".join(
+                character for character in issn.upper() if character.isalnum()
+            )
+            if normalized_issn and normalized_issn not in existing_issns:
+                first.issn.append(issn)
+                existing_issns.add(normalized_issn)
+
         if first.source and second.source:
             if second.source not in first.source:
                 first.source = (

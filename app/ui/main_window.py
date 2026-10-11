@@ -44,6 +44,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QInputDialog,
     QComboBox,
+    QCheckBox,
 )
 
 from app.analyzer.loader import DatasetLoader
@@ -5875,6 +5876,8 @@ class ResearchPage(QWidget):
         layout = QVBoxLayout(
             widget
         )
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(8)
 
         title = QLabel(
             "Ranked Academic Papers"
@@ -5885,26 +5888,21 @@ class ResearchPage(QWidget):
         )
 
         description = QLabel(
-            "Ranking uses the configured relevance model. "
-            "Dataset Usage Confidence is reported separately "
-            "from relevance."
+            "Browse ranked results, review their sources, and filter journals by confirmed SINTA status."
         )
-
-        description.setWordWrap(
-            True
-        )
+        description.setObjectName("cardDescription")
 
         filter_panel = QFrame()
         filter_panel.setObjectName("paperScreeningToolbar")
         toolbar = QHBoxLayout(filter_panel)
-        toolbar.setContentsMargins(12, 10, 12, 10)
-        toolbar.setSpacing(10)
+        toolbar.setContentsMargins(10, 8, 10, 8)
+        toolbar.setSpacing(8)
 
         self.paper_search_input = QLineEdit()
         self.paper_search_input.setPlaceholderText(
             "Search title, author, venue, or ISSN"
         )
-        self.paper_search_input.setMinimumHeight(38)
+        self.paper_search_input.setMinimumHeight(34)
         self.paper_search_input.textChanged.connect(self._apply_paper_filter)
         toolbar.addWidget(self.paper_search_input, 1)
 
@@ -5913,7 +5911,8 @@ class ResearchPage(QWidget):
         toolbar.addWidget(filter_label)
 
         self.sinta_filter = QComboBox()
-        self.sinta_filter.setMinimumHeight(38)
+        self.sinta_filter.setMinimumHeight(34)
+        self.sinta_filter.setMinimumWidth(165)
         self.sinta_filter.addItem("All papers", "ALL")
         self.sinta_filter.addItem("Needs screening", "UNVERIFIED")
         for rank in range(1, 7):
@@ -5927,17 +5926,41 @@ class ResearchPage(QWidget):
         self.paper_count_label.setObjectName("topbarStatus")
         toolbar.addWidget(self.paper_count_label)
 
+        self.provider_status_label = QLabel(
+            "Sources: OpenAlex, Crossref, Semantic Scholar, Europe PMC, OpenAIRE; Scopus requires API access."
+        )
+        self.provider_status_label.setObjectName("cardDescription")
+        self.provider_status_label.setWordWrap(True)
+
+        self.ucl_discovery_button = QPushButton("Search UCL Discovery")
+        self.ucl_discovery_button.setObjectName("secondaryButton")
+        self.ucl_discovery_button.setToolTip(
+            "Open the official UCL Discovery repository search in your browser."
+        )
+        self.ucl_discovery_button.setMinimumHeight(30)
+        self.ucl_discovery_button.clicked.connect(
+            self._open_ucl_discovery_search
+        )
+        self.ucl_search_query = ""
+
+        provider_row = QHBoxLayout()
+        provider_row.setContentsMargins(0, 0, 0, 0)
+        provider_row.setSpacing(8)
+        provider_row.addWidget(self.provider_status_label, 1)
+        provider_row.addWidget(self.ucl_discovery_button)
+
         self.paper_table = QTableWidget()
         self.paper_table.setObjectName("rankedPapersTable")
 
-        self.paper_table.setColumnCount(5)
+        self.paper_table.setColumnCount(6)
 
         self.paper_table.setHorizontalHeaderLabels(
             [
                 "Paper",
                 "Year",
                 "Relevance",
-                "Venue",
+                "Journal",
+                "Source",
                 "SINTA Status",
             ]
         )
@@ -5949,6 +5972,7 @@ class ResearchPage(QWidget):
         self.paper_table.setSelectionBehavior(
             QTableWidget.SelectRows
         )
+        self.paper_table.setSelectionMode(QTableWidget.SingleSelection)
 
         self.paper_table.setAlternatingRowColors(
             True
@@ -5963,22 +5987,14 @@ class ResearchPage(QWidget):
             QHeaderView.Stretch,
         )
 
-        header.setSectionResizeMode(
-            1,
-            QHeaderView.ResizeToContents,
-        )
-
-        header.setSectionResizeMode(
-            2,
-            QHeaderView.ResizeToContents,
-        )
-
-        header.setSectionResizeMode(
-            3,
-            QHeaderView.ResizeToContents,
-        )
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
-        self.paper_table.verticalHeader().setDefaultSectionSize(34)
+        for column, width in ((1, 68), (2, 88), (3, 185), (4, 112), (5, 122)):
+            header.setSectionResizeMode(column, QHeaderView.Fixed)
+            self.paper_table.setColumnWidth(column, width)
+        self.paper_table.setMinimumHeight(300)
+        self.paper_table.setWordWrap(False)
+        self.paper_table.setTextElideMode(Qt.ElideRight)
+        self.paper_table.setShowGrid(False)
+        self.paper_table.verticalHeader().setDefaultSectionSize(36)
         self.paper_table.verticalHeader().setVisible(False)
 
         self.paper_table.itemSelectionChanged.connect(
@@ -5986,10 +6002,12 @@ class ResearchPage(QWidget):
         )
 
         self.paper_detail = QTextBrowser()
+        self.paper_detail.setObjectName("paperDetail")
         self.paper_detail.setOpenExternalLinks(True)
         self.paper_detail.setReadOnly(True)
-        self.paper_detail.setMinimumHeight(92)
-        self.paper_detail.setMaximumHeight(140)
+        self.paper_detail.setFrameShape(QFrame.NoFrame)
+        self.paper_detail.setMinimumHeight(96)
+        self.paper_detail.setMaximumHeight(136)
         self.paper_detail.document().setDefaultStyleSheet(
             "body { font-family: 'Segoe UI'; font-size: 9pt; color: #25364D; } "
             "h2 { font-size: 11pt; margin: 2px 0 5px; } "
@@ -5999,26 +6017,28 @@ class ResearchPage(QWidget):
         self.sinta_screening_panel = QFrame()
         self.sinta_screening_panel.setObjectName("sintaScreeningPanel")
         screening_layout = QVBoxLayout(self.sinta_screening_panel)
-        screening_layout.setContentsMargins(14, 10, 14, 10)
-        screening_layout.setSpacing(6)
+        screening_layout.setContentsMargins(12, 8, 12, 8)
+        screening_layout.setSpacing(4)
 
         screening_heading = QLabel("Journal accreditation screening")
         screening_heading.setObjectName("sectionTitle")
         screening_note = QLabel(
-            "Check the journal in the official SINTA directory inside this app. Confirm its accreditation period for the paper year before saving."
+            "Check the journal in the official SINTA directory. For a rank, verify its accreditation period includes the paper year."
         )
         screening_note.setObjectName("cardDescription")
         screening_note.setWordWrap(True)
+        screening_note.setMaximumHeight(34)
         screening_layout.addWidget(screening_heading)
         screening_layout.addWidget(screening_note)
 
         screening_controls = QHBoxLayout()
         screening_controls.setSpacing(8)
-        status_label = QLabel("Rank for paper year")
-        status_label.setObjectName("cardDescription")
-        screening_controls.addWidget(status_label)
 
         self.sinta_status_combo = QComboBox()
+        self.sinta_status_combo.setToolTip(
+            "Choose the SINTA rank or journal status that applies to this paper's publication year."
+        )
+        self.sinta_status_combo.setMinimumWidth(155)
         self.sinta_status_combo.addItem("Select after checking period", "UNVERIFIED")
         for rank in range(1, 7):
             self.sinta_status_combo.addItem(f"SINTA {rank}", f"S{rank}")
@@ -6028,7 +6048,7 @@ class ResearchPage(QWidget):
         self.sinta_status_combo.addItem(
             "Outside SINTA / not listed", "NOT_IN_SINTA"
         )
-        self.sinta_status_combo.setMinimumHeight(36)
+        self.sinta_status_combo.setMinimumHeight(32)
         self.sinta_status_combo.currentIndexChanged.connect(
             self._update_sinta_save_enabled
         )
@@ -6036,17 +6056,26 @@ class ResearchPage(QWidget):
 
         self.check_sinta_button = QPushButton("Check SINTA")
         self.check_sinta_button.setObjectName("secondaryButton")
-        self.check_sinta_button.setMinimumHeight(36)
+        self.check_sinta_button.setMinimumHeight(32)
+        self.check_sinta_button.setMinimumWidth(100)
         self.check_sinta_button.clicked.connect(self._check_sinta_in_app)
         screening_controls.addWidget(self.check_sinta_button)
 
-        self.save_sinta_button = QPushButton("Save screening")
+        self.save_sinta_button = QPushButton("Save status")
         self.save_sinta_button.setObjectName("primaryButton")
-        self.save_sinta_button.setMinimumHeight(36)
+        self.save_sinta_button.setMinimumHeight(32)
+        self.save_sinta_button.setMinimumWidth(96)
         self.save_sinta_button.setEnabled(False)
         self.save_sinta_button.clicked.connect(self._save_sinta_screening)
         screening_controls.addWidget(self.save_sinta_button)
         screening_layout.addLayout(screening_controls)
+
+        self.sinta_period_confirmed = QCheckBox(
+            "I verified this journal status for the paper year"
+        )
+        self.sinta_period_confirmed.setObjectName("sintaPeriodConfirmed")
+        self.sinta_period_confirmed.toggled.connect(self._update_sinta_save_enabled)
+        screening_layout.addWidget(self.sinta_period_confirmed)
 
         self.sinta_lookup_progress = QProgressBar()
         self.sinta_lookup_progress.setRange(0, 0)
@@ -6060,7 +6089,17 @@ class ResearchPage(QWidget):
         )
         self.sinta_lookup_message.setObjectName("cardDescription")
         self.sinta_lookup_message.setWordWrap(True)
+        self.sinta_lookup_message.setMaximumHeight(34)
         screening_layout.addWidget(self.sinta_lookup_message)
+
+        selection_panel = QFrame()
+        selection_panel.setObjectName("paperSelectionPanel")
+        selection_layout = QHBoxLayout(selection_panel)
+        selection_layout.setContentsMargins(8, 6, 8, 6)
+        selection_layout.setSpacing(10)
+        selection_layout.addWidget(self.paper_detail, 3)
+        selection_layout.addWidget(self.sinta_screening_panel, 2)
+        selection_panel.setMaximumHeight(200)
 
         layout.addWidget(
             title
@@ -6071,17 +6110,14 @@ class ResearchPage(QWidget):
         )
 
         layout.addWidget(filter_panel)
+        layout.addLayout(provider_row)
 
         layout.addWidget(
             self.paper_table,
             1,
         )
 
-        layout.addWidget(
-            self.paper_detail
-        )
-
-        layout.addWidget(self.sinta_screening_panel)
+        layout.addWidget(selection_panel)
 
         return widget
 
@@ -6358,7 +6394,12 @@ class ResearchPage(QWidget):
 
         self.paper_detail.clear()
         self.paper_count_label.setText("0 papers | 0 need screening")
+        self.provider_status_label.setText(
+            "Sources: OpenAlex, Crossref, Semantic Scholar, Europe PMC, and OpenAIRE. "
+            "Scopus requires a configured API key and access entitlement."
+        )
         self.sinta_status_combo.setCurrentIndex(0)
+        self.sinta_period_confirmed.setChecked(False)
         self.save_sinta_button.setEnabled(False)
         self.check_sinta_button.setEnabled(False)
         self.sinta_lookup_progress.setVisible(False)
@@ -6591,6 +6632,12 @@ class ResearchPage(QWidget):
         ml_result,
     ):
 
+        query_list = result.get("queries") or []
+        self.ucl_search_query = next(
+            (str(query).strip() for query in query_list if str(query).strip()),
+            "",
+        )
+
         summary = result.get(
             "summary",
             {}
@@ -6600,6 +6647,26 @@ class ResearchPage(QWidget):
             "papers",
             []
         )
+
+        academic_search = (result.get("pipeline") or {}).get("academic_search") or {}
+        provider_status = academic_search.get("provider_status") or {}
+        provider_counts = academic_search.get("sources") or {}
+        provider_parts = []
+        for provider in ("OpenAlex", "Crossref", "Semantic Scholar", "Europe PMC", "OpenAIRE", "Scopus"):
+            state = provider_status.get(provider)
+            count = provider_counts.get(provider)
+            if state == "NOT_CONFIGURED":
+                provider_parts.append(f"{provider}: API key required")
+            elif state == "DISABLED":
+                provider_parts.append(f"{provider}: off")
+            elif state == "ERROR":
+                provider_parts.append(f"{provider}: unavailable")
+            elif state == "ENABLED":
+                provider_parts.append(f"{provider}: {int(count or 0)}")
+        if provider_parts:
+            self.provider_status_label.setText(
+                "Provider candidates before deduplication  |  " + "  |  ".join(provider_parts)
+            )
 
         keywords_result = result.get(
             "keywords",
@@ -6895,6 +6962,14 @@ class ResearchPage(QWidget):
         self.gap_summary_label.setText(f"Potential directions: {len(gap_items)}")
         self.gap_text.setHtml(self._format_gap_html(gaps))
 
+    def _open_ucl_discovery_search(self):
+        base_url = "https://discovery.ucl.ac.uk/cgi/search/simple"
+        if self.ucl_search_query:
+            url = f"{base_url}?q={quote_plus(self.ucl_search_query)}"
+        else:
+            url = "https://discovery.ucl.ac.uk/"
+        QDesktopServices.openUrl(QUrl(url))
+
     def _render_landscape_chart(self, landscape):
         groups = [
             ("Sources", landscape.get("sources") or []),
@@ -7090,6 +7165,14 @@ class ResearchPage(QWidget):
             venue = str(paper.get("venue") or paper.get("source") or "-")
             if len(venue) > 42:
                 venue = venue[:39].rstrip() + "..."
+            sources = [
+                source.strip()
+                for source in str(paper.get("source") or "").split(",")
+                if source.strip()
+            ]
+            source_label = sources[0] if sources else "-"
+            if len(sources) > 1:
+                source_label += f" +{len(sources) - 1}"
 
             values = [
                 str(title),
@@ -7098,6 +7181,7 @@ class ResearchPage(QWidget):
                     relevance
                 ),
                 venue,
+                source_label,
                 sinta_label,
             ]
 
@@ -7116,15 +7200,23 @@ class ResearchPage(QWidget):
                     item.setToolTip(str(paper.get("venue") or paper.get("source") or "Venue unavailable"))
 
                 if column == 4:
+                    item.setToolTip(", ".join(sources) or "Source unavailable")
+
+                if column in {1, 2, 5}:
+                    item.setTextAlignment(Qt.AlignCenter)
+
+                if column == 5:
                     screening = self._sinta_screening(paper)
                     status = str(screening.get("status") or "UNVERIFIED")
-                    color = (
-                        "#19836F" if status in {f"S{rank}" for rank in range(1, 7)}
-                        else "#9A6A18" if status == "NOT_ACCREDITED"
-                        else "#718096" if status == "UNVERIFIED"
-                        else "#58677D"
-                    )
-                    item.setForeground(QColor(color))
+                    if status in {f"S{rank}" for rank in range(1, 7)}:
+                        item.setForeground(QColor("#167A68"))
+                        item.setBackground(QColor("#EAF6F2"))
+                    elif status == "UNVERIFIED":
+                        item.setForeground(QColor("#8A671D"))
+                        item.setBackground(QColor("#FFF8E8"))
+                    else:
+                        item.setForeground(QColor("#596A80"))
+                        item.setBackground(QColor("#F0F3F7"))
                     item.setToolTip(screening.get("source_url") or "Check this journal from the screening panel below.")
 
                 item.setToolTip(
@@ -7136,8 +7228,6 @@ class ResearchPage(QWidget):
                     column,
                     item
                 )
-
-        self.paper_table.resizeRowsToContents()
 
         verified_count = sum(
             bool(self._sinta_screening(paper).get("status"))
@@ -7185,9 +7275,13 @@ class ResearchPage(QWidget):
             return
         paper = papers[paper_index]
         screening = self._sinta_screening(paper)
-        current_status = screening.get("status", "UNVERIFIED")
+        current_status = screening.get("status") or screening.get("lookup_rank") or "UNVERIFIED"
         status_index = self.sinta_status_combo.findData(current_status)
         self.sinta_status_combo.setCurrentIndex(max(0, status_index))
+        self.sinta_period_confirmed.setChecked(
+            bool(screening.get("period_confirmed"))
+            and str(screening.get("checked_for_year") or "") == str(paper.get("year") or "")
+        )
         self._update_sinta_save_enabled()
 
         issn_values = paper.get("issn", [])
@@ -7269,6 +7363,7 @@ class ResearchPage(QWidget):
         self.save_sinta_button.setEnabled(
             has_identifier
             and self.sinta_status_combo.currentData() != "UNVERIFIED"
+            and self.sinta_period_confirmed.isChecked()
         )
 
     def _selected_paper_index(self):
@@ -7406,6 +7501,13 @@ class ResearchPage(QWidget):
                 "Check the official journal directory and select a confirmed status first.",
             )
             return
+        if not self.sinta_period_confirmed.isChecked():
+            QMessageBox.information(
+                self,
+                "Confirm accreditation period",
+                "Verify that this journal status is valid for the paper's publication year before saving.",
+            )
+            return
 
         paper = papers[paper_index]
         previous = self._sinta_screening(paper)
@@ -7414,6 +7516,7 @@ class ResearchPage(QWidget):
             "status": status,
             "checked_at": time.strftime("%Y-%m-%d %H:%M"),
             "checked_for_year": paper.get("year"),
+            "period_confirmed": True,
             "verification": "user-confirmed against the official SINTA directory",
             "source_url": previous.get("source_url") or self._sinta_search_url(paper),
         }

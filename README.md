@@ -506,13 +506,34 @@ Search queries are generated from dataset analysis results.
 
 The application uses academic APIs to retrieve related publications.
 
-### Primary Source
+### Search Sources
 
-**OpenAlex**
+Academic Research combines and deduplicates records from OpenAlex, Crossref,
+Semantic Scholar, Europe PMC, and OpenAIRE. Scopus search is optional and is enabled when
+`ELSEVIER_API_KEY` is configured in the local `.env` file. Scopus access also
+depends on the API key's Elsevier entitlement; the key alone does not guarantee
+access to every Scopus field or endpoint.
 
-### Secondary Source
+OpenAIRE currently uses its documented Graph API v4 beta endpoint, so its
+availability and response format may change as that API evolves.
 
-**Crossref**
+UCL Discovery is available from the Ranked Papers page through its official
+repository search, prefilled with the first generated literature query. UCL's
+published help documents its website search, not a supported query API, so its
+results are not silently mixed into the ranked list. Records indexed by
+OpenAIRE or other bibliographic providers may also include UCL research
+outputs. SINTA accreditation is checked separately against the journal and
+publication year; other indexes do not establish a SINTA rank.
+
+Semantic Scholar can be used without a key. Set `SEMANTIC_SCHOLAR_API_KEY` in
+`.env` if you have one and need a higher personal request allowance. Keep API
+keys out of source control.
+
+Results from multiple providers are deduplicated by DOI or title. The provider
+column shows which indexes contributed metadata to a paper. SINTA screening is
+separate: it checks journal records in the official SINTA directory, and the
+paper's publication year still needs to be matched to the journal's accreditation
+period before saving a rank.
 
 ---
 

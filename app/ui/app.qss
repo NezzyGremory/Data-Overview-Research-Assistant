@@ -1479,12 +1479,22 @@ QProgressBar::chunk {
 #paperScreeningToolbar {
     background: #FFFFFF;
     border: 1px solid #DCE6F3;
-    border-radius: 12px;
+    border-radius: 10px;
+}
+#paperSelectionPanel {
+    background: #FFFFFF;
+    border: 1px solid #DCE6F3;
+    border-radius: 10px;
+}
+#paperDetail {
+    background: transparent;
+    border: none;
+    color: #25364D;
 }
 #sintaScreeningPanel {
-    background: #F8FAFE;
-    border: 1px solid #DCE6F3;
-    border-radius: 12px;
+    background: #F7F9FC;
+    border: 1px solid #E3EAF3;
+    border-radius: 8px;
 }
 #sintaScreeningPanel #sectionTitle {
     color: #20324A;
@@ -1495,13 +1505,18 @@ QProgressBar::chunk {
     color: #687A96;
     font-size: 11px;
 }
+#sintaPeriodConfirmed {
+    color: #42546B;
+    font-size: 10px;
+    spacing: 6px;
+}
 #rankedPapersTable {
-    font-size: 10pt;
+    font-size: 9.5pt;
     gridline-color: #E7EDF5;
     alternate-background-color: #F8FAFD;
 }
 #rankedPapersTable::item {
-    padding: 5px 7px;
+    padding: 4px 8px;
     color: #25364D;
 }
 #rankedPapersTable::item:selected {
@@ -1510,8 +1525,12 @@ QProgressBar::chunk {
 }
 #rankedPapersTable QHeaderView::section {
     padding: 7px 8px;
-    font-size: 10pt;
+    font-size: 9.5pt;
     color: #52647C;
+}
+#rankedPapersTable QTableCornerButton::section {
+    background: #F2F7FD;
+    border: none;
 }
 #sintaScreeningPanel QProgressBar {
     background: #E5EDF8;

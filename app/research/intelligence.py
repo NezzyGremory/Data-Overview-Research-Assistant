@@ -117,6 +117,7 @@ class ResearchIntelligenceEngine:
         ranked_papers: List[Dict[str, Any]] = []
 
         source_counts: Dict[str, int] = {}
+        provider_status_runs: Dict[str, List[str]] = {}
         search_errors: List[Dict[str, Any]] = []
 
         landscape: Dict[str, Any] = {}
@@ -298,6 +299,8 @@ class ResearchIntelligenceEngine:
                     }
 
                 search_status = search_result.get("status", "UNKNOWN")
+                for provider, status in (search_result.get("provider_status") or {}).items():
+                    provider_status_runs.setdefault(str(provider), []).append(str(status))
                 papers = search_result.get("papers", [])
 
                 if not isinstance(papers, list):
@@ -354,6 +357,15 @@ class ResearchIntelligenceEngine:
 
         pipeline["academic_search"]["papers"] = len(all_papers)
         pipeline["academic_search"]["sources"] = source_counts
+        pipeline["academic_search"]["provider_status"] = {
+            provider: (
+                "ENABLED" if "ENABLED" in statuses
+                else "ERROR" if "ERROR" in statuses
+                else statuses[-1]
+            )
+            for provider, statuses in provider_status_runs.items()
+            if statuses
+        }
         pipeline["academic_search"]["errors"] = search_errors
 
         if all_papers:
@@ -1001,6 +1013,12 @@ class ResearchIntelligenceEngine:
                 if not isinstance(keywords, list):
                     keywords = [str(keywords)]
 
+                issn = item.get("issn", [])
+                if isinstance(issn, str):
+                    issn = [issn]
+                elif not isinstance(issn, list):
+                    issn = []
+
                 citation_count = item.get("citation_count", 0)
 
                 try:
@@ -1023,7 +1041,7 @@ class ResearchIntelligenceEngine:
                         ),
                         external_id=item.get("external_id"),
                         keywords=keywords,
-                        issn=item.get("issn", []) or [],
+                        issn=issn,
                     )
                 )
             except Exception:

@@ -1,29 +1,44 @@
 from __future__ import annotations
 
 import os
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional
 
 from app.research.crossref import CrossrefClient
 from app.research.deduplication import PaperDeduplicator
 from app.research.openalex import OpenAlexClient
+from app.research.semantic_scholar import SemanticScholarClient
+from app.research.europe_pmc import EuropePMCClient
+from app.research.scopus import ScopusClient
+from app.research.openaire import OpenAIREClient
 from app.research.paper import Paper
 
 
 class AcademicSearchEngine:
-    """Multi-source academic search using open-access academic providers (OpenAlex & Crossref)."""
+    """Search and merge records from several bibliographic indexes."""
 
     def __init__(
         self,
         email: Optional[str] = None,
         openalex: Optional[OpenAlexClient] = None,
         crossref: Optional[CrossrefClient] = None,
+        semantic_scholar: Optional[SemanticScholarClient] = None,
+        europe_pmc: Optional[EuropePMCClient] = None,
+        scopus: Optional[ScopusClient] = None,
+        openaire: Optional[OpenAIREClient] = None,
         scholar: Any = None,
         scholar_api_key: Optional[str] = None,
         deduplicator: Optional[PaperDeduplicator] = None,
         **kwargs,
     ):
-        self.openalex = openalex or OpenAlexClient(email=email)
-        self.crossref = crossref or CrossrefClient(email=email)
+        self.openalex = openalex or OpenAlexClient(email=email, timeout=12.0)
+        self.crossref = crossref or CrossrefClient(email=email, timeout=12.0)
+        self.semantic_scholar = semantic_scholar or SemanticScholarClient(
+            api_key=os.getenv("SEMANTIC_SCHOLAR_API_KEY"), timeout=12.0
+        )
+        self.europe_pmc = europe_pmc or EuropePMCClient(timeout=12.0)
+        self.scopus = scopus or ScopusClient(timeout=12.0)
+        self.openaire = openaire or OpenAIREClient(timeout=12.0)
         self.deduplicator = deduplicator or PaperDeduplicator()
 
     def search(
@@ -48,32 +63,48 @@ class AcademicSearchEngine:
 
         all_papers: List[Paper] = []
         candidate_source_counts: Dict[str, int] = {}
-        provider_status = {
-            "OpenAlex": "ENABLED",
-            "Crossref": "ENABLED" if use_crossref else "DISABLED",
+        provider_calls = {
+            "OpenAlex": lambda: self.openalex.search(query=query, per_page=limit),
         }
-
-        # Collect candidates independently from OpenAlex and Crossref
-        try:
-            openalex_results = self.openalex.search(
-                query=query,
-                per_page=limit,
-            )
-            all_papers.extend(openalex_results)
-            candidate_source_counts["OpenAlex"] = len(openalex_results)
-        except Exception:
-            provider_status["OpenAlex"] = "ERROR"
-
         if use_crossref:
-            try:
-                crossref_results = self.crossref.search(
-                    query=query,
-                    rows=limit,
-                )
-                all_papers.extend(crossref_results)
-                candidate_source_counts["Crossref"] = len(crossref_results)
-            except Exception:
-                provider_status["Crossref"] = "ERROR"
+            provider_calls["Crossref"] = lambda: self.crossref.search(query=query, rows=limit)
+        provider_calls["Semantic Scholar"] = lambda: self.semantic_scholar.search(query=query, limit=limit)
+        provider_calls["Europe PMC"] = lambda: self.europe_pmc.search(query=query, limit=limit)
+        provider_calls["OpenAIRE"] = lambda: self.openaire.search(query=query, limit=limit)
+
+        provider_status = {name: "ENABLED" for name in provider_calls}
+        if self.scopus.enabled:
+            provider_calls["Scopus"] = lambda: self.scopus.search(query=query, limit=limit)
+            provider_status["Scopus"] = "ENABLED"
+        else:
+            provider_status["Scopus"] = "NOT_CONFIGURED"
+        if not use_crossref:
+            provider_status["Crossref"] = "DISABLED"
+
+        provider_attempts = {name: 0 for name in provider_calls}
+        provider_errors = {name: 0 for name in provider_calls}
+        # Independent providers run in parallel; the GUI research worker owns
+        # this operation, so network latency never blocks the desktop window.
+        with ThreadPoolExecutor(max_workers=max(1, len(provider_calls))) as executor:
+            futures = {
+                executor.submit(search_provider): name
+                for name, search_provider in provider_calls.items()
+            }
+            for future, provider in futures.items():
+                provider_attempts[provider] += 1
+                try:
+                    results = future.result()
+                    results = results if isinstance(results, list) else []
+                    all_papers.extend(results)
+                    candidate_source_counts[provider] = len(results)
+                except Exception:
+                    provider_errors[provider] += 1
+                    candidate_source_counts[provider] = 0
+
+        for provider, attempts in provider_attempts.items():
+            provider_status[provider] = (
+                "ERROR" if attempts and provider_errors[provider] == attempts else "ENABLED"
+            )
 
         unique_papers = self.deduplicator.deduplicate(all_papers)
         unique_papers = unique_papers[:limit]
