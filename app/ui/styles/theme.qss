@@ -377,6 +377,10 @@ QComboBox#analysisControlSelect QAbstractItemView { background: var(--surface); 
 QDialog { background: var(--surface); border-radius: var(--dialog-radius); }
 QDialog#uploadDatasetDialog { background: transparent; border: none; border-radius: var(--dialog-radius); }
 #uploadDialogSurface { background: var(--surface); border: none; border-radius: var(--dialog-radius); }
+QScrollArea#uploadDialogContent,
+QScrollArea#uploadDialogContent::viewport,
+#uploadDialogViewport,
+#uploadDialogContentBody { background: transparent; border: none; }
 #dialogOverlay { background: var(--overlay); border: none; }
 #uploadDialogTitle { color: var(--heading); font-family: "Plus Jakarta Sans"; font-size: 30px; font-weight: 700; }
 #uploadDialogSubtitle { color: var(--body); font-size: 20px; }
@@ -413,5 +417,29 @@ QPushButton#uploadDialogCancel {
 QDialog#uploadDatasetDialog QPushButton#uploadDialogCancel { color: var(--blue); font-size: 18px; }
 QPushButton#uploadDialogCancel:hover { background: var(--canvas); }
 QPushButton#uploadDialogCancel:pressed { background: var(--blue-active); }
+QDialog#uploadDatasetDialog[compact="true"] #uploadDialogTitle { font-size: 24px; }
+QDialog#uploadDatasetDialog[compact="true"] #uploadDialogSubtitle { font-size: 16px; }
+QDialog#uploadDatasetDialog[compact="true"] #uploadDialogFileName { font-size: 19px; }
+QDialog#uploadDatasetDialog[compact="true"] #uploadDialogFileDetails { font-size: 14px; }
+QDialog#uploadDatasetDialog[compact="true"] #uploadDialogLabel { font-size: 13px; }
+QDialog#uploadDatasetDialog[compact="true"] QLineEdit#uploadDialogInput,
+QDialog#uploadDatasetDialog[compact="true"] QComboBox#uploadDialogInput {
+    font-size: 16px;
+    min-height: 52px;
+    padding: 0 16px;
+}
+QDialog#uploadDatasetDialog[compact="true"] QCheckBox#uploadDialogCheck { font-size: 14px; }
+QDialog#uploadDatasetDialog[compact="true"] QCheckBox#uploadDialogCheck::indicator {
+    width: 38px;
+    height: 24px;
+}
+QDialog#uploadDatasetDialog[compact="true"] QPushButton#primaryButton {
+    font-size: 14px;
+    min-height: 52px;
+}
+QDialog#uploadDatasetDialog[compact="true"] QPushButton#uploadDialogCancel {
+    font-size: 14px;
+    min-height: 52px;
+}
 
 /* Notebook-style plot area uses the same font and palette as the UI. */

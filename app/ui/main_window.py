@@ -1480,6 +1480,23 @@ class UploadDatasetDialog(QDialog):
         self.setWindowModality(Qt.ApplicationModal)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WA_StyledBackground, True)
+        screen = main_window.screen() or QApplication.primaryScreen()
+        self.available_geometry = (
+            screen.availableGeometry() if screen is not None else main_window.frameGeometry()
+        )
+        safe_width = min(
+            max(1, self.available_geometry.width() - 32),
+            max(1, main_window.width() - 32),
+        )
+        safe_height = min(
+            max(1, self.available_geometry.height() - 32),
+            max(1, main_window.height() - 32),
+        )
+        self.dialog_width = min(1027, safe_width)
+        self.dialog_height = min(757, safe_height)
+        self.compact_layout = self.dialog_width < 900 or self.dialog_height < 700
+        self.setProperty("compact", self.compact_layout)
+
         self.surface = QFrame(self)
         self.surface.setObjectName("uploadDialogSurface")
         self.surface.setAttribute(Qt.WA_StyledBackground, True)
@@ -1488,49 +1505,71 @@ class UploadDatasetDialog(QDialog):
         outer.addWidget(self.surface)
         self._build_ui()
         apply_card_shadow(self.surface)
-
-        width = min(1027, max(760, main_window.width() - 48))
-        height = min(757, max(600, main_window.height() - 48))
-        self.setFixedSize(width, height)
+        self.setMinimumSize(min(520, self.dialog_width), min(400, self.dialog_height))
+        self.setMaximumSize(self.dialog_width, self.dialog_height)
+        self.resize(self.dialog_width, self.dialog_height)
 
     def _field(self, label, widget):
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(20)
+        layout.setSpacing(10 if self.compact_layout else 20)
         caption = QLabel(label)
         caption.setObjectName("uploadDialogLabel")
         layout.addWidget(caption)
         widget.setObjectName("uploadDialogInput")
-        widget.setMinimumHeight(64)
+        widget.setMinimumHeight(52 if self.compact_layout else 64)
         layout.addWidget(widget)
         return container
 
     def _build_ui(self):
         root = QVBoxLayout(self.surface)
-        root.setContentsMargins(42, 49, 42, 42)
+        root.setContentsMargins(
+            26 if self.compact_layout else 42,
+            24 if self.compact_layout else 49,
+            26 if self.compact_layout else 42,
+            20 if self.compact_layout else 42,
+        )
         root.setSpacing(0)
+
+        content_scroll = QScrollArea(self.surface)
+        content_scroll.setObjectName("uploadDialogContent")
+        content_scroll.setFrameShape(QFrame.NoFrame)
+        content_scroll.setWidgetResizable(True)
+        content_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        content_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        content_scroll.viewport().setObjectName("uploadDialogViewport")
+        content = QWidget()
+        content.setObjectName("uploadDialogContentBody")
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 12 if self.compact_layout else 0)
+        content_layout.setSpacing(0)
+        content_scroll.setWidget(content)
+        root.addWidget(content_scroll, 1)
 
         title = QLabel("Upload Dataset")
         title.setObjectName("uploadDialogTitle")
-        root.addWidget(title)
-        root.addSpacing(10)
+        content_layout.addWidget(title)
+        content_layout.addSpacing(6 if self.compact_layout else 10)
         subtitle = QLabel("Choose a CSV file and confirm how DORA should read it.")
         subtitle.setObjectName("uploadDialogSubtitle")
         subtitle.setWordWrap(True)
-        root.addWidget(subtitle)
-        root.addSpacing(35)
+        content_layout.addWidget(subtitle)
+        content_layout.addSpacing(18 if self.compact_layout else 35)
 
         file_card = QFrame()
         file_card.setObjectName("uploadDialogFileCard")
-        file_card.setFixedHeight(134)
+        file_card.setFixedHeight(108 if self.compact_layout else 134)
         file_layout = QHBoxLayout(file_card)
-        file_layout.setContentsMargins(26, 20, 26, 20)
-        file_layout.setSpacing(26)
+        if self.compact_layout:
+            file_layout.setContentsMargins(16, 12, 16, 12)
+        else:
+            file_layout.setContentsMargins(26, 20, 26, 20)
+        file_layout.setSpacing(16 if self.compact_layout else 26)
         file_icon = QLabel()
         file_icon.setObjectName("uploadDialogFileIcon")
         file_icon.setAlignment(Qt.AlignCenter)
-        file_icon.setFixedSize(80, 80)
+        file_icon.setFixedSize(72 if self.compact_layout else 80, 72 if self.compact_layout else 80)
         icon = QPixmap(str(_resource_path("assets/icons/file-text.svg")))
         if not icon.isNull():
             file_icon.setPixmap(icon.scaled(42, 42, Qt.KeepAspectRatio, Qt.SmoothTransformation))
@@ -1550,8 +1589,8 @@ class UploadDatasetDialog(QDialog):
         file_text.addWidget(filename)
         file_text.addWidget(details)
         file_layout.addLayout(file_text, 1)
-        root.addWidget(file_card)
-        root.addSpacing(33)
+        content_layout.addWidget(file_card)
+        content_layout.addSpacing(18 if self.compact_layout else 33)
 
         dataset_name = QLineEdit(self.file_path.name)
         delimiter = QComboBox()
@@ -1565,33 +1604,33 @@ class UploadDatasetDialog(QDialog):
 
         fields = QGridLayout()
         fields.setContentsMargins(0, 0, 0, 0)
-        fields.setHorizontalSpacing(14)
-        fields.setVerticalSpacing(22)
+        fields.setHorizontalSpacing(10 if self.compact_layout else 14)
+        fields.setVerticalSpacing(14 if self.compact_layout else 22)
         fields.addWidget(self._field("DATASET NAME", dataset_name), 0, 0)
         fields.addWidget(self._field("DEMILITER", delimiter), 0, 1)
         fields.addWidget(self._field("TARGET COLUMN", target), 1, 0)
         fields.addWidget(self._field("ENCODING", encoding), 1, 1)
         fields.setColumnStretch(0, 1)
         fields.setColumnStretch(1, 1)
-        root.addLayout(fields)
-        root.addSpacing(28)
+        content_layout.addLayout(fields)
+        content_layout.addSpacing(18 if self.compact_layout else 28)
 
         first_row = QCheckBox("First row contains column names")
         first_row.setObjectName("uploadDialogCheck")
         first_row.setChecked(True)
-        root.addWidget(first_row)
-        root.addStretch(1)
+        content_layout.addWidget(first_row)
+        content_layout.addStretch(1)
 
         actions = QHBoxLayout()
-        actions.setSpacing(12)
+        actions.setSpacing(10 if self.compact_layout else 12)
         actions.addStretch(1)
         cancel = QPushButton("Cancel")
         cancel.setObjectName("uploadDialogCancel")
-        cancel.setFixedSize(154, 64)
+        cancel.setFixedSize(126 if self.compact_layout else 154, 52 if self.compact_layout else 64)
         cancel.clicked.connect(self.reject)
         confirm = QPushButton("Upload && Preview")
         confirm.setObjectName("primaryButton")
-        confirm.setFixedSize(290, 64)
+        confirm.setFixedSize(230 if self.compact_layout else 290, 52 if self.compact_layout else 64)
         confirm.clicked.connect(self.accept)
         actions.addWidget(cancel)
         actions.addWidget(confirm)
@@ -1605,11 +1644,13 @@ class UploadDatasetDialog(QDialog):
         overlay.setGeometry(host.rect())
         overlay.show()
         overlay.raise_()
-        origin = self.main_window.mapToGlobal(QPoint(0, 0))
-        self.move(
-            origin.x() + (self.main_window.width() - self.width()) // 2,
-            origin.y() + (self.main_window.height() - self.height()) // 2,
-        )
+        bounds = self.available_geometry
+        parent_center = self.main_window.frameGeometry().center()
+        left = parent_center.x() - self.width() // 2
+        top = parent_center.y() - self.height() // 2
+        left = max(bounds.left() + 16, min(left, bounds.right() - self.width() + 1 - 16))
+        top = max(bounds.top() + 16, min(top, bounds.bottom() - self.height() + 1 - 16))
+        self.move(left, top)
         result = self.exec()
         overlay.hide()
         overlay.deleteLater()
@@ -10360,8 +10401,8 @@ class AboutPage(QWidget):
         add_card(0, 0, "Pengembang", "Abdul Muhis\nSains Data, UIN K.H. Abdurrahman Wahid Pekalongan")
         add_card(
             0, 1, "Copyright",
-            "© 2026 Dataset Research.\n"
-            "Contoh teks hak cipta ini hanya untuk pratinjau tampilan.",
+            "© 2026 UIN HIJAU v5.\n"
+            "Teks sementara untuk pratinjau tampilan.",
         )
         add_card(
             1, 0, "Data dan privasi",
@@ -10375,6 +10416,46 @@ class AboutPage(QWidget):
             "research landscape dan gap, serta laporan penelitian.",
         )
         root.addStretch()
+
+
+class CopyrightPage(QWidget):
+    """Preview-only copyright details for the team named in the top bar."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(28, 24, 28, 28)
+        root.setSpacing(16)
+
+        heading = QLabel("Copyright")
+        heading.setObjectName("aboutPageTitle")
+        root.addWidget(heading)
+
+        subtitle = QLabel("Informasi hak cipta untuk pratinjau aplikasi.")
+        subtitle.setObjectName("aboutPageSubtitle")
+        subtitle.setWordWrap(True)
+        root.addWidget(subtitle)
+
+        card = QFrame()
+        card.setObjectName("aboutInfoCard")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(18, 16, 18, 18)
+        card_layout.setSpacing(8)
+
+        card_title = QLabel("Hak Cipta")
+        card_title.setObjectName("aboutCardTitle")
+        card_layout.addWidget(card_title)
+
+        copyright_text = QLabel(
+            "© 2026 UIN HIJAU v5.\n"
+            "Teks sementara untuk pratinjau tampilan."
+        )
+        copyright_text.setObjectName("aboutBody")
+        copyright_text.setWordWrap(True)
+        card_layout.addWidget(copyright_text)
+        card_layout.addStretch(1)
+        root.addWidget(card)
+        root.addStretch(1)
 
 
 class MainWindow(QMainWindow):
@@ -10669,6 +10750,7 @@ class MainWindow(QMainWindow):
         )
         self.report_tool_page = ResearchReportToolPage(self)
         self.about_page = AboutPage()
+        self.copyright_page = CopyrightPage()
 
         self.pages = {
             "dashboard": self.dashboard,
@@ -10683,6 +10765,7 @@ class MainWindow(QMainWindow):
             "gap": self.gap_tool_page,
             "report": self.report_tool_page,
             "about": self.about_page,
+            "copyright": self.copyright_page,
         }
 
         for page in self.pages.values():
@@ -10702,6 +10785,7 @@ class MainWindow(QMainWindow):
             "gap": "Research Gap",
             "report": "Research Report",
             "about": "About",
+            "copyright": "Copyright",
         }
 
         for widget in (root, content, self.page_stack, self.datasets_page, self.datasets_tabs, self.datasets_tab_pages):
@@ -10869,21 +10953,29 @@ class MainWindow(QMainWindow):
         about = QPushButton("About")
         about.setObjectName("topbarLink")
         about.setIcon(QIcon(str(_resource_path("assets/icons/about.svg"))))
-        about.setProperty("active", True)
+        about.setProperty("active", False)
         about.clicked.connect(self.open_about)
         layout.addWidget(about)
-        for label, icon_name in (("Copyright", "copyright.svg"), ("Help", "help.svg")):
+        self.topbar_links = {"about": about}
+        for key, label, icon_name in (
+            ("copyright", "Copyright", "copyright.svg"),
+            ("help", "Help", "help.svg"),
+        ):
             link = QPushButton(label)
             link.setObjectName("topbarLink")
             link.setIcon(QIcon(str(_resource_path(Path("assets") / "icons" / icon_name))))
             link.setFlat(True)
+            link.setProperty("active", False)
+            self.topbar_links[key] = link
+            if key == "copyright":
+                link.clicked.connect(self.open_copyright)
             layout.addWidget(link)
         divider = QFrame()
         divider.setObjectName("topbarDivider")
         divider.setFixedSize(1, 34)
         layout.addSpacing(10)
         layout.addWidget(divider)
-        version = QLabel("2026 Dataset Research v4.0.0")
+        version = QLabel("2026 UIN HIJAU v5")
         version.setObjectName("topbarVersion")
         layout.addSpacing(18)
         layout.addWidget(version)
@@ -10918,6 +11010,15 @@ class MainWindow(QMainWindow):
         self.page_stack.setCurrentWidget(page)
         self.page_title.setText(self._page_titles[key])
         self.set_active_button(key)
+        self._set_topbar_active(key)
+
+    def _set_topbar_active(self, page_key):
+        active_link = page_key if page_key in ("about", "copyright") else None
+        for key, link in self.topbar_links.items():
+            link.setProperty("active", key == active_link)
+            link.style().unpolish(link)
+            link.style().polish(link)
+            link.update()
 
     def open_dashboard(self):
         self._show_page("dashboard")
@@ -11008,6 +11109,9 @@ class MainWindow(QMainWindow):
 
     def open_about(self):
         self._show_page("about")
+
+    def open_copyright(self):
+        self._show_page("copyright")
 
     def _current_filename(self):
         if self.current_project_id is not None:
