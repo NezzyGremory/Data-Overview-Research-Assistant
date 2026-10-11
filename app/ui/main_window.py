@@ -1942,11 +1942,8 @@ class AnalysisPage(QWidget):
 
         root_layout = QVBoxLayout(self)
 
-        root_layout.setContentsMargins(
-            20, 18, 20, 18
-        )
-
-        root_layout.setSpacing(12)
+        root_layout.setContentsMargins(36, 29, 28, 16)
+        root_layout.setSpacing(18)
 
         # =================================================
         # HEADER
@@ -1970,7 +1967,7 @@ class AnalysisPage(QWidget):
         )
 
         subtitle.setObjectName(
-            "pageSubtitle"
+            "analysisSubtitle"
         )
 
         subtitle.setWordWrap(True)
@@ -1978,23 +1975,22 @@ class AnalysisPage(QWidget):
         title_layout.addWidget(title)
         title_layout.addWidget(subtitle)
 
-        header_layout.addLayout(
-            title_layout
-        )
+        header_layout.addLayout(title_layout, 1)
 
-        header_layout.addStretch()
-
-        self.analyze_button = QPushButton(
-            "Run Analysis"
-        )
+        self.analyze_button = QPushButton("Run Analysis")
 
         self.analyze_button.setObjectName(
             "primaryButton"
         )
+        self.analyze_button.setProperty("analysisRun", True)
 
         self.analyze_button.setMinimumHeight(
-            42
+            64
         )
+        run_icon = _resource_path("assets/icons/run.svg")
+        if run_icon.exists():
+            self.analyze_button.setIcon(QIcon(str(run_icon)))
+            self.analyze_button.setIconSize(QSize(24, 24))
 
         self.analyze_button.clicked.connect(
             self.run_analysis
@@ -2047,7 +2043,9 @@ class AnalysisPage(QWidget):
         self.readiness_recommendation.setTextFormat(Qt.PlainText)
         self.readiness_recommendation.setWordWrap(True)
         readiness_layout.addWidget(self.readiness_recommendation)
-        root_layout.addWidget(self.readiness_card)
+        # Readiness values continue to update from analyzer results; the Figma
+        # page presents the dataset summary in its banner instead.
+        self.readiness_card.hide()
 
         self._update_readiness()
 
@@ -2055,15 +2053,23 @@ class AnalysisPage(QWidget):
         # DATASET STATUS
         # =================================================
 
-        self.dataset_label = QLabel(
-            "No dataset loaded."
-        )
-
+        self.dataset_label = QFrame()
         self.dataset_label.setObjectName(
             "analysisDatasetBanner"
         )
+        dataset_banner_layout = QHBoxLayout(self.dataset_label)
+        dataset_banner_layout.setContentsMargins(32, 0, 32, 0)
+        dataset_banner_layout.setSpacing(12)
+        self.dataset_name_label = QLabel("No dataset loaded")
+        self.dataset_name_label.setObjectName("analysisDatasetName")
+        self.dataset_metrics_label = QLabel("")
+        self.dataset_metrics_label.setObjectName("analysisDatasetMetrics")
+        dataset_banner_layout.addWidget(self.dataset_name_label)
+        dataset_banner_layout.addStretch(1)
+        dataset_banner_layout.addWidget(self.dataset_metrics_label)
+        apply_card_shadow(self.dataset_label)
 
-        root_layout.insertWidget(1, self.dataset_label)
+        root_layout.addWidget(self.dataset_label)
 
         # =================================================
         # RESULT AREA
@@ -2074,6 +2080,7 @@ class AnalysisPage(QWidget):
         scroll.setWidgetResizable(
             True
         )
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
         scroll.setFrameShape(
             QFrame.NoFrame
@@ -2084,6 +2091,7 @@ class AnalysisPage(QWidget):
         self.result_layout = QVBoxLayout(
             container
         )
+        self.result_layout.setContentsMargins(0, 0, 0, 0)
 
         self.result_layout.setSpacing(
             15
@@ -2344,13 +2352,28 @@ class AnalysisPage(QWidget):
         self._visualization_correlations = correlations
         self._visualization_missing_values = missing_values
 
-        # =================================================
-        # DATASET PROFILING
-        # =================================================
-        self.add_cell_profiling(profile, fingerprint, statistics)
-
-        # Visualisasi memakai dataset aktual dan hasil analyzer di atas.
+        # The first viewport mirrors the Figma analysis dashboard. Existing
+        # detailed result cards follow below it in the scroll area.
         self._build_visualization_panel()
+        overview = QFrame()
+        overview.setObjectName("analysisOverview")
+        overview.setMinimumHeight(682)
+        overview_layout = QHBoxLayout(overview)
+        overview_layout.setContentsMargins(0, 0, 0, 0)
+        overview_layout.setSpacing(16)
+        overview_layout.addWidget(self.visualization_card, 68)
+
+        side_column = QVBoxLayout()
+        side_column.setContentsMargins(0, 0, 0, 0)
+        side_column.setSpacing(18)
+        side_column.addWidget(self._build_fingerprint_card(fingerprint))
+        side_column.addWidget(self._build_quality_summary_card(), 1)
+        overview_layout.addLayout(side_column, 32)
+        self.result_layout.addWidget(overview)
+
+        # Keep the analyzer's detailed result views and their action handlers
+        # available below the Figma overview.
+        self.add_cell_profiling(profile, fingerprint, statistics)
 
         # =================================================
         # DATA QUALITY
@@ -2389,6 +2412,56 @@ class AnalysisPage(QWidget):
             id(self.main_window.current_dataset),
         )
 
+    def _build_fingerprint_card(self, fingerprint):
+        card = QFrame()
+        card.setObjectName("analysisFingerprintCard")
+        card.setMinimumHeight(162)
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(6)
+
+        title = QLabel("Sidik jari dataset")
+        title.setObjectName("analysisPanelTitle")
+        layout.addWidget(title)
+        algorithm = QLabel("SHA-256")
+        algorithm.setObjectName("analysisPanelSubtitle")
+        layout.addWidget(algorithm)
+
+        hash_value = fingerprint.get("fingerprint") if isinstance(fingerprint, dict) else ""
+        value = QLabel(f"{hash_value[:32]}.." if hash_value else "Belum tersedia")
+        value.setObjectName("analysisFingerprintValue")
+        value.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        value.setToolTip(str(hash_value or ""))
+        layout.addWidget(value)
+        apply_card_shadow(card)
+        return card
+
+    def _build_quality_summary_card(self):
+        card = QFrame()
+        card.setObjectName("analysisQualitySummaryCard")
+        card.setMinimumHeight(500)
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(18, 16, 18, 18)
+        layout.setSpacing(8)
+
+        title = QLabel("Kualitas data")
+        title.setObjectName("analysisPanelTitle")
+        layout.addWidget(title)
+        subtitle = QLabel("Temuan pada nilai kosong, duplikasi, dan outliers")
+        subtitle.setObjectName("analysisPanelSubtitle")
+        subtitle.setWordWrap(True)
+        layout.addWidget(subtitle)
+        layout.addSpacing(2)
+
+        for object_name in ("analysisQualityCritical", "analysisQualityWarning", "analysisQualityGood"):
+            indicator = QFrame()
+            indicator.setObjectName(object_name)
+            indicator.setMinimumHeight(92)
+            layout.addWidget(indicator)
+        layout.addStretch(1)
+        apply_card_shadow(card)
+        return card
+
     # =====================================================
     # VISUALIZATION
     # =====================================================
@@ -2399,16 +2472,19 @@ class AnalysisPage(QWidget):
     def _build_visualization_panel(self):
         card = QFrame()
         card.setObjectName("contentCard")
+        card.setMinimumHeight(682)
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(22, 20, 22, 20)
+        layout.setContentsMargins(32, 24, 32, 20)
         layout.setSpacing(12)
 
         title = QLabel("Visualisasi Data")
-        title.setObjectName("sectionTitle")
+        title.setObjectName("analysisVisualizationTitle")
         layout.addWidget(title)
+        layout.addSpacing(14)
 
         controls = QHBoxLayout()
         self.chart_type = QComboBox()
+        self.chart_type.setObjectName("analysisControlSelect")
         self.chart_type.addItem("Histogram", "histogram")
         self.chart_type.addItem("Diagram batang", "bar")
         self.chart_type.addItem("Box plot", "box")
@@ -2417,29 +2493,37 @@ class AnalysisPage(QWidget):
         self.chart_type.currentIndexChanged.connect(self._update_visualization_options)
 
         self.chart_column = QComboBox()
+        self.chart_column.setObjectName("analysisControlSelect")
         self.chart_column.currentIndexChanged.connect(self._draw_visualization)
         self.chart_type.currentIndexChanged.connect(self._draw_visualization)
 
-        controls.addWidget(QLabel("Jenis grafik"))
+        chart_type_label = QLabel("Jenis Grafik")
+        chart_type_label.setObjectName("analysisControlLabel")
+        controls.addWidget(chart_type_label)
         controls.addWidget(self.chart_type, 1)
-        controls.addWidget(QLabel("Kolom"))
+        column_label = QLabel("Kolom")
+        column_label.setObjectName("analysisControlLabel")
+        controls.addWidget(column_label)
         controls.addWidget(self.chart_column, 1)
         layout.addLayout(controls)
+        layout.addSpacing(24)
 
         self.chart_message = QLabel("Jalankan analisis untuk melihat visualisasi.")
-        self.chart_message.setObjectName("pageSubtitle")
+        self.chart_message.setObjectName("analysisChartMessage")
         self.chart_message.setAlignment(Qt.AlignCenter)
         self.chart_message.setMinimumHeight(250)
         layout.addWidget(self.chart_message)
 
         self.chart_figure = Figure(figsize=(8, 4), tight_layout=True)
         self.chart_canvas = FigureCanvasQTAgg(self.chart_figure)
-        self.chart_canvas.setMinimumHeight(300)
-        self.chart_canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.chart_canvas.setObjectName("chartCanvas")
+        self.chart_canvas.setMinimumHeight(440)
+        self.chart_canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.chart_canvas.hide()
         layout.addWidget(self.chart_canvas)
 
-        self.result_layout.addWidget(card)
+        apply_card_shadow(card)
+        self.visualization_card = card
         self._update_visualization_options()
 
     @staticmethod
@@ -2462,10 +2546,19 @@ class AnalysisPage(QWidget):
         if not hasattr(self, "chart_type"):
             return
         chart_type = self.chart_type.currentData()
-        columns = self._chart_columns(self._visualization_dataframe, chart_type)
+        columns = [str(column) for column in self._chart_columns(self._visualization_dataframe, chart_type)]
+        current_column = self.chart_column.currentText()
         self.chart_column.blockSignals(True)
         self.chart_column.clear()
-        self.chart_column.addItems([str(column) for column in columns])
+        self.chart_column.addItems(columns)
+        preferred_column = current_column
+        if preferred_column not in columns:
+            preferred_column = next(
+                (column for column in columns if column.casefold() == "age"),
+                columns[0] if columns else "",
+            )
+        if preferred_column:
+            self.chart_column.setCurrentText(preferred_column)
         self.chart_column.setEnabled(bool(columns))
         self.chart_column.blockSignals(False)
         self._draw_visualization()
@@ -2499,8 +2592,19 @@ class AnalysisPage(QWidget):
                 if len(values) < 2 or values.nunique() < 2:
                     self._show_chart_message("Kolom ini belum memiliki variasi untuk histogram.")
                     return
-                axis.hist(values, bins="auto", color="#0D99FF", edgecolor="white")
-                axis.set(title=f"Distribusi {column_name}", xlabel=column_name, ylabel="Jumlah")
+                theme = getattr(self.main_window, "_theme_tokens", {})
+                chart_blue = theme.get("chart-blue", "#0d99ff")
+                chart_grid = theme.get("chart-grid", "#e5e5e5")
+                chart_text = theme.get("chart-text", "#564e4e")
+                axis.hist(values, bins="auto", color=chart_blue, edgecolor="white", linewidth=0.7)
+                axis.set_title(f"Distribusi {column_name}", fontsize=12, color=chart_text, pad=12)
+                axis.set_xlabel("")
+                axis.set_ylabel("")
+                axis.set_axisbelow(True)
+                axis.grid(axis="y", color=chart_grid, linewidth=0.8)
+                for spine in axis.spines.values():
+                    spine.set_visible(False)
+                axis.tick_params(axis="both", colors=chart_text, labelsize=10, length=0, pad=8)
             elif chart_type == "box":
                 if values.empty:
                     self._show_chart_message("Tidak ada nilai untuk ditampilkan pada box plot.")
@@ -2897,10 +3001,9 @@ class AnalysisPage(QWidget):
         filename
     ):
 
-        self.dataset_label.setText(
-            f"<b>{filename}</b> — "
-            f"{len(dataframe):,} rows × "
-            f"{len(dataframe.columns):,} columns"
+        self.dataset_name_label.setText(str(filename))
+        self.dataset_metrics_label.setText(
+            f"{len(dataframe):,} rows x {len(dataframe.columns):,} columns"
         )
 
         result = getattr(self.main_window, "analysis_result", {})
@@ -3111,13 +3214,6 @@ class AnalysisPage(QWidget):
 
             p_table.setFixedHeight(175)
             layout.addWidget(p_table)
-
-        # Fingerprint hash if available
-        fp_hash = fingerprint.get("fingerprint") if isinstance(fingerprint, dict) else None
-        if fp_hash:
-            fp_lbl = QLabel(f"<span style='color: #64748B;'>Sidik jari dataset (SHA-256):</span> <code style='color: #475569;'>{fp_hash[:24]}...</code>")
-            fp_lbl.setStyleSheet("font-size: 11px;")
-            layout.addWidget(fp_lbl)
 
         self.result_layout.addWidget(card)
 
