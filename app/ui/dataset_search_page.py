@@ -170,7 +170,7 @@ class DatasetSearchPage(QWidget):
         subtitle.setObjectName("datasetSearchSubtitle")
         subtitle.setWordWrap(True)
         subtitle.setMinimumWidth(0)
-        subtitle.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        subtitle.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
 
         body.addWidget(title)
         subtitle.setTextFormat(Qt.RichText)
@@ -259,7 +259,7 @@ class DatasetSearchPage(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        width = event.size().width()
+        width = self.scroll.viewport().width()
         stacked_controls = width < 900
         self.search_controls_layout.setDirection(
             QBoxLayout.TopToBottom if stacked_controls else QBoxLayout.LeftToRight
@@ -267,7 +267,9 @@ class DatasetSearchPage(QWidget):
         self.search_input.setMinimumHeight(50 if stacked_controls else 66)
         self.source_combo.setMinimumHeight(50 if stacked_controls else 66)
         self.search_button.setMinimumHeight(50 if stacked_controls else 66)
-        direction = QBoxLayout.TopToBottom if width < 1000 else QBoxLayout.LeftToRight
+        # Two result cards contain long metadata and action labels. Keep one
+        # column until the actual scroll viewport is wide enough for both.
+        direction = QBoxLayout.TopToBottom if width < 1500 else QBoxLayout.LeftToRight
         for row in self._result_rows:
             row.layout().setDirection(direction)
 
@@ -346,11 +348,13 @@ class DatasetSearchPage(QWidget):
             row_layout = QHBoxLayout(row)
             row_layout.setDirection(
                 QBoxLayout.TopToBottom
-                if self.width() < 1000
+                if self.scroll.viewport().width() < 1500
                 else QBoxLayout.LeftToRight
             )
             row_layout.setContentsMargins(0, 0, 0, 0)
             row_layout.setSpacing(12)
+            row.setMinimumWidth(0)
+            row.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
             row_layout.addWidget(self._build_result_card(self.results[start]), 1)
             if start + 1 < len(self.results):
                 row_layout.addWidget(self._build_result_card(self.results[start + 1]), 1)
@@ -363,6 +367,8 @@ class DatasetSearchPage(QWidget):
         card = QFrame()
         card.setObjectName("datasetResultCard")
         card.setMinimumHeight(370)
+        card.setMinimumWidth(0)
+        card.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         apply_card_shadow(card)
 
         layout = QVBoxLayout(card)
@@ -376,6 +382,8 @@ class DatasetSearchPage(QWidget):
         title = QLabel(result.title)
         title.setObjectName("datasetResultTitle")
         title.setWordWrap(True)
+        title.setMinimumWidth(0)
+        title.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         header_row.addWidget(title, 1)
 
         source_badge = QLabel(f" {result.source_label} ")
@@ -387,10 +395,15 @@ class DatasetSearchPage(QWidget):
         clean_repo = result.dataset_id.replace("kaggle:", "")
         repo_label = QLabel(f"ID: {clean_repo}")
         repo_label.setObjectName("cardDescription")
+        repo_label.setWordWrap(True)
+        repo_label.setMinimumWidth(0)
+        repo_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
 
         description = QLabel(result.description or "No dataset description available.")
         description.setObjectName("cardDescription")
         description.setWordWrap(True)
+        description.setMinimumWidth(0)
+        description.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
 
         explanation = QLabel(
             "Why it matches: " + (
@@ -400,6 +413,8 @@ class DatasetSearchPage(QWidget):
         )
         explanation.setObjectName("cardDescription")
         explanation.setWordWrap(True)
+        explanation.setMinimumWidth(0)
+        explanation.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
 
         meta_parts = [
             f"Source: {result.source_label}",
@@ -412,6 +427,8 @@ class DatasetSearchPage(QWidget):
         meta = QLabel("  |  ".join(meta_parts))
         meta.setObjectName("cardDescription")
         meta.setWordWrap(True)
+        meta.setMinimumWidth(0)
+        meta.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
 
         layout.addWidget(repo_label)
         layout.addWidget(description)
@@ -438,6 +455,7 @@ class DatasetSearchPage(QWidget):
             combo = QComboBox()
             combo.setObjectName("datasetFileSelect")
             combo.setMinimumHeight(54)
+            combo.setMinimumWidth(0)
             for file in files[:12]:
                 combo.addItem(
                     f"{file.filename}  ({file.display_size})",
