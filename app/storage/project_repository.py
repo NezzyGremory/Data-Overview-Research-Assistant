@@ -210,6 +210,7 @@ class ProjectRepository:
                 project_id,
             ),
         )
+        return True
 
     def save_workflow_section(
         self,
@@ -270,7 +271,7 @@ class ProjectRepository:
     def delete_project(
         self,
         project_id: int,
-    ) -> None:
+    ) -> bool:
 
         self.database.execute(
             """
@@ -279,6 +280,7 @@ class ProjectRepository:
             """,
             (project_id,),
         )
+        return True
 
     # ============================================================
     # RESEARCH RESULT
@@ -671,6 +673,8 @@ class ProjectRepository:
                 source,
                 external_id,
                 keywords_json,
+                issn_json,
+                sinta_screening_json,
                 relevance_score,
                 score_breakdown_json,
                 reasons_json,
@@ -679,7 +683,7 @@ class ProjectRepository:
             )
             VALUES (
                 ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                ?, ?, ?, ?, ?, ?, ?, ?
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
             )
             """,
             (
@@ -708,6 +712,8 @@ class ProjectRepository:
                         [],
                     )
                 ),
+                self._json(paper.get("issn", [])),
+                self._json(paper.get("sinta_screening", {})),
                 paper.get(
                     "relevance_score"
                 ),
@@ -751,6 +757,8 @@ class ProjectRepository:
                 source,
                 external_id,
                 keywords_json,
+                issn_json,
+                sinta_screening_json,
                 relevance_score,
                 score_breakdown_json,
                 reasons_json,
@@ -800,6 +808,11 @@ class ProjectRepository:
                         row["keywords_json"],
                         [],
                     ),
+                    "issn": self._from_json(row["issn_json"], []),
+                    "sinta_screening": self._from_json(
+                        row["sinta_screening_json"],
+                        {},
+                    ),
                     "relevance_score": row[
                         "relevance_score"
                     ],
@@ -846,6 +859,8 @@ class ProjectRepository:
                 source,
                 external_id,
                 keywords_json,
+                issn_json,
+                sinta_screening_json,
                 relevance_score,
                 score_breakdown_json,
                 reasons_json,
@@ -884,6 +899,11 @@ class ProjectRepository:
             "keywords": self._from_json(
                 row["keywords_json"],
                 [],
+            ),
+            "issn": self._from_json(row["issn_json"], []),
+            "sinta_screening": self._from_json(
+                row["sinta_screening_json"],
+                {},
             ),
             "relevance_score": row[
                 "relevance_score"
@@ -1000,3 +1020,209 @@ class ProjectRepository:
             return 0
 
         return int(row["count"])
+
+    # ============================================================
+    # JOURNAL SCREENING & SINTA PERSISTENCE
+    # ============================================================
+
+    def save_journal_screening(
+        self,
+        paper_key: str,
+        screening_data: dict[str, Any],
+        doi: str | None = None,
+    ) -> None:
+        """Menyimpan hasil screening akreditasi jurnal ke SQLite."""
+        if not paper_key and not doi:
+            return
+
+        doi_val = (doi or "").strip().lower() or None
+        key_val = (paper_key or "").strip().lower() or None
+        status = screening_data.get("status") or "UNVERIFIED"
+        rank = screening_data.get("rank")
+        journal_name = screening_data.get("journal_name") or screening_data.get("journal")
+        issn_matched = screening_data.get("issn_matched")
+        period_start = screening_data.get("period_start")
+        period_end = screening_data.get("period_end")
+        period_confirmed = 1 if screening_data.get("period_confirmed") else 0
+        checked_for_year = screening_data.get("checked_for_year")
+        verification_source = screening_data.get("verification_source") or "Direktori Resmi SINTA"
+        source_url = screening_data.get("source_url")
+        is_ambiguous = 1 if screening_data.get("is_ambiguous") else 0
+        ambiguity_reason = screening_data.get("ambiguity_reason") or ""
+        notes = screening_data.get("notes") or ""
+        payload = self._json(screening_data)
+
+        # Cek apakah sudah ada record berdasarkan DOI atau paper_key
+        existing = None
+        if doi_val:
+            existing = self.database.fetch_one(
+                "SELECT id FROM journal_screening WHERE doi = ?",
+                (doi_val,),
+            )
+        if not existing and key_val:
+            existing = self.database.fetch_one(
+                "SELECT id FROM journal_screening WHERE paper_key = ?",
+                (key_val,),
+            )
+
+        if existing:
+            self.database.execute(
+                """
+                UPDATE journal_screening
+                SET
+                    doi = coalesce(?, doi),
+                    paper_key = coalesce(?, paper_key),
+                    journal_name = ?,
+                    issn_matched = ?,
+                    rank = ?,
+                    status = ?,
+                    period_start = ?,
+                    period_end = ?,
+                    period_confirmed = ?,
+                    checked_for_year = ?,
+                    verification_source = ?,
+                    source_url = ?,
+                    is_ambiguous = ?,
+                    ambiguity_reason = ?,
+                    notes = ?,
+                    screening_json = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (
+                    doi_val,
+                    key_val,
+                    journal_name,
+                    issn_matched,
+                    rank,
+                    status,
+                    period_start,
+                    period_end,
+                    period_confirmed,
+                    checked_for_year,
+                    verification_source,
+                    source_url,
+                    is_ambiguous,
+                    ambiguity_reason,
+                    notes,
+                    payload,
+                    existing["id"],
+                ),
+            )
+        else:
+            self.database.execute(
+                """
+                INSERT INTO journal_screening (
+                    doi,
+                    paper_key,
+                    journal_name,
+                    issn_matched,
+                    rank,
+                    status,
+                    period_start,
+                    period_end,
+                    period_confirmed,
+                    checked_for_year,
+                    verification_source,
+                    source_url,
+                    is_ambiguous,
+                    ambiguity_reason,
+                    notes,
+                    screening_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    doi_val,
+                    key_val,
+                    journal_name,
+                    issn_matched,
+                    rank,
+                    status,
+                    period_start,
+                    period_end,
+                    period_confirmed,
+                    checked_for_year,
+                    verification_source,
+                    source_url,
+                    is_ambiguous,
+                    ambiguity_reason,
+                    notes,
+                    payload,
+                ),
+            )
+
+    def get_journal_screening(
+        self,
+        doi: str | None = None,
+        paper_key: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Mengambil hasil screening jurnal tersimpan."""
+        row = None
+        if doi:
+            row = self.database.fetch_one(
+                """
+                SELECT * FROM journal_screening
+                WHERE doi = ?
+                ORDER BY updated_at DESC LIMIT 1
+                """,
+                (doi.strip().lower(),),
+            )
+        if not row and paper_key:
+            row = self.database.fetch_one(
+                """
+                SELECT * FROM journal_screening
+                WHERE paper_key = ?
+                ORDER BY updated_at DESC LIMIT 1
+                """,
+                (paper_key.strip().lower(),),
+            )
+        if not row:
+            return None
+
+        screening_dict = self._from_json(row["screening_json"], {})
+        if not screening_dict:
+            screening_dict = {
+                "status": row["status"],
+                "rank": row["rank"],
+                "journal_name": row["journal_name"],
+                "issn_matched": row["issn_matched"],
+                "period_start": row["period_start"],
+                "period_end": row["period_end"],
+                "period_confirmed": bool(row["period_confirmed"]),
+                "checked_for_year": row["checked_for_year"],
+                "verification_source": row["verification_source"],
+                "source_url": row["source_url"],
+                "is_ambiguous": bool(row["is_ambiguous"]),
+                "ambiguity_reason": row["ambiguity_reason"],
+                "notes": row["notes"],
+                "checked_at": row["checked_at"],
+            }
+        return screening_dict
+
+    def list_journal_screenings(self) -> dict[str, dict[str, Any]]:
+        """Mengambil seluruh riwayat screening yang tersimpan (keyed by DOI and paper_key)."""
+        rows = self.database.fetch_all(
+            """
+            SELECT * FROM journal_screening
+            ORDER BY updated_at DESC
+            """
+        )
+        results: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            data = self._from_json(row["screening_json"], {})
+            if not data:
+                data = {
+                    "status": row["status"],
+                    "rank": row["rank"],
+                    "journal_name": row["journal_name"],
+                    "issn_matched": row["issn_matched"],
+                    "period_confirmed": bool(row["period_confirmed"]),
+                    "checked_for_year": row["checked_for_year"],
+                    "source_url": row["source_url"],
+                }
+            if row["doi"]:
+                results[f"doi:{row['doi']}"] = data
+            if row["paper_key"]:
+                results[f"key:{row['paper_key']}"] = data
+        return results

@@ -87,6 +87,25 @@ def _resource_path(relative_path: str | Path) -> Path:
     return Path(__file__).resolve().parent / relative
 
 
+def _sinta_ui_text(value: Any) -> str:
+    """Avoid exposing raw transport wording in SINTA-facing UI text."""
+    text = str(value or "")
+    text = re.sub(r"\bkegagalan\s+pencarian\b", "pemeriksaan yang belum tuntas", text, flags=re.IGNORECASE)
+    return re.sub(r"\bgagal\b", "belum berhasil", text, flags=re.IGNORECASE).strip()
+
+
+def _sinta_ui_note(screening: Dict[str, Any] | None) -> str:
+    """Turn internal SINTA lookup details into calm, user-facing guidance."""
+    screening = screening if isinstance(screening, dict) else {}
+    lookup_status = str(screening.get("lookup_status") or "").upper()
+    if lookup_status == "FAILED":
+        message = "Direktori SINTA belum dapat diperiksa. Periksa koneksi internet, lalu coba lagi."
+    else:
+        message = _sinta_ui_text(screening.get("notes"))
+    assistive_note = _sinta_ui_text(screening.get("assistive_note"))
+    return " ".join(part for part in (message, assistive_note) if part)
+
+
 class GeminiExplainWorker(QObject):
     """Run Gemini / Hybrid academic explanation off the Qt UI thread."""
 
@@ -221,70 +240,165 @@ class AcademicResearchWorker(QObject):
 
 
 class SintaLookupWorker(QObject):
-    """Look up a journal in the official SINTA directory without blocking Qt."""
+    """Worker background untuk verifikasi jurnal di direktori resmi SINTA tanpa memblokir GUI."""
 
     finished = Signal(int, str, object)
     failed = Signal(str)
 
-    def __init__(self, query: str, issn: str, paper_year: str, paper_index: int, paper_identity: str):
+    def __init__(
+        self,
+        query: str,
+        issn_list: list[str] | str,
+        journal_name: str,
+        paper_year: Any,
+        paper_index: int,
+        paper_identity: str,
+        article_doi: str = "",
+    ):
         super().__init__()
         self.query = query
-        self.issn = re.sub(r"[^0-9Xx]", "", issn).upper()
-        self.paper_year = str(paper_year or "")
+        self.issn_list = issn_list if isinstance(issn_list, list) else ([issn_list] if issn_list else [])
+        self.journal_name = journal_name
+        from app.research.sinta_verifier import SintaVerifier
+        self.paper_year = SintaVerifier.normalize_year(paper_year)
         self.paper_index = paper_index
         self.paper_identity = paper_identity
+        self.article_doi = str(article_doi or "").strip()
 
     def run(self):
+        verifier = None
         try:
-            url = "https://sinta.kemdiktisaintek.go.id/journals/?q=" + quote_plus(self.query)
-            with httpx.Client(
-                timeout=httpx.Timeout(12.0, connect=5.0),
-                follow_redirects=True,
-                headers={"User-Agent": "DatasetResearch/4.0 (journal accreditation lookup)"},
-            ) as client:
-                response = client.get(url)
-                response.raise_for_status()
-            parser = _SintaTextParser()
-            parser.feed(response.text)
-            lines = parser.lines()
-
-            match_index = None
-            if self.issn:
-                for index, line in enumerate(lines):
-                    line_issns = re.findall(r"(?:P-ISSN|E-ISSN)\s*:\s*([0-9Xx-]+)", line, re.I)
-                    normalized = [re.sub(r"[^0-9Xx]", "", value).upper() for value in line_issns]
-                    if self.issn in normalized:
-                        match_index = index
-                        break
-
-            if match_index is None and not self.issn:
-                wanted = re.sub(r"[^a-z0-9]", "", self.query.casefold())
-                for index, line in enumerate(lines):
-                    candidate = re.sub(r"[^a-z0-9]", "", line.casefold())
-                    if len(wanted) >= 8 and candidate == wanted:
-                        match_index = index
-                        break
-
-            if match_index is None:
-                self.finished.emit(self.paper_index, self.paper_identity, {"found": False, "url": url, "query": self.query})
-                return
-
-            # SINTA ranks a journal and publishes the current directory status.
-            # We deliberately leave historical period matching to the user.
-            context = " ".join(lines[match_index:match_index + 8])
-            rank_match = re.search(r"\bS([1-6])\s+Accredited\b", context, re.I)
-            rank = f"S{rank_match.group(1)}" if rank_match else None
-            self.finished.emit(self.paper_index, self.paper_identity, {
-                "found": True,
-                "rank": rank,
-                "journal": lines[max(0, match_index - 3)] if match_index else self.query,
-                "url": url,
-                "query": self.query,
-                "issn_match": bool(self.issn),
-                "paper_year": self.paper_year,
-            })
+            from app.research.sinta_verifier import SintaVerifier
+            verifier = SintaVerifier(timeout=12.0)
+            result = verifier.verify(
+                issn_list=self.issn_list,
+                journal_name=self.journal_name,
+                article_year=self.paper_year,
+                article_doi=self.article_doi,
+            )
+            self.finished.emit(self.paper_index, self.paper_identity, result.to_dict())
         except Exception as error:
             self.failed.emit(str(error))
+        finally:
+            if verifier is not None:
+                verifier.close()
+
+
+class SintaBatchLookupWorker(QObject):
+    """Verify several paper journals without blocking the interface."""
+
+    progress = Signal(int, int, int, str, object)
+    finished = Signal(int)
+    failed = Signal(str)
+
+    def __init__(self, tasks):
+        super().__init__()
+        self.tasks = tasks
+
+    def run(self):
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from app.research.sinta_verifier import SintaVerifier
+
+        total = len(self.tasks)
+
+        # Group journal lookups by any shared normalized ISSN. Fall back to
+        # normalized journal name only when the records have no ISSN.
+        groups = []
+        for task in self.tasks:
+            task_issns = {
+                SintaVerifier.normalize_issn(value)
+                for value in (task.get("issn") or [])
+                if SintaVerifier.normalize_issn(value)
+            }
+            task_name = SintaVerifier.normalize_name(task.get("journal"))
+            matching = []
+            for index, group in enumerate(groups):
+                if task_issns and task_issns.intersection(group["issns"]):
+                    matching.append(index)
+                elif (
+                    task_name
+                    and task_name == group["name"]
+                    and not task_issns
+                    and not group["issns"]
+                ):
+                    matching.append(index)
+
+            if not matching:
+                groups.append({
+                    "tasks": [task],
+                    "issns": set(task_issns),
+                    "name": task_name,
+                    "journal": str(task.get("journal") or "").strip(),
+                })
+                continue
+
+            group = groups[matching[0]]
+            group["tasks"].append(task)
+            group["issns"].update(task_issns)
+            if not group["journal"] and task.get("journal"):
+                group["journal"] = str(task["journal"]).strip()
+            for duplicate_index in reversed(matching[1:]):
+                duplicate = groups.pop(duplicate_index)
+                group["tasks"].extend(duplicate["tasks"])
+                group["issns"].update(duplicate["issns"])
+
+        def lookup_group(group):
+            verifier = SintaVerifier(timeout=8.0)
+            try:
+                result = verifier.verify(
+                    issn_list=sorted(group["issns"]),
+                    journal_name=group["journal"],
+                    article_year=None,
+                ).to_dict()
+            except Exception as error:
+                result = {
+                    "found": False,
+                    "status": "UNVERIFIED",
+                    "lookup_status": "FAILED",
+                    "journal_name": group["journal"],
+                    "notes": f"Gagal memeriksa jurnal: {error}",
+                    "source_url": "https://sinta.kemdiktisaintek.go.id/journals",
+                }
+            return group, result, verifier
+
+        current = 0
+        worker_count = min(3, len(groups)) or 1
+        with ThreadPoolExecutor(max_workers=worker_count) as pool:
+            futures = [pool.submit(lookup_group, group) for group in groups]
+            for future in as_completed(futures):
+                group, base_result, verifier = future.result()
+                try:
+                    for task in group["tasks"]:
+                        try:
+                            if task.get("doi"):
+                                result = verifier.evaluate_article_doi(
+                                    base_result,
+                                    task.get("doi"),
+                                    task.get("year"),
+                                ).to_dict()
+                            else:
+                                result = SintaVerifier.evaluate_for_year(
+                                    base_result, task.get("year")
+                                ).to_dict()
+                        except Exception as error:
+                            result = {
+                                **base_result,
+                                "status": "UNVERIFIED",
+                                "lookup_status": "FAILED",
+                                "checked_for_year": task.get("year"),
+                                "notes": f"Evaluasi artikel dari profil resmi gagal: {error}",
+                            }
+                        current += 1
+                        self.progress.emit(
+                            current,
+                            total,
+                            task["paper_index"],
+                            task["identity"],
+                            result,
+                        )
+                finally:
+                    verifier.close()
+        self.finished.emit(total)
 
 
 class _SintaTextParser(HTMLParser):
@@ -5876,11 +5990,11 @@ class ResearchPage(QWidget):
         layout = QVBoxLayout(
             widget
         )
-        layout.setContentsMargins(14, 12, 14, 12)
-        layout.setSpacing(8)
+        layout.setContentsMargins(16, 10, 16, 10)
+        layout.setSpacing(7)
 
         title = QLabel(
-            "Ranked Academic Papers"
+            "Artikel Akademik Terperingkat"
         )
 
         title.setObjectName(
@@ -5888,7 +6002,7 @@ class ResearchPage(QWidget):
         )
 
         description = QLabel(
-            "Browse ranked results, review their sources, and filter journals by confirmed SINTA status."
+            "Tinjau artikel dan sumbernya, lalu filter jurnal berdasarkan status SINTA yang telah dikonfirmasi."
         )
         description.setObjectName("cardDescription")
 
@@ -5900,44 +6014,60 @@ class ResearchPage(QWidget):
 
         self.paper_search_input = QLineEdit()
         self.paper_search_input.setPlaceholderText(
-            "Search title, author, venue, or ISSN"
+            "Cari judul, penulis, jurnal, ISSN, atau DOI"
         )
         self.paper_search_input.setMinimumHeight(34)
         self.paper_search_input.textChanged.connect(self._apply_paper_filter)
         toolbar.addWidget(self.paper_search_input, 1)
 
-        filter_label = QLabel("SINTA status")
+        filter_label = QLabel("Status SINTA")
         filter_label.setObjectName("cardDescription")
         toolbar.addWidget(filter_label)
 
         self.sinta_filter = QComboBox()
         self.sinta_filter.setMinimumHeight(34)
-        self.sinta_filter.setMinimumWidth(165)
-        self.sinta_filter.addItem("All papers", "ALL")
-        self.sinta_filter.addItem("Needs screening", "UNVERIFIED")
+        self.sinta_filter.setMinimumWidth(185)
+        self.sinta_filter.addItem("Semua Status Akreditasi", "ALL")
         for rank in range(1, 7):
             self.sinta_filter.addItem(f"SINTA {rank}", f"S{rank}")
-        self.sinta_filter.addItem("Not accredited", "NOT_ACCREDITED")
-        self.sinta_filter.addItem("Not listed in SINTA", "NOT_IN_SINTA")
+        self.sinta_filter.addItem("Tidak Terakreditasi", "NOT_ACCREDITED")
+        self.sinta_filter.addItem("Belum Diperiksa", "UNVERIFIED")
+        self.sinta_filter.addItem("Perlu Verifikasi Tahun", "PERIOD_UNVERIFIED")
+        self.sinta_filter.addItem("Kandidat Ambigu", "AMBIGUOUS")
+        self.sinta_filter.addItem("Jurnal Belum Cocok", "NO_MATCH")
+        self.sinta_filter.addItem("Metadata Jurnal Tidak Ada", "NO_METADATA")
+        self.sinta_filter.addItem("Peringkat Tidak Terbaca", "RANK_UNAVAILABLE")
+        self.sinta_filter.addItem("Tidak Ditemukan", "NOT_FOUND")
+        self.sinta_filter.addItem("Perlu Dicoba Lagi", "FAILED")
         self.sinta_filter.currentIndexChanged.connect(self._apply_paper_filter)
         toolbar.addWidget(self.sinta_filter)
 
-        self.paper_count_label = QLabel("0 papers")
+        self.sinta_batch_button = QPushButton("Periksa jurnal belum dicek")
+        self.sinta_batch_button.setObjectName("secondaryButton")
+        self.sinta_batch_button.setMinimumHeight(34)
+        self.sinta_batch_button.setToolTip(
+            "Periksa semua jurnal yang belum memiliki hasil direktori SINTA untuk tahun artikelnya."
+        )
+        self.sinta_batch_button.clicked.connect(self._check_pending_sinta_batch)
+        toolbar.addWidget(self.sinta_batch_button)
+
+        self.paper_count_label = QLabel("0 paper")
         self.paper_count_label.setObjectName("topbarStatus")
         toolbar.addWidget(self.paper_count_label)
 
         self.provider_status_label = QLabel(
-            "Sources: OpenAlex, Crossref, Semantic Scholar, Europe PMC, OpenAIRE; Scopus requires API access."
+            "Sumber: OpenAlex, Crossref, Europe PMC, OpenAIRE, Semantic Scholar; Scopus memerlukan Elsevier API key."
         )
         self.provider_status_label.setObjectName("cardDescription")
         self.provider_status_label.setWordWrap(True)
 
-        self.ucl_discovery_button = QPushButton("Search UCL Discovery")
+        self.ucl_discovery_button = QPushButton("Pencarian Eksternal UCL Discovery")
         self.ucl_discovery_button.setObjectName("secondaryButton")
         self.ucl_discovery_button.setToolTip(
-            "Open the official UCL Discovery repository search in your browser."
+            "Buka pencarian resmi repositori UCL Discovery di browser menggunakan kata kunci riset. "
+            "Hasil UCL tidak ditarik otomatis ke dalam daftar Ranked Papers aplikasi."
         )
-        self.ucl_discovery_button.setMinimumHeight(30)
+        self.ucl_discovery_button.setMinimumHeight(32)
         self.ucl_discovery_button.clicked.connect(
             self._open_ucl_discovery_search
         )
@@ -5952,16 +6082,18 @@ class ResearchPage(QWidget):
         self.paper_table = QTableWidget()
         self.paper_table.setObjectName("rankedPapersTable")
 
-        self.paper_table.setColumnCount(6)
+        self.paper_table.setColumnCount(8)
 
         self.paper_table.setHorizontalHeaderLabels(
             [
-                "Paper",
-                "Year",
-                "Relevance",
-                "Journal",
-                "Source",
-                "SINTA Status",
+                "#",
+                "Judul Artikel",
+                "Tahun",
+                "Jurnal / Venue",
+                "ISSN",
+                "Sumber",
+                "Relevansi",
+                "Status SINTA",
             ]
         )
 
@@ -5982,19 +6114,28 @@ class ResearchPage(QWidget):
             self.paper_table.horizontalHeader()
         )
 
-        header.setSectionResizeMode(
-            0,
-            QHeaderView.Stretch,
-        )
+        header.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        header.setSectionResizeMode(0, QHeaderView.Fixed)
+        self.paper_table.setColumnWidth(0, 38)
+        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.Fixed)
+        self.paper_table.setColumnWidth(2, 58)
+        header.setSectionResizeMode(3, QHeaderView.Fixed)
+        self.paper_table.setColumnWidth(3, 185)
+        header.setSectionResizeMode(4, QHeaderView.Fixed)
+        self.paper_table.setColumnWidth(4, 110)
+        header.setSectionResizeMode(5, QHeaderView.Fixed)
+        self.paper_table.setColumnWidth(5, 100)
+        header.setSectionResizeMode(6, QHeaderView.Fixed)
+        self.paper_table.setColumnWidth(6, 78)
+        header.setSectionResizeMode(7, QHeaderView.Fixed)
+        self.paper_table.setColumnWidth(7, 132)
 
-        for column, width in ((1, 68), (2, 88), (3, 185), (4, 112), (5, 122)):
-            header.setSectionResizeMode(column, QHeaderView.Fixed)
-            self.paper_table.setColumnWidth(column, width)
-        self.paper_table.setMinimumHeight(300)
+        self.paper_table.setMinimumHeight(210)
         self.paper_table.setWordWrap(False)
         self.paper_table.setTextElideMode(Qt.ElideRight)
         self.paper_table.setShowGrid(False)
-        self.paper_table.verticalHeader().setDefaultSectionSize(36)
+        self.paper_table.verticalHeader().setDefaultSectionSize(34)
         self.paper_table.verticalHeader().setVisible(False)
 
         self.paper_table.itemSelectionChanged.connect(
@@ -6006,28 +6147,31 @@ class ResearchPage(QWidget):
         self.paper_detail.setOpenExternalLinks(True)
         self.paper_detail.setReadOnly(True)
         self.paper_detail.setFrameShape(QFrame.NoFrame)
-        self.paper_detail.setMinimumHeight(96)
-        self.paper_detail.setMaximumHeight(136)
+        self.paper_detail.setMinimumHeight(145)
         self.paper_detail.document().setDefaultStyleSheet(
-            "body { font-family: 'Segoe UI'; font-size: 9pt; color: #25364D; } "
-            "h2 { font-size: 11pt; margin: 2px 0 5px; } "
-            "p { margin: 2px 0; } h3 { font-size: 9pt; margin: 4px 0 2px; }"
+            "body { font-family: 'Segoe UI', sans-serif; font-size: 9pt; color: #20324A; line-height: 1.45; } "
+            "h2 { font-size: 11pt; color: #0F172A; margin: 0 0 6px 0; font-weight: 600; } "
+            "p { margin: 3px 0; } "
+            "h3 { font-size: 9.5pt; color: #1E293B; margin: 8px 0 4px; font-weight: bold; } "
+            "ul { margin: 2px 0 6px 16px; padding: 0; } "
+            "li { margin: 2px 0; } "
+            "a { color: #2563EB; text-decoration: none; font-weight: bold; } "
+            "a:hover { text-decoration: underline; }"
         )
 
         self.sinta_screening_panel = QFrame()
         self.sinta_screening_panel.setObjectName("sintaScreeningPanel")
         screening_layout = QVBoxLayout(self.sinta_screening_panel)
-        screening_layout.setContentsMargins(12, 8, 12, 8)
-        screening_layout.setSpacing(4)
+        screening_layout.setContentsMargins(14, 10, 14, 10)
+        screening_layout.setSpacing(6)
 
-        screening_heading = QLabel("Journal accreditation screening")
+        screening_heading = QLabel("Verifikasi Akreditasi Jurnal (SINTA)")
         screening_heading.setObjectName("sectionTitle")
         screening_note = QLabel(
-            "Check the journal in the official SINTA directory. For a rank, verify its accreditation period includes the paper year."
+            "Peringkat diberikan pada jurnal. Gemini dapat membantu mencari profil kandidat; status tetap merujuk pada data resmi SINTA."
         )
         screening_note.setObjectName("cardDescription")
         screening_note.setWordWrap(True)
-        screening_note.setMaximumHeight(34)
         screening_layout.addWidget(screening_heading)
         screening_layout.addWidget(screening_note)
 
@@ -6036,42 +6180,45 @@ class ResearchPage(QWidget):
 
         self.sinta_status_combo = QComboBox()
         self.sinta_status_combo.setToolTip(
-            "Choose the SINTA rank or journal status that applies to this paper's publication year."
+            "Pilih peringkat SINTA atau status jurnal yang berlaku untuk tahun publikasi artikel."
         )
-        self.sinta_status_combo.setMinimumWidth(155)
-        self.sinta_status_combo.addItem("Select after checking period", "UNVERIFIED")
+        self.sinta_status_combo.setMinimumWidth(160)
+        self.sinta_status_combo.addItem("Belum Terverifikasi (Pilih status)", "UNVERIFIED")
         for rank in range(1, 7):
             self.sinta_status_combo.addItem(f"SINTA {rank}", f"S{rank}")
-        self.sinta_status_combo.addItem(
-            "Not accredited for paper year", "NOT_ACCREDITED"
-        )
-        self.sinta_status_combo.addItem(
-            "Outside SINTA / not listed", "NOT_IN_SINTA"
-        )
+        self.sinta_status_combo.addItem("Tidak Terakreditasi", "NOT_ACCREDITED")
+        self.sinta_status_combo.addItem("Tidak Terdaftar di SINTA", "NOT_IN_SINTA")
         self.sinta_status_combo.setMinimumHeight(32)
         self.sinta_status_combo.currentIndexChanged.connect(
             self._update_sinta_save_enabled
         )
         screening_controls.addWidget(self.sinta_status_combo, 1)
 
-        self.check_sinta_button = QPushButton("Check SINTA")
+        self.check_sinta_button = QPushButton("Periksa di SINTA")
         self.check_sinta_button.setObjectName("secondaryButton")
         self.check_sinta_button.setMinimumHeight(32)
-        self.check_sinta_button.setMinimumWidth(100)
+        self.check_sinta_button.setToolTip("Cari jurnal di direktori resmi SINTA berdasarkan ISSN dan nama jurnal")
         self.check_sinta_button.clicked.connect(self._check_sinta_in_app)
         screening_controls.addWidget(self.check_sinta_button)
 
-        self.save_sinta_button = QPushButton("Save status")
+        self.open_sinta_browser_button = QPushButton("Buka di Browser")
+        self.open_sinta_browser_button.setObjectName("secondaryButton")
+        self.open_sinta_browser_button.setMinimumHeight(32)
+        self.open_sinta_browser_button.setToolTip("Buka halaman pencarian resmi SINTA di web browser")
+        self.open_sinta_browser_button.clicked.connect(self._open_sinta_in_browser)
+        screening_controls.addWidget(self.open_sinta_browser_button)
+
+        self.save_sinta_button = QPushButton("Simpan Status")
         self.save_sinta_button.setObjectName("primaryButton")
         self.save_sinta_button.setMinimumHeight(32)
-        self.save_sinta_button.setMinimumWidth(96)
         self.save_sinta_button.setEnabled(False)
+        self.save_sinta_button.setToolTip("Simpan status akreditasi yang telah dikonfirmasi ke database lokal")
         self.save_sinta_button.clicked.connect(self._save_sinta_screening)
         screening_controls.addWidget(self.save_sinta_button)
         screening_layout.addLayout(screening_controls)
 
         self.sinta_period_confirmed = QCheckBox(
-            "I verified this journal status for the paper year"
+            "Saya telah memverifikasi masa berlaku akreditasi jurnal untuk tahun terbit artikel ini"
         )
         self.sinta_period_confirmed.setObjectName("sintaPeriodConfirmed")
         self.sinta_period_confirmed.toggled.connect(self._update_sinta_save_enabled)
@@ -6085,21 +6232,21 @@ class ResearchPage(QWidget):
         screening_layout.addWidget(self.sinta_lookup_progress)
 
         self.sinta_lookup_message = QLabel(
-            "Select a paper and check its journal using ISSN or journal title."
+            "Pilih artikel, lalu periksa jurnal pada direktori resmi SINTA."
         )
-        self.sinta_lookup_message.setObjectName("cardDescription")
+        self.sinta_lookup_message.setObjectName("sintaLookupMessage")
         self.sinta_lookup_message.setWordWrap(True)
-        self.sinta_lookup_message.setMaximumHeight(34)
+        self.sinta_lookup_message.setMinimumHeight(32)
         screening_layout.addWidget(self.sinta_lookup_message)
 
         selection_panel = QFrame()
         selection_panel.setObjectName("paperSelectionPanel")
         selection_layout = QHBoxLayout(selection_panel)
-        selection_layout.setContentsMargins(8, 6, 8, 6)
-        selection_layout.setSpacing(10)
+        selection_layout.setContentsMargins(10, 8, 10, 8)
+        selection_layout.setSpacing(12)
         selection_layout.addWidget(self.paper_detail, 3)
         selection_layout.addWidget(self.sinta_screening_panel, 2)
-        selection_panel.setMaximumHeight(200)
+        selection_panel.setMinimumHeight(190)
 
         layout.addWidget(
             title
@@ -7077,6 +7224,46 @@ class ResearchPage(QWidget):
     ):
         if not isinstance(papers, list):
             papers = []
+
+        # Muat hasil screening akreditasi yang tersimpan di SQLite lokal
+        repo = getattr(self.main_window, "repository", None)
+        if repo is not None:
+            try:
+                saved_screenings = repo.list_journal_screenings()
+                for paper in papers:
+                    if not isinstance(paper, dict):
+                        continue
+                    doi = str(paper.get("doi") or "").strip().lower()
+                    key = self._paper_identity(paper)
+                    saved = None
+                    if doi and f"doi:{doi}" in saved_screenings:
+                        saved = saved_screenings[f"doi:{doi}"]
+                    elif key and f"key:{key}" in saved_screenings:
+                        saved = saved_screenings[f"key:{key}"]
+                    if saved:
+                        existing = paper.get("sinta_screening") or {}
+                        expected_key = self._screening_metadata_key(paper)
+                        saved_key = saved.get("metadata_key")
+                        legacy_matches = (
+                            not saved_key
+                            and bool(saved.get("period_confirmed"))
+                            and str(saved.get("checked_for_year") or "")
+                            == str(paper.get("year") or "")
+                        )
+                        if saved_key == expected_key or legacy_matches:
+                            if not existing.get("period_confirmed"):
+                                paper["sinta_screening"] = {**existing, **saved}
+                    existing = paper.get("sinta_screening")
+                    if isinstance(existing, dict):
+                        stored_key = existing.get("metadata_key")
+                        # Screening results from old parser versions (and legacy
+                        # results without a metadata key) must be rechecked. A
+                        # prior result may belong to a different article DOI.
+                        if stored_key != self._screening_metadata_key(paper):
+                            paper.pop("sinta_screening", None)
+            except Exception as exc:
+                print(f"Warning: gagal memuat riwayat screening dari database: {exc}")
+
         self._all_paper_result_indices = [
             index for index, paper in enumerate(papers) if isinstance(paper, dict)
         ]
@@ -7086,19 +7273,158 @@ class ResearchPage(QWidget):
     @staticmethod
     def _sinta_screening(paper):
         screening = paper.get("sinta_screening", {})
-        return screening if isinstance(screening, dict) else {}
+        if not isinstance(screening, dict):
+            return {}
+        screening = dict(screening)
+        # Legacy states did not separate an explicit empty result from errors.
+        if screening.get("status") == "NOT_IN_SINTA" and not screening.get("lookup_status"):
+            screening["status"] = "UNVERIFIED"
+            screening["lookup_status"] = "LEGACY_UNVERIFIED"
+            screening["notes"] = (
+                "Hasil versi lama tidak membedakan hasil kosong dari kegagalan pencarian. "
+                "Periksa kembali direktori resmi SINTA."
+            )
+        if (
+            screening.get("status") in {f"S{value}" for value in range(1, 7)}
+            and not screening.get("lookup_status")
+        ):
+            # Older app versions stored a rank as if it were verified without
+            # retaining the source or the accreditation-period check. Recheck it.
+            screening["rank"] = screening.get("status")
+            screening["status"] = "UNVERIFIED"
+            screening["lookup_status"] = "LEGACY_UNVERIFIED"
+            screening["period_status"] = "PERIOD_CHECK_REQUIRED"
+            screening["period_confirmed"] = False
+            screening["notes"] = (
+                "Hasil versi lama tidak menyimpan bukti sumber dan masa berlaku SK. "
+                "Jurnal perlu diperiksa ulang sebelum peringkat dianggap terverifikasi."
+            )
+        if (
+            screening.get("status") == "NOT_ACCREDITED"
+            and screening.get("rank")
+            and not screening.get("lookup_status")
+        ):
+            screening["status"] = "UNVERIFIED"
+            screening["lookup_status"] = "PERIOD_UNVERIFIED"
+            screening["period_status"] = "EXPIRED"
+            screening["notes"] = (
+                "Versi lama menyimpulkan status ini dari periode yang tidak mencakup tahun artikel. "
+                "Periksa SK historis sebelum menyimpulkan akreditasi."
+            )
+        return screening
+
+    @staticmethod
+    def _screening_metadata_key(paper):
+        from app.research.sinta_verifier import SintaVerifier
+
+        issn_values = paper.get("issn", [])
+        if isinstance(issn_values, str):
+            issn_values = [issn_values]
+        normalized_issns = sorted({
+            SintaVerifier.normalize_issn(value)
+            for value in issn_values
+            if SintaVerifier.normalize_issn(value)
+        })
+        journal = SintaVerifier.normalize_name(str(paper.get("venue") or ""))
+        year = SintaVerifier.normalize_year(paper.get("year"))
+        doi = SintaVerifier.normalize_doi(str(paper.get("doi") or ""))
+        return (
+            f"sinta-parser:v4|issn:{','.join(normalized_issns)}"
+            f"|journal:{journal}|year:{year or ''}|doi:{doi}"
+        )
 
     @classmethod
     def _sinta_status_label(cls, paper):
-        status = str(cls._sinta_screening(paper).get("status") or "UNVERIFIED")
+        screening = cls._sinta_screening(paper)
+        status = str(screening.get("status") or "UNVERIFIED")
+        lookup_status = str(screening.get("lookup_status") or "UNVERIFIED")
+        if lookup_status == "FAILED":
+            return "Perlu Dicoba Lagi"
+        if lookup_status == "NOT_FOUND" or status == "NOT_IN_SINTA":
+            return "Tidak Ditemukan"
+        if lookup_status == "AMBIGUOUS":
+            return "Kandidat Ambigu"
+        if lookup_status == "PERIOD_UNVERIFIED":
+            rank = str(screening.get("rank") or "")
+            if rank in {f"S{value}" for value in range(1, 7)}:
+                return f"SINTA {rank[1:]}*"
+            return "Perlu Verifikasi Tahun"
+        if lookup_status == "NO_MATCH":
+            return "Jurnal Belum Cocok"
+        if lookup_status == "NO_METADATA":
+            return "ISSN/Jurnal Tidak Ada"
+        if lookup_status == "RANK_UNAVAILABLE":
+            return "Peringkat Tidak Terbaca"
+        if lookup_status == "LEGACY_UNVERIFIED":
+            return "Perlu Diperiksa Ulang"
         labels = {
-            "UNVERIFIED": "Needs screening",
-            "NOT_ACCREDITED": "Not accredited",
-            "NOT_IN_SINTA": "Not listed in SINTA",
+            "UNVERIFIED": "Belum Diperiksa",
+            "NOT_ACCREDITED": "Tidak Terakreditasi",
+            "NOT_IN_SINTA": "Tidak di SINTA",
         }
         if status in {f"S{rank}" for rank in range(1, 7)}:
             return f"SINTA {status[1:]}"
-        return labels.get(status, "Needs screening")
+        return labels.get(status, "Belum Terverifikasi")
+
+    @classmethod
+    def _sinta_table_status_label(cls, paper):
+        label = cls._sinta_status_label(paper)
+        compact_labels = {
+            "Perlu Dicoba Lagi": "Coba Lagi",
+            "Tidak Ditemukan": "Tidak di SINTA",
+            "Kandidat Ambigu": "Ambigu",
+            "Perlu Verifikasi Tahun": "Cek Periode SK",
+            "Jurnal Belum Cocok": "Belum Cocok",
+            "ISSN/Jurnal Tidak Ada": "Data Kurang",
+            "Peringkat Tidak Terbaca": "Rank Tak Ada",
+            "Perlu Diperiksa Ulang": "Cek Ulang",
+            "Belum Diperiksa": "Belum Dicek",
+            "Tidak Terakreditasi": "Tanpa Akreditasi",
+            "Belum Terverifikasi": "Belum Pasti",
+        }
+        return compact_labels.get(label, label)
+
+    @staticmethod
+    def _screening_journal_display_name(paper, screening):
+        candidate = str(screening.get("journal_name") or "").strip()
+        if (
+            not candidate
+            or candidate.startswith(("#", "["))
+            or re.search(r"mynetwork|current accreditation|history accreditation", candidate, re.I)
+        ):
+            candidate = str(paper.get("venue") or "").strip()
+        return candidate or "Nama jurnal belum tersedia"
+
+    @staticmethod
+    def _sinta_lookup_label(value):
+        return {
+            "VERIFIED": "Terverifikasi",
+            "NOT_FOUND": "Tidak ada hasil pada direktori resmi",
+            "NO_MATCH": "Hasil ditemukan, tetapi metadata belum cocok persis",
+            "NO_METADATA": "Data ISSN dan nama jurnal tidak tersedia",
+            "RANK_UNAVAILABLE": "Jurnal cocok, tetapi peringkat tidak terbaca dari sumber",
+            "FAILED": "Belum dapat terhubung ke direktori; coba lagi",
+            "AMBIGUOUS": "Kandidat jurnal perlu ditinjau",
+            "PERIOD_UNVERIFIED": "Periode SK belum terverifikasi",
+            "MANUALLY_CONFIRMED": "Dikonfirmasi manual",
+            "LEGACY_UNVERIFIED": "Hasil lama perlu diperiksa ulang",
+            "UNVERIFIED": "Belum dapat dipastikan",
+        }.get(str(value or "UNVERIFIED"), "Belum dapat dipastikan")
+
+    @classmethod
+    def _matches_sinta_filter(cls, paper, selected_status):
+        if selected_status in {None, "ALL"}:
+            return True
+        screening = cls._sinta_screening(paper)
+        status = str(screening.get("status") or "UNVERIFIED")
+        lookup_status = str(screening.get("lookup_status") or "UNVERIFIED")
+        if selected_status == "UNVERIFIED":
+            return status == "UNVERIFIED" and lookup_status in {"UNVERIFIED", "LEGACY_UNVERIFIED"}
+        if selected_status in {f"S{rank}" for rank in range(1, 7)}:
+            return str(screening.get("rank") or status) == selected_status
+        if selected_status == "NOT_FOUND":
+            return lookup_status == "NOT_FOUND"
+        return status == selected_status or lookup_status == selected_status
 
     def _apply_paper_filter(self, *_):
         papers = getattr(self, "_all_papers", [])
@@ -7108,11 +7434,7 @@ class ResearchPage(QWidget):
         self.filtered_paper_indices = []
 
         for index, paper in zip(result_indices, papers):
-            screening = self._sinta_screening(paper)
-            status = str(screening.get("status") or "UNVERIFIED")
-            if selected_status == "UNVERIFIED" and status != "UNVERIFIED":
-                continue
-            if selected_status not in {None, "ALL", "UNVERIFIED"} and status != selected_status:
+            if not self._matches_sinta_filter(paper, selected_status):
                 continue
 
             authors = paper.get("authors", [])
@@ -7148,23 +7470,22 @@ class ResearchPage(QWidget):
                 continue
             paper = papers[paper_index]
 
-            title = paper.get(
-                "title",
-                "Untitled",
-            )
+            title = str(paper.get("title") or "Untitled")
+            year = str(paper.get("year") or "-")
+            relevance = paper.get("relevance_score")
 
-            year = paper.get(
-                "year"
-            )
-
-            relevance = paper.get(
-                "relevance_score"
-            )
-
-            sinta_label = self._sinta_status_label(paper)
             venue = str(paper.get("venue") or paper.get("source") or "-")
-            if len(venue) > 42:
-                venue = venue[:39].rstrip() + "..."
+            venue_display = venue
+            if len(venue_display) > 38:
+                venue_display = venue_display[:35].rstrip() + "..."
+
+            issn_list = paper.get("issn", [])
+            if isinstance(issn_list, str):
+                issn_list = [issn_list]
+            issn_clean = [str(i).strip() for i in issn_list if str(i).strip()]
+            issn_str = issn_clean[0] if issn_clean else "-"
+            issn_tooltip = ", ".join(issn_clean) if len(issn_clean) > 1 else (issn_str if issn_str != "-" else "ISSN tidak tersedia")
+
             sources = [
                 source.strip()
                 for source in str(paper.get("source") or "").split(",")
@@ -7174,69 +7495,76 @@ class ResearchPage(QWidget):
             if len(sources) > 1:
                 source_label += f" +{len(sources) - 1}"
 
+            sinta_label = self._sinta_table_status_label(paper)
+            full_sinta_label = self._sinta_status_label(paper)
+
             values = [
-                str(title),
-                str(year or "-"),
-                self._format_score(
-                    relevance
-                ),
-                venue,
+                str(row + 1),
+                title,
+                year,
+                venue_display,
+                issn_str,
                 source_label,
+                self._format_score(relevance),
                 sinta_label,
             ]
 
-            for column, value in enumerate(
-                values
-            ):
-
-                item = QTableWidgetItem(
-                    value
-                )
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(value)
 
                 if column == 0:
                     item.setData(Qt.UserRole, paper_index)
-
-                if column == 3:
-                    item.setToolTip(str(paper.get("venue") or paper.get("source") or "Venue unavailable"))
-
-                if column == 4:
-                    item.setToolTip(", ".join(sources) or "Source unavailable")
-
-                if column in {1, 2, 5}:
+                    item.setTextAlignment(Qt.AlignCenter)
+                elif column == 1:
+                    item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+                    item.setToolTip(title)
+                elif column in {2, 4, 5, 6, 7}:
                     item.setTextAlignment(Qt.AlignCenter)
 
-                if column == 5:
+                if column == 3:
+                    item.setToolTip(venue)
+                elif column == 4:
+                    item.setToolTip(issn_tooltip)
+                elif column == 5:
+                    item.setToolTip(", ".join(sources) or "Sumber tidak tersedia")
+                elif column == 7:
                     screening = self._sinta_screening(paper)
                     status = str(screening.get("status") or "UNVERIFIED")
                     if status in {f"S{rank}" for rank in range(1, 7)}:
-                        item.setForeground(QColor("#167A68"))
-                        item.setBackground(QColor("#EAF6F2"))
+                        item.setForeground(QColor("#0F766E"))
+                        item.setBackground(QColor("#F0FDF4"))
                     elif status == "UNVERIFIED":
-                        item.setForeground(QColor("#8A671D"))
-                        item.setBackground(QColor("#FFF8E8"))
+                        item.setForeground(QColor("#B45309"))
+                        item.setBackground(QColor("#FFFBEB"))
+                    elif status == "NOT_ACCREDITED":
+                        item.setForeground(QColor("#475569"))
+                        item.setBackground(QColor("#F8FAFC"))
                     else:
-                        item.setForeground(QColor("#596A80"))
-                        item.setBackground(QColor("#F0F3F7"))
-                    item.setToolTip(screening.get("source_url") or "Check this journal from the screening panel below.")
+                        item.setForeground(QColor("#64748B"))
+                        item.setBackground(QColor("#F1F5F9"))
+                    item.setToolTip(
+                        f"{full_sinta_label}. "
+                        f"{_sinta_ui_note(screening) or screening.get('source_url') or 'Pilih baris ini untuk memeriksa akreditasi.'}"
+                    )
 
-                item.setToolTip(
-                    item.toolTip() or str(value)
-                )
+                if not item.toolTip():
+                    item.setToolTip(str(value))
 
-                self.paper_table.setItem(
-                    row,
-                    column,
-                    item
-                )
+                self.paper_table.setItem(row, column, item)
 
-        verified_count = sum(
-            bool(self._sinta_screening(paper).get("status"))
-            and self._sinta_screening(paper).get("status") != "UNVERIFIED"
+        checked_states = {
+            "VERIFIED", "MANUALLY_CONFIRMED", "FAILED", "NOT_FOUND", "NO_MATCH",
+            "NO_METADATA", "RANK_UNAVAILABLE", "AMBIGUOUS", "PERIOD_UNVERIFIED",
+            "LEGACY_UNVERIFIED",
+        }
+        checked_count = sum(
+            str(self._sinta_screening(paper).get("lookup_status") or "UNVERIFIED")
+            in checked_states
             for paper in self._all_papers
         )
         self.paper_count_label.setText(
-            f"{len(self.filtered_paper_indices)} of {len(self._all_papers)} papers | "
-            f"{len(self._all_papers) - verified_count} need screening"
+            f"{len(self.filtered_paper_indices)} dari {len(self._all_papers)} paper | "
+            f"{checked_count} sudah diperiksa | {len(self._all_papers) - checked_count} belum diperiksa"
         )
 
         if self.filtered_paper_indices:
@@ -7244,17 +7572,24 @@ class ResearchPage(QWidget):
             if selected_paper_index in self.filtered_paper_indices:
                 selected_row = self.filtered_paper_indices.index(selected_paper_index)
             self.paper_table.selectRow(selected_row)
+            # Rebuild the detail pane even when the same visual row stayed
+            # selected while the filtered table contents changed.
+            self._show_selected_paper()
         else:
             if not self._all_papers:
                 self.paper_detail.setPlainText(
-                    "No literature records were found for this dataset yet. "
-                    "Academic Research searches using the dataset's research topic and column metadata; "
-                    "it does not require the private dataset itself to have been published before."
+                    "Belum ada paper yang ditemukan untuk dataset ini.\n\n"
+                    "Academic Research mencari literatur menggunakan topik riset dan metadata kolom dataset; "
+                    "dataset pribadi tidak harus sudah dipublikasikan sebelumnya."
                 )
             else:
-                self.paper_detail.setPlainText("No papers match this search or SINTA filter.")
+                self.paper_detail.setPlainText("Tidak ada paper yang cocok dengan pencarian atau filter SINTA ini.")
             self.save_sinta_button.setEnabled(False)
             self.check_sinta_button.setEnabled(False)
+            self.sinta_status_combo.setCurrentIndex(0)
+            self.sinta_period_confirmed.setChecked(False)
+            self.sinta_lookup_message.setText("Tidak ada artikel yang sesuai dengan filter saat ini.")
+            self.sinta_lookup_message.setToolTip("")
 
     # =========================================================
     # PAPER DETAIL
@@ -7266,6 +7601,10 @@ class ResearchPage(QWidget):
             self.paper_detail.clear()
             self.save_sinta_button.setEnabled(False)
             self.check_sinta_button.setEnabled(False)
+            self.sinta_status_combo.setCurrentIndex(0)
+            self.sinta_period_confirmed.setChecked(False)
+            self.sinta_lookup_message.setText("Pilih artikel untuk melihat detail dan status verifikasi SINTA.")
+            self.sinta_lookup_message.setToolTip("")
             return
         row = rows[0].row()
         paper_index_item = self.paper_table.item(row, 0)
@@ -7275,7 +7614,7 @@ class ResearchPage(QWidget):
             return
         paper = papers[paper_index]
         screening = self._sinta_screening(paper)
-        current_status = screening.get("status") or screening.get("lookup_rank") or "UNVERIFIED"
+        current_status = screening.get("status") or screening.get("rank") or "UNVERIFIED"
         status_index = self.sinta_status_combo.findData(current_status)
         self.sinta_status_combo.setCurrentIndex(max(0, status_index))
         self.sinta_period_confirmed.setChecked(
@@ -7287,20 +7626,34 @@ class ResearchPage(QWidget):
         issn_values = paper.get("issn", [])
         if isinstance(issn_values, str):
             issn_values = [issn_values]
+        issn_clean = [str(i).strip() for i in issn_values if str(i).strip()]
         self.check_sinta_button.setEnabled(
             self._sinta_thread is None
-            and bool(issn_values or str(paper.get("venue") or "").strip())
+            and bool(issn_clean or str(paper.get("venue") or "").strip())
         )
-        if screening.get("lookup_candidate"):
-            rank_hint = screening.get("lookup_rank") or "rank not detected"
-            self.sinta_lookup_message.setText(
-                f"Directory match: {screening.get('lookup_candidate')} ({rank_hint}). "
-                "Confirm accreditation period for the paper year before saving."
-            )
+
+        if screening.get("journal_name") or screening.get("lookup_status") not in {None, "UNVERIFIED"}:
+            rank_hint = screening.get("rank") or "peringkat belum terdeteksi"
+            status_label = self._sinta_status_label(paper)
+            if screening.get("match_method") == "DOI" and screening.get("lookup_status") == "VERIFIED":
+                message = f"DOI artikel cocok dengan catatan resmi SINTA: {rank_hint}."
+            elif screening.get("lookup_status") == "PERIOD_UNVERIFIED" and screening.get("rank"):
+                message = (
+                    f"Peringkat jurnal saat ini {rank_hint}. Periksa masa berlaku SK "
+                    f"untuk tahun {paper.get('year') or '-'} sebelum menetapkan status artikel."
+                )
+            elif screening.get("lookup_status") == "AMBIGUOUS":
+                message = "Ada lebih dari satu kandidat jurnal. Cocokkan ISSN dan profil SINTA sebelum memilih status."
+            else:
+                message = _sinta_ui_note(screening) or status_label
+            self.sinta_lookup_message.setText(message)
+            self.sinta_lookup_message.setToolTip(_sinta_ui_note(screening) or message)
         else:
             self.sinta_lookup_message.setText(
-                "Select a paper and check its journal using ISSN or journal title."
+                "Pilih artikel, lalu periksa jurnal pada direktori resmi SINTA."
             )
+            self.sinta_lookup_message.setToolTip("")
+
         def esc(value):
             if isinstance(value, (list, tuple)):
                 value = ", ".join(map(str, value))
@@ -7310,44 +7663,83 @@ class ResearchPage(QWidget):
         source_url = str(paper.get("url") or "").strip()
         if not source_url and doi:
             source_url = doi if doi.startswith(("http://", "https://")) else f"https://doi.org/{doi.removeprefix('doi:')}"
-        parsed = urlparse(source_url)
-        source_link = ""
-        if parsed.scheme.lower() in {"http", "https"} and parsed.netloc:
-            source_link = f"<a href='{html_escape(source_url, quote=True)}'>Open publication source</a>"
-        elif doi:
-            doi_url = f"https://doi.org/{doi.removeprefix('doi:')}"
-            source_link = f"<a href='{html_escape(doi_url, quote=True)}'>Open DOI source</a>"
-        else:
-            source_link = "No source link is available for this paper."
+
+        links_html = []
+        if source_url:
+            links_html.append(f"<a href='{html_escape(source_url, quote=True)}'>Buka sumber artikel</a>")
+        if doi:
+            doi_url = doi if doi.startswith(("http://", "https://")) else f"https://doi.org/{doi.removeprefix('doi:')}"
+            links_html.append(f"<a href='{html_escape(doi_url, quote=True)}'>Buka DOI</a>")
+        sinta_url = screening.get("source_url") or self._sinta_search_url(paper)
+        links_html.append(f"<a href='{html_escape(sinta_url, quote=True)}'>Buka pencarian SINTA</a>")
+        candidate_url = str(screening.get("assistive_candidate_url") or "").strip()
+        if candidate_url.startswith("https://sinta.kemdiktisaintek.go.id/journals/profile/"):
+            links_html.append(
+                f"<a href='{html_escape(candidate_url, quote=True)}'>Kandidat profil SINTA (Gemini)</a>"
+            )
+
+        issn_display = ", ".join(issn_clean) if issn_clean else "Tidak tersedia"
+        sinta_status = str(screening.get("status") or "UNVERIFIED")
+        sinta_rank = screening.get("rank") or (sinta_status if sinta_status.startswith("S") else "-")
+        lookup_status = str(screening.get("lookup_status") or "UNVERIFIED")
+        match_method = {
+            "ISSN": "ISSN persis",
+            "JOURNAL_NAME": "Nama jurnal",
+            "DOI": "DOI artikel persis",
+            "MANUAL": "Konfirmasi pengguna",
+            "NONE": "Belum ada kecocokan",
+        }.get(str(screening.get("match_method") or "NONE"), "Belum diketahui")
+        sinta_label = self._sinta_status_label(paper)
+        period_start = screening.get("period_start")
+        period_end = screening.get("period_end")
+        period_str = (
+            "Diverifikasi dari entri DOI artikel di SINTA"
+            if screening.get("period_status") == "ARTICLE_RECORD"
+            else f"{period_start} - {period_end}" if (period_start and period_end) else "Belum tersedia"
+        )
+        checked_year = screening.get("checked_for_year") or paper.get("year") or "-"
+        verification_src = screening.get("verification_source") or "Direktori Resmi SINTA (Kemdiktisaintek RI)"
+        checked_at = screening.get("verification_date") or screening.get("checked_at") or "-"
+        display_journal_name = self._screening_journal_display_name(paper, screening)
+
+        ambiguity_block = ""
+        if screening.get("is_ambiguous"):
+            ambiguity_block = (
+                f"<div style='background:#FFFBEB;color:#92400E;padding:6px 10px;border-radius:6px;border:1px solid #FCD34D;margin:6px 0;'>"
+                f"<b>Ambiguitas pencocokan:</b> {esc(_sinta_ui_text(screening.get('ambiguity_reason')) or 'Pencocokan menggunakan nama jurnal. Harap verifikasi manual.')}</div>"
+            )
+
+        notes_block = ""
+        display_note = _sinta_ui_note(screening)
+        if display_note:
+            notes_block = f"<p style='color:#475569;margin:3px 0;'><b>Catatan:</b> {esc(display_note)}</p>"
 
         rows_html = [
-            f"<h2>{esc(paper.get('title') or 'Untitled')}</h2>",
-            f"<p><b>Authors:</b> {esc(paper.get('authors'))}<br>",
-            f"<b>Year:</b> {esc(paper.get('year'))}<br>",
-            f"<b>Venue:</b> {esc(paper.get('venue'))}<br>",
-            f"<b>ISSN:</b> {esc(issn_values)}<br>",
-            f"<b>Source:</b> {esc(paper.get('source'))}<br>",
-            f"<b>DOI:</b> {esc(doi)}<br>",
-            f"<b>Relevance:</b> {esc(self._format_score(paper.get('relevance_score')))}<br>",
-            f"<b>Dataset usage confidence:</b> {esc(paper.get('dataset_usage_confidence'))}</p>",
-            f"<p><b>SINTA screening:</b> {esc(self._sinta_status_label(paper))}<br>",
-            f"<b>Checked for year:</b> {esc(screening.get('checked_for_year') or 'Not checked yet')}</p>",
-            f"<p>{source_link}</p>",
+            f"<h2 style='color:#0F172A;margin-bottom:4px;'>{esc(paper.get('title') or 'Untitled')}</h2>",
+            f"<p><b>Penulis:</b> {esc(paper.get('authors'))}<br>",
+            f"<b>Tahun:</b> {esc(paper.get('year'))} &nbsp;|&nbsp; <b>Jurnal / Venue:</b> {esc(paper.get('venue'))}<br>",
+            f"<b>ISSN:</b> {esc(issn_display)} &nbsp;|&nbsp; <b>DOI:</b> {esc(doi or '-')}<br>",
+            f"<b>Sumber:</b> {esc(paper.get('source'))} &nbsp;|&nbsp; <b>Relevansi:</b> {esc(self._format_score(paper.get('relevance_score')))} &nbsp;|&nbsp; <b>Keyakinan Penggunaan Dataset:</b> {esc(paper.get('dataset_usage_confidence') or '-')}</p>",
+            f"<p style='margin:6px 0;'>{' &nbsp;|&nbsp; '.join(links_html)}</p>",
+            "<hr style='border:0;border-top:1px solid #E2E8F0;margin:6px 0;'>",
+            "<div style='background:#F8FAFC;border:1px solid #E2E8F0;border-radius:6px;padding:8px 12px;margin:6px 0;'>",
+            f"<h3 style='margin:0 0 4px 0;color:#1E293B;'>Verifikasi Akreditasi SINTA: <span style='color:#2563EB;'>{esc(sinta_label)}</span></h3>",
+            f"<p style='margin:2px 0;'><b>Jurnal:</b> {esc(display_journal_name)}<br>",
+            f"<b>ISSN artikel:</b> {esc(issn_display)} &nbsp;|&nbsp; <b>ISSN cocok:</b> {esc(screening.get('issn_matched') or 'Tidak ada kecocokan ISSN')}<br>",
+            f"<b>Metode pencocokan:</b> {esc(match_method)} &nbsp;|&nbsp; <b>Peringkat terkini:</b> {esc(sinta_rank)}<br>",
+            f"<b>Masa berlaku SK:</b> {esc(period_str)} &nbsp;|&nbsp; <b>Status untuk tahun {esc(checked_year)}:</b> {esc(sinta_label)}<br>",
+            f"<b>Status pemeriksaan:</b> {esc(self._sinta_lookup_label(lookup_status))}<br>",
+            f"<b>Sumber Pemeriksaan:</b> {esc(verification_src)} ({esc(checked_at)})</p>",
+            ambiguity_block,
+            notes_block,
+            "<p style='color:#64748B;font-size:8pt;margin-top:4px;'><i>Batasan: Keterindeksan di Scopus, Crossref, atau OpenAlex adalah indeksasi internasional dan BUKAN akreditasi SINTA. Akreditasi SINTA diterbitkan secara nasional oleh Kemdiktisaintek RI.</i></p>",
+            "</div>",
         ]
-        if screening.get("lookup_candidate"):
-            rows_html.append(
-                f"<p><b>SINTA directory match:</b> {esc(screening.get('lookup_candidate'))}</p>"
-            )
-        for label, key in (("Dataset usage evidence", "dataset_usage_evidence"),
-                           ("Dataset usage limitations", "dataset_usage_limitations")):
-            values = paper.get(key) or []
-            if isinstance(values, str):
-                values = [values]
-            if values:
-                rows_html.append(f"<h3>{label}</h3><ul>{''.join(f'<li>{esc(value)}</li>' for value in values)}</ul>")
+
         abstract = paper.get("abstract")
         if abstract:
-            rows_html.append(f"<h3>Abstract</h3><p>{esc(abstract)}</p>")
+            rows_html.append(f"<h3 style='margin-top:8px;'>Abstrak</h3><p style='color:#334155;text-align:justify;'>{esc(abstract)}</p>")
+
         self.paper_detail.setHtml("".join(rows_html))
 
     def _update_sinta_save_enabled(self, *_):
@@ -7373,6 +7765,167 @@ class ResearchPage(QWidget):
         item = self.paper_table.item(rows[0].row(), 0)
         return item.data(Qt.UserRole) if item else None
 
+    def _check_pending_sinta_batch(self):
+        if self._sinta_thread is not None:
+            return
+
+        tasks = []
+        for paper_index, paper in zip(self._all_paper_result_indices, self._all_papers):
+            screening = self._sinta_screening(paper)
+            if str(screening.get("status") or "UNVERIFIED") != "UNVERIFIED":
+                continue
+            checked_year = str(screening.get("checked_for_year") or "")
+            same_year = checked_year == str(paper.get("year") or "")
+            reusable_lookup = str(screening.get("lookup_status") or "") in {
+                "VERIFIED", "PERIOD_UNVERIFIED", "AMBIGUOUS"
+            }
+            if screening.get("found") and same_year and reusable_lookup:
+                continue
+
+            issn_values = paper.get("issn", [])
+            if isinstance(issn_values, str):
+                issn_values = [issn_values]
+            issn_values = [str(value).strip() for value in issn_values if str(value).strip()]
+            journal_name = str(paper.get("venue") or "").strip()
+            if not issn_values and not journal_name:
+                self._apply_sinta_result(paper, {
+                    "found": False,
+                    "status": "UNVERIFIED",
+                    "lookup_status": "NO_METADATA",
+                    "checked_for_year": paper.get("year"),
+                    "notes": "Artikel ini tidak memiliki ISSN atau nama jurnal. Lengkapi metadata jurnal sebelum pemeriksaan SINTA.",
+                    "source_url": self._sinta_search_url(paper),
+                })
+                self._persist_sinta_screening(paper)
+                continue
+            tasks.append({
+                "paper_index": paper_index,
+                "identity": self._paper_identity(paper),
+                "issn": issn_values,
+                "journal": journal_name,
+                "year": paper.get("year"),
+                "doi": paper.get("doi"),
+            })
+
+        if not tasks:
+            self._render_filtered_papers()
+            papers_page = getattr(self.main_window, "papers_tool_page", None)
+            if papers_page is not None:
+                papers_page.update_from_result(self.research_result)
+            metadata_missing = sum(
+                self._sinta_screening(paper).get("lookup_status") == "NO_METADATA"
+                for paper in self._all_papers
+            )
+            if metadata_missing:
+                message = (
+                    f"Tidak ada jurnal lain untuk diperiksa. {metadata_missing} artikel "
+                    "tidak memiliki ISSN atau nama jurnal; lengkapi metadata jika tersedia. "
+                    "Hasil pemeriksaan sebelumnya tetap tersimpan."
+                )
+            else:
+                message = (
+                    "Tidak ada jurnal baru untuk diperiksa. Hasil yang sudah ada tetap tersimpan; "
+                    "artikel dengan periode SK belum terverifikasi perlu konfirmasi manual."
+                )
+            self.sinta_lookup_message.setText(
+                message
+            )
+            return
+
+        self._sinta_batch_found = 0
+        self._sinta_batch_manual = 0
+        self.sinta_batch_button.setEnabled(False)
+        self.sinta_batch_button.setText("Memeriksa jurnal...")
+        self.check_sinta_button.setEnabled(False)
+        self.sinta_lookup_progress.setRange(0, len(tasks))
+        self.sinta_lookup_progress.setValue(0)
+        self.sinta_lookup_progress.setVisible(True)
+        self.sinta_lookup_message.setText(f"Memeriksa jurnal 0 dari {len(tasks)}...")
+
+        self._sinta_thread = QThread(self)
+        self._sinta_worker = SintaBatchLookupWorker(tasks)
+        self._sinta_worker.moveToThread(self._sinta_thread)
+        self._sinta_thread.started.connect(self._sinta_worker.run)
+        self._sinta_worker.progress.connect(self._on_sinta_batch_progress)
+        self._sinta_worker.finished.connect(self._finish_sinta_batch)
+        self._sinta_worker.failed.connect(self._on_sinta_batch_failed)
+        self._sinta_worker.finished.connect(self._sinta_thread.quit)
+        self._sinta_worker.failed.connect(self._sinta_thread.quit)
+        self._sinta_thread.finished.connect(self._sinta_worker.deleteLater)
+        self._sinta_thread.finished.connect(self._cleanup_sinta_lookup)
+        self._sinta_thread.start()
+
+    @Slot(int, int, int, str, object)
+    def _on_sinta_batch_progress(self, current, total, paper_index, identity, result):
+        papers = self.research_result.get("papers", [])
+        if isinstance(paper_index, int) and 0 <= paper_index < len(papers):
+            paper = papers[paper_index]
+            if self._paper_identity(paper) == identity:
+                self._apply_sinta_result(paper, result)
+                self._sinta_lookup_cache[self._screening_metadata_key(paper)] = dict(result)
+                self._persist_sinta_screening(paper)
+                state = str(result.get("lookup_status") or "UNVERIFIED")
+                if result.get("found") and state not in {"AMBIGUOUS", "FAILED"}:
+                    self._sinta_batch_found += 1
+                if state in {
+                    "FAILED", "UNVERIFIED", "AMBIGUOUS", "PERIOD_UNVERIFIED",
+                    "NO_MATCH", "NO_METADATA", "RANK_UNAVAILABLE",
+                }:
+                    self._sinta_batch_manual += 1
+                journal = str(result.get("journal_name") or paper.get("venue") or "Jurnal")
+            else:
+                journal = "Jurnal"
+        else:
+            journal = "Jurnal"
+        self.sinta_lookup_progress.setValue(current)
+        self.sinta_lookup_message.setText(
+            f"{current} dari {total} artikel | Memeriksa {journal} | "
+            f"cocok {self._sinta_batch_found}, perlu ditinjau {self._sinta_batch_manual}"
+        )
+        self._render_filtered_papers()
+
+    @Slot(int)
+    def _finish_sinta_batch(self, total):
+        missing_metadata = sum(
+            self._sinta_screening(paper).get("lookup_status") == "NO_METADATA"
+            for paper in self._all_papers
+        )
+        missing_note = (
+            f" {missing_metadata} artikel tidak memiliki ISSN/nama jurnal."
+            if missing_metadata
+            else ""
+        )
+        self.sinta_lookup_message.setText(
+            f"Pemeriksaan selesai: jurnal cocok untuk {self._sinta_batch_found} artikel dari {total} yang diperiksa; "
+            f"{self._sinta_batch_manual} perlu pemeriksaan manual. "
+            f"Hasil yang tersedia sudah disimpan ke ruang kerja lokal.{missing_note}"
+        )
+        project_id = getattr(self.main_window, "current_project_id", None)
+        if project_id is not None:
+            try:
+                repository = self.main_window.repository
+                repository.save_workflow_section(project_id, "research", self.research_result)
+                repository.save_research_result(project_id, self.research_result)
+            except Exception as error:
+                print(f"Warning: hasil batch SINTA tidak dapat disimpan: {error}")
+        papers_page = getattr(self.main_window, "papers_tool_page", None)
+        if papers_page is not None:
+            papers_page.update_from_result(self.research_result)
+        self._render_filtered_papers()
+
+    def _persist_sinta_screening(self, paper):
+        repository = getattr(self.main_window, "repository", None)
+        if repository is None:
+            return
+        try:
+            repository.save_journal_screening(
+                paper_key=self._paper_identity(paper),
+                screening_data=self._sinta_screening(paper),
+                doi=str(paper.get("doi") or "").strip().lower(),
+            )
+        except Exception as error:
+            print(f"Warning: hasil screening SINTA belum tersimpan: {error}")
+
     def _check_sinta_in_app(self):
         paper_index = self._selected_paper_index()
         papers = self.research_result.get("papers", [])
@@ -7385,14 +7938,26 @@ class ResearchPage(QWidget):
         issn_values = paper.get("issn", [])
         if isinstance(issn_values, str):
             issn_values = [issn_values]
-        issn = next((str(value).strip() for value in issn_values if value), "")
-        query = issn
-        if not query:
-            query = str(paper.get("venue") or "").strip()
-        if not query:
+        issn_clean = [str(i).strip() for i in issn_values if str(i).strip()]
+        venue = str(paper.get("venue") or "").strip()
+
+        if not issn_clean and not venue:
+            QMessageBox.information(
+                self,
+                "Informasi Tidak Lengkap",
+                "Paper ini tidak memiliki ISSN maupun nama jurnal untuk diverifikasi di SINTA.",
+            )
             return
-        cache_key = re.sub(r"[^a-z0-9]", "", query.casefold())
+
+        cache_key = self._screening_metadata_key(paper)
         cached_result = self._sinta_lookup_cache.get(cache_key)
+        if cached_result is None:
+            existing_screening = self._sinta_screening(paper)
+            if (
+                existing_screening.get("metadata_key") == cache_key
+                and existing_screening.get("found")
+            ):
+                cached_result = existing_screening
         if cached_result is not None:
             self._on_sinta_lookup_result(
                 paper_index, self._paper_identity(paper), cached_result
@@ -7400,15 +7965,23 @@ class ResearchPage(QWidget):
             return
 
         self.check_sinta_button.setEnabled(False)
-        self.check_sinta_button.setText("Checking...")
+        self.sinta_batch_button.setEnabled(False)
+        self.check_sinta_button.setText("Memeriksa SINTA...")
         self.sinta_lookup_progress.setVisible(True)
         self.sinta_lookup_message.setText(
-            "Searching the official SINTA directory. The app remains available while this runs."
+            "Mencari jurnal di direktori resmi SINTA (memeriksa ISSN terlebih dahulu)..."
         )
         self._sinta_thread = QThread(self)
         paper_identity = self._paper_identity(paper)
+        query = issn_clean[0] if issn_clean else venue
         self._sinta_worker = SintaLookupWorker(
-            query, issn, paper.get("year"), paper_index, paper_identity
+            query=query,
+            issn_list=issn_clean,
+            journal_name=venue,
+            paper_year=paper.get("year"),
+            paper_index=paper_index,
+            paper_identity=paper_identity,
+            article_doi=str(paper.get("doi") or ""),
         )
         self._sinta_worker.moveToThread(self._sinta_thread)
         self._sinta_thread.started.connect(self._sinta_worker.run)
@@ -7427,6 +8000,19 @@ class ResearchPage(QWidget):
             re.sub(r"\s+", " ", str(paper.get("doi") or "").casefold()).strip(),
         ))
 
+    @staticmethod
+    def _apply_sinta_result(paper, result):
+        previous = ResearchPage._sinta_screening(paper)
+        paper["sinta_screening"] = {
+            **previous,
+            **result,
+            "status": result.get("status") or "UNVERIFIED",
+            "checked_at": time.strftime("%Y-%m-%d %H:%M"),
+            "checked_for_year": result.get("checked_for_year") or paper.get("year"),
+            "source_url": result.get("source_url") or previous.get("source_url"),
+            "metadata_key": ResearchPage._screening_metadata_key(paper),
+        }
+
     @Slot(int, str, object)
     def _on_sinta_lookup_result(self, paper_index, paper_identity, result):
         papers = self.research_result.get("papers", [])
@@ -7435,57 +8021,103 @@ class ResearchPage(QWidget):
         paper = papers[paper_index]
         if self._paper_identity(paper) != paper_identity:
             return
+
+        issn_clean = [str(i).strip() for i in paper.get("issn", []) if str(i).strip()]
+        venue = str(paper.get("venue") or "").strip()
+        cache_key = self._screening_metadata_key(paper)
+        self._sinta_lookup_cache[cache_key] = result
+        self._apply_sinta_result(paper, result)
+        self._persist_sinta_screening(paper)
+
         if not result.get("found"):
-            self._sinta_lookup_cache[
-                re.sub(r"[^a-z0-9]", "", str(result.get("query") or "").casefold())
-            ] = result
             self.sinta_lookup_message.setText(
-                "No exact journal match was found. Check the ISSN or journal name, then verify a status before saving."
+                _sinta_ui_note(result) or "Hasil pemeriksaan belum dapat diverifikasi."
             )
+            self._render_filtered_papers()
+            self._show_selected_paper()
             return
 
-        previous = self._sinta_screening(paper)
-        paper["sinta_screening"] = {
-            **previous,
-            "source_url": result.get("url"),
-            "lookup_candidate": result.get("journal") or paper.get("venue") or "Journal record",
-            "lookup_rank": result.get("rank"),
-            "lookup_method": "exact ISSN" if result.get("issn_match") else "exact journal title",
-            "checked_at": time.strftime("%Y-%m-%d %H:%M"),
-        }
-        query_key = re.sub(r"[^a-z0-9]", "", str(result.get("query") or "").casefold())
-        if query_key:
-            self._sinta_lookup_cache[query_key] = result
         rank = result.get("rank")
-        self._render_filtered_papers()
-        self._show_selected_paper()
-        if rank:
-            if self._selected_paper_index() == paper_index:
-                combo_index = self.sinta_status_combo.findData(rank)
-                if combo_index >= 0:
-                    self.sinta_status_combo.setCurrentIndex(combo_index)
+        status = result.get("status")
+        match_method = result.get("match_method")
+        is_ambiguous = result.get("is_ambiguous")
+
+        if is_ambiguous:
             self.sinta_lookup_message.setText(
-                f"Directory match: {rank}. Confirm the accreditation period includes {paper.get('year') or 'the paper year'}, then save screening."
+                f"Kecocokan nama jurnal (ambigu): {result.get('journal_name')} ({rank or '-'}). "
+                "Harap konfirmasi kesesuaian jurnal & masa berlaku SK secara manual."
+            )
+        elif rank and status == rank:
+            if match_method == "DOI":
+                message = f"DOI artikel cocok dengan entri resmi SINTA: {rank}."
+            else:
+                message = (
+                    f"Kecocokan {match_method}: {result.get('journal_name')} ({rank}). "
+                    f"Masa berlaku SK terverifikasi untuk tahun {paper.get('year')}."
+                )
+            self.sinta_lookup_message.setText(message)
+        elif rank and status == "UNVERIFIED":
+            self.sinta_lookup_message.setText(
+                f"Jurnal terdaftar: {result.get('journal_name')} ({rank}). "
+                f"Masa berlaku SK untuk tahun {paper.get('year') or '-'} perlu dikonfirmasi manual."
             )
         else:
             self.sinta_lookup_message.setText(
-                "Journal match found, but no SINTA rank was detected in the result. Verify the record and choose a status manually."
+                _sinta_ui_note(result) or f"Pemeriksaan selesai: status {status}."
             )
+
+        combo_val = status
+        combo_index = self.sinta_status_combo.findData(combo_val)
+        if combo_index >= 0:
+            self.sinta_status_combo.setCurrentIndex(combo_index)
+
+        self._render_filtered_papers()
+        self._show_selected_paper()
         self._update_sinta_save_enabled()
 
     @Slot(str)
     def _on_sinta_lookup_failed(self, error):
+        paper_index = self._selected_paper_index()
+        papers = self.research_result.get("papers", [])
+        if isinstance(paper_index, int) and 0 <= paper_index < len(papers):
+            paper = papers[paper_index]
+            self._apply_sinta_result(paper, {
+                "found": False,
+                "status": "UNVERIFIED",
+                "lookup_status": "FAILED",
+                "checked_for_year": paper.get("year"),
+                "verification_date": time.strftime("%Y-%m-%d %H:%M"),
+                "notes": "Direktori SINTA belum dapat diperiksa. Periksa koneksi internet, lalu coba lagi.",
+                "source_url": self._sinta_search_url(paper),
+            })
         self.sinta_lookup_message.setText(
-            "Could not reach the SINTA directory. Check your internet connection and try again. "
-            f"Details: {error}"
+            "Direktori SINTA belum dapat diperiksa. Periksa koneksi internet, lalu coba lagi."
+        )
+        self._render_filtered_papers()
+
+    @Slot(str)
+    def _on_sinta_batch_failed(self, error):
+        self.sinta_lookup_message.setText(
+            "Pemeriksaan jurnal terhenti sebelum selesai. Jurnal yang belum diperiksa dapat dicoba kembali."
         )
 
     def _cleanup_sinta_lookup(self):
         self.sinta_lookup_progress.setVisible(False)
-        self.check_sinta_button.setText("Check SINTA")
+        self.check_sinta_button.setText("Periksa di SINTA")
+        self.sinta_batch_button.setText("Periksa jurnal belum dicek")
+        self.sinta_batch_button.setEnabled(bool(self._all_papers))
         self._sinta_worker = None
         self._sinta_thread = None
         self._show_selected_paper()
+
+    def _open_sinta_in_browser(self):
+        paper_index = self._selected_paper_index()
+        papers = self.research_result.get("papers", [])
+        if not isinstance(paper_index, int) or paper_index >= len(papers):
+            url = "https://sinta.kemdiktisaintek.go.id/journals"
+        else:
+            url = self._sinta_search_url(papers[paper_index])
+        QDesktopServices.openUrl(QUrl(url))
 
     def _save_sinta_screening(self):
         paper_index = self._selected_paper_index()
@@ -7497,44 +8129,64 @@ class ResearchPage(QWidget):
         if status == "UNVERIFIED":
             QMessageBox.information(
                 self,
-                "SINTA status not selected",
-                "Check the official journal directory and select a confirmed status first.",
+                "Status SINTA Belum Dipilih",
+                "Silakan periksa direktori resmi SINTA dan pilih status akreditasi yang sesuai.",
             )
             return
         if not self.sinta_period_confirmed.isChecked():
             QMessageBox.information(
                 self,
-                "Confirm accreditation period",
-                "Verify that this journal status is valid for the paper's publication year before saving.",
+                "Konfirmasi Masa Berlaku Akreditasi",
+                "Harap konfirmasi bahwa status akreditasi ini mencakup tahun publikasi artikel sebelum menyimpan.",
             )
             return
 
         paper = papers[paper_index]
         previous = self._sinta_screening(paper)
-        paper["sinta_screening"] = {
+        updated_screening = {
             **previous,
             "status": status,
+            "lookup_status": "MANUALLY_CONFIRMED",
+            "rank": status if status.startswith("S") else previous.get("rank"),
             "checked_at": time.strftime("%Y-%m-%d %H:%M"),
             "checked_for_year": paper.get("year"),
             "period_confirmed": True,
-            "verification": "user-confirmed against the official SINTA directory",
+            "period_status": "MANUALLY_CONFIRMED",
+            "metadata_key": self._screening_metadata_key(paper),
+            "verification_source": "Konfirmasi Pengguna terhadap Direktori Resmi SINTA",
             "source_url": previous.get("source_url") or self._sinta_search_url(paper),
         }
+        paper["sinta_screening"] = updated_screening
 
-        project_id = getattr(self.main_window, "current_project_id", None)
-        if project_id is not None:
+        # Simpan secara permanen ke SQLite lokal
+        repo = getattr(self.main_window, "repository", None)
+        if repo is not None:
+            doi = str(paper.get("doi") or "").strip().lower()
+            key = self._paper_identity(paper)
             try:
-                self.main_window.repository.save_workflow_section(
-                    project_id, "research", self.research_result
+                repo.save_journal_screening(
+                    paper_key=key,
+                    screening_data=updated_screening,
+                    doi=doi,
                 )
-                self.main_window.repository.save_research_result(
-                    project_id, self.research_result
-                )
-            except Exception as error:
-                print(f"Warning: SINTA screening could not be saved: {error}")
+            except Exception as exc:
+                print(f"Warning: gagal menyimpan status screening ke database: {exc}")
+
+            project_id = getattr(self.main_window, "current_project_id", None)
+            if project_id is not None:
+                try:
+                    repo.save_workflow_section(
+                        project_id, "research", self.research_result
+                    )
+                    repo.save_research_result(
+                        project_id, self.research_result
+                    )
+                except Exception as error:
+                    print(f"Warning: workflow riset tidak dapat disimpan: {error}")
 
         self.main_window.papers_tool_page.update_from_result(self.research_result)
         self._apply_paper_filter()
+        self._show_selected_paper()
 
     @staticmethod
     def _sinta_search_url(paper):
@@ -7789,18 +8441,34 @@ class PapersToolPage(QWidget):
 
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText(
-            "Search title, author, keyword, venue, DOI..."
+            "Cari judul, penulis, jurnal, ISSN, DOI, kata kunci..."
         )
         self.search_input.setMinimumHeight(38)
         self.search_input.textChanged.connect(self._apply_filter)
-
         toolbar.addWidget(self.search_input, 1)
+
+        self.sinta_filter = QComboBox()
+        self.sinta_filter.setMinimumHeight(38)
+        self.sinta_filter.setMinimumWidth(185)
+        self.sinta_filter.addItem("Semua Status Akreditasi", "ALL")
+        for rank in range(1, 7):
+            self.sinta_filter.addItem(f"SINTA {rank}", f"S{rank}")
+        self.sinta_filter.addItem("Tidak Terakreditasi", "NOT_ACCREDITED")
+        self.sinta_filter.addItem("Belum Terverifikasi", "UNVERIFIED")
+        self.sinta_filter.addItem("Periode SK perlu dicek", "PERIOD_UNVERIFIED")
+        self.sinta_filter.addItem("Kandidat ambigu", "AMBIGUOUS")
+        self.sinta_filter.addItem("Jurnal belum cocok", "NO_MATCH")
+        self.sinta_filter.addItem("ISSN/jurnal tidak tersedia", "NO_METADATA")
+        self.sinta_filter.addItem("Peringkat tidak terbaca", "RANK_UNAVAILABLE")
+        self.sinta_filter.addItem("Perlu Dicoba Lagi", "FAILED")
+        self.sinta_filter.addItem("Tidak ada hasil resmi", "NOT_FOUND")
+        self.sinta_filter.currentIndexChanged.connect(self._apply_filter)
+        toolbar.addWidget(self.sinta_filter)
 
         self.refresh_button = QPushButton("Refresh")
         self.refresh_button.setObjectName("secondaryButton")
         self.refresh_button.setMinimumHeight(38)
         self.refresh_button.clicked.connect(self._refresh_from_research)
-
         toolbar.addWidget(self.refresh_button)
 
         root.addLayout(toolbar)
@@ -7817,32 +8485,45 @@ class PapersToolPage(QWidget):
         table_layout.setSpacing(8)
 
         self.paper_table = QTableWidget()
-        self.paper_table.setColumnCount(7)
+        self.paper_table.setColumnCount(8)
         self.paper_table.setHorizontalHeaderLabels(
             [
                 "#",
-                "Paper",
-                "Year",
-                "Relevance",
-                "Usage",
-                "Source",
-                "Venue",
+                "Judul Artikel",
+                "Tahun",
+                "Jurnal / Venue",
+                "ISSN",
+                "Sumber",
+                "Relevansi",
+                "Status SINTA",
             ]
         )
         self.paper_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.paper_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.paper_table.setSelectionMode(QTableWidget.SingleSelection)
         self.paper_table.setAlternatingRowColors(True)
-        self.paper_table.setSortingEnabled(True)
 
         table_header = self.paper_table.horizontalHeader()
-        table_header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        table_header.setSectionResizeMode(0, QHeaderView.Fixed)
+        self.paper_table.setColumnWidth(0, 42)
         table_header.setSectionResizeMode(1, QHeaderView.Stretch)
-        table_header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        table_header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        table_header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
-        table_header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
-        table_header.setSectionResizeMode(6, QHeaderView.ResizeToContents)
+        table_header.setSectionResizeMode(2, QHeaderView.Fixed)
+        self.paper_table.setColumnWidth(2, 64)
+        table_header.setSectionResizeMode(3, QHeaderView.Fixed)
+        self.paper_table.setColumnWidth(3, 175)
+        table_header.setSectionResizeMode(4, QHeaderView.Fixed)
+        self.paper_table.setColumnWidth(4, 105)
+        table_header.setSectionResizeMode(5, QHeaderView.Fixed)
+        self.paper_table.setColumnWidth(5, 110)
+        table_header.setSectionResizeMode(6, QHeaderView.Fixed)
+        self.paper_table.setColumnWidth(6, 85)
+        table_header.setSectionResizeMode(7, QHeaderView.Fixed)
+        self.paper_table.setColumnWidth(7, 145)
+
+        self.paper_table.setMinimumHeight(280)
+        self.paper_table.setShowGrid(False)
+        self.paper_table.verticalHeader().setDefaultSectionSize(38)
+        self.paper_table.verticalHeader().setVisible(False)
 
         self.paper_table.itemSelectionChanged.connect(
             self._show_selected_paper
@@ -7938,44 +8619,37 @@ class PapersToolPage(QWidget):
 
     def _apply_filter(self):
         query = self.search_input.text().strip().lower()
+        selected_sinta = self.sinta_filter.currentData() if hasattr(self, "sinta_filter") else "ALL"
 
-        if not query:
-            self.filtered_papers = list(self.papers)
-        else:
-            filtered = []
+        filtered = []
+        for paper in self.papers:
+            if not ResearchPage._matches_sinta_filter(paper, selected_sinta):
+                continue
 
-            for paper in self.papers:
-                authors = paper.get("authors", [])
-                if isinstance(authors, list):
-                    authors_text = " ".join(str(a) for a in authors)
-                else:
-                    authors_text = str(authors)
+            authors = paper.get("authors", [])
+            authors_text = " ".join(str(a) for a in authors) if isinstance(authors, list) else str(authors)
+            keywords = paper.get("keywords", [])
+            keywords_text = " ".join(str(k) for k in keywords) if isinstance(keywords, list) else str(keywords)
+            issn = paper.get("issn", [])
+            issn_text = " ".join(str(i) for i in issn) if isinstance(issn, list) else str(issn)
 
-                keywords = paper.get("keywords", [])
-                if isinstance(keywords, list):
-                    keywords_text = " ".join(
-                        str(k) for k in keywords
-                    )
-                else:
-                    keywords_text = str(keywords)
+            searchable = " ".join(
+                [
+                    str(paper.get("title", "")),
+                    authors_text,
+                    str(paper.get("venue", "")),
+                    str(paper.get("doi", "")),
+                    keywords_text,
+                    issn_text,
+                    str(paper.get("source", "")),
+                    str(paper.get("year", "")),
+                ]
+            ).lower()
 
-                searchable = " ".join(
-                    [
-                        str(paper.get("title", "")),
-                        authors_text,
-                        str(paper.get("venue", "")),
-                        str(paper.get("doi", "")),
-                        keywords_text,
-                        str(paper.get("source", "")),
-                        str(paper.get("year", "")),
-                    ]
-                ).lower()
+            if not query or query in searchable:
+                filtered.append(paper)
 
-                if query in searchable:
-                    filtered.append(paper)
-
-            self.filtered_papers = filtered
-
+        self.filtered_papers = filtered
         self._populate_table()
 
     # =====================================================
@@ -7984,75 +8658,86 @@ class PapersToolPage(QWidget):
 
     def _populate_table(self):
         self.paper_table.setSortingEnabled(False)
-        self.paper_table.setRowCount(
-            len(self.filtered_papers)
-        )
+        self.paper_table.setRowCount(len(self.filtered_papers))
 
         for row, paper in enumerate(self.filtered_papers):
+            title = str(paper.get("title") or "Untitled")
+            year = str(paper.get("year") or "-")
             relevance = paper.get("relevance_score")
-            usage = paper.get(
-                "dataset_usage_confidence",
-                "UNKNOWN",
-            )
+
+            venue = str(paper.get("venue") or paper.get("source") or "-")
+            venue_display = venue
+            if len(venue_display) > 38:
+                venue_display = venue_display[:35].rstrip() + "..."
+
+            issn_list = paper.get("issn", [])
+            if isinstance(issn_list, str):
+                issn_list = [issn_list]
+            issn_clean = [str(i).strip() for i in issn_list if str(i).strip()]
+            issn_str = issn_clean[0] if issn_clean else "-"
+
+            sources = [
+                s.strip()
+                for s in str(paper.get("source") or "").split(",")
+                if s.strip()
+            ]
+            source_label = sources[0] if sources else "-"
+            if len(sources) > 1:
+                source_label += f" +{len(sources) - 1}"
+
+            screening = ResearchPage._sinta_screening(paper)
+            status = str(screening.get("status") or "UNVERIFIED")
+            sinta_label = ResearchPage._sinta_table_status_label(paper)
+
+            relevance_str = f"{relevance:.1f}%" if isinstance(relevance, (int, float)) else "-"
 
             values = [
                 str(row + 1),
-                str(
-                    paper.get(
-                        "title",
-                        "Untitled",
-                    )
-                ),
-                str(
-                    paper.get("year")
-                    or "-"
-                ),
-                (
-                    f"{relevance:.1f}%"
-                    if isinstance(relevance, (int, float))
-                    else "-"
-                ),
-                str(usage),
-                str(
-                    paper.get(
-                        "source",
-                        "-"
-                    )
-                    or "-"
-                ),
-                str(
-                    paper.get(
-                        "venue",
-                        "-"
-                    )
-                    or "-"
-                ),
+                title,
+                year,
+                venue_display,
+                issn_str,
+                source_label,
+                relevance_str,
+                sinta_label,
             ]
 
             for column, value in enumerate(values):
                 item = QTableWidgetItem(value)
-                item.setToolTip(value)
 
-                # Keep the underlying relevance numeric so sorting
-                # remains useful when the table is manually sorted.
-                if column == 3 and isinstance(
-                    relevance,
-                    (int, float),
-                ):
-                    item.setData(
-                        Qt.UserRole,
-                        float(relevance),
-                    )
+                if column in {0, 2, 4, 5, 6, 7}:
+                    item.setTextAlignment(Qt.AlignCenter)
+                else:
+                    item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
-                self.paper_table.setItem(
-                    row,
-                    column,
-                    item,
-                )
+                if column == 1:
+                    item.setToolTip(title)
+                elif column == 3:
+                    item.setToolTip(venue)
+                elif column == 4:
+                    item.setToolTip(", ".join(issn_clean) if len(issn_clean) > 1 else (issn_str if issn_str != "-" else "ISSN tidak tersedia"))
+                elif column == 5:
+                    item.setToolTip(", ".join(sources) or "Sumber tidak tersedia")
+                elif column == 7:
+                    if status in {f"S{rank}" for rank in range(1, 7)} or screening.get("rank"):
+                        item.setForeground(QColor("#0F766E"))
+                        item.setBackground(QColor("#F0FDF4"))
+                    elif status == "UNVERIFIED":
+                        item.setForeground(QColor("#B45309"))
+                        item.setBackground(QColor("#FFFBEB"))
+                    elif status == "NOT_ACCREDITED":
+                        item.setForeground(QColor("#475569"))
+                        item.setBackground(QColor("#F8FAFC"))
+                    else:
+                        item.setForeground(QColor("#64748B"))
+                        item.setBackground(QColor("#F1F5F9"))
+                    item.setToolTip(_sinta_ui_note(screening) or sinta_label)
 
-        self.paper_table.setSortingEnabled(True)
+                self.paper_table.setItem(row, column, item)
+
+        self.paper_table.setSortingEnabled(False)
         self.count_label.setText(
-            f"{len(self.filtered_papers)} of {len(self.papers)} papers"
+            f"{len(self.filtered_papers)} dari {len(self.papers)} paper"
         )
 
         self.paper_detail.clear()
@@ -8062,7 +8747,7 @@ class PapersToolPage(QWidget):
             self.paper_table.selectRow(0)
         else:
             self.paper_detail.setPlainText(
-                "No papers match the current search."
+                "Tidak ada paper yang cocok dengan pencarian atau filter saat ini."
             )
 
     # =====================================================
@@ -8085,84 +8770,72 @@ class PapersToolPage(QWidget):
         paper = self.filtered_papers[row]
 
         authors = paper.get("authors", [])
-        if isinstance(authors, list):
-            authors_text = ", ".join(
-                str(author)
-                for author in authors
-            )
-        else:
-            authors_text = str(authors)
+        authors_text = ", ".join(str(a) for a in authors) if isinstance(authors, list) else str(authors)
 
-        evidence = paper.get(
-            "dataset_usage_evidence",
-            [],
-        )
-        limitations = paper.get(
-            "dataset_usage_limitations",
-            [],
-        )
+        issn_list = paper.get("issn", [])
+        if isinstance(issn_list, str):
+            issn_list = [issn_list]
+        issn_clean = [str(i).strip() for i in issn_list if str(i).strip()]
+        issn_display = ", ".join(issn_clean) if issn_clean else "-"
+
+        screening = paper.get("sinta_screening", {}) if isinstance(paper.get("sinta_screening"), dict) else {}
+        status = str(screening.get("status") or "UNVERIFIED")
+        labels = {
+            "UNVERIFIED": "Belum Terverifikasi",
+            "NOT_ACCREDITED": "Tidak Terakreditasi",
+            "NOT_IN_SINTA": "Tidak di SINTA",
+        }
+        sinta_label = f"SINTA {status[1:]}" if status in {f"S{r}" for r in range(1, 7)} else labels.get(status, "Belum Terverifikasi")
 
         lines = [
-            f"TITLE\n{paper.get('title') or '-'}",
-            f"AUTHORS\n{authors_text or '-'}",
-            f"YEAR\n{paper.get('year') or '-'}",
-            f"VENUE\n{paper.get('venue') or '-'}",
-            f"SOURCE\n{paper.get('source') or '-'}",
+            f"JUDUL ARTIKEL\n{paper.get('title') or '-'}",
+            f"PENULIS\n{authors_text or '-'}",
+            f"TAHUN PUBLIKASI\n{paper.get('year') or '-'}",
+            f"JURNAL / VENUE\n{paper.get('venue') or '-'}",
+            f"ISSN\n{issn_display}",
             f"DOI\n{paper.get('doi') or '-'}",
+            f"SUMBER PENCARIAN\n{paper.get('source') or '-'}",
             (
-                "RELEVANCE SCORE\n"
+                "SKOR RELEVANSI\n"
                 + (
                     f"{paper.get('relevance_score'):.1f}%"
-                    if isinstance(
-                        paper.get("relevance_score"),
-                        (int, float),
-                    )
+                    if isinstance(paper.get("relevance_score"), (int, float))
                     else "-"
                 )
             ),
-            (
-                "DATASET USAGE CONFIDENCE\n"
-                f"{paper.get('dataset_usage_confidence') or '-'}"
-            ),
+            f"STATUS AKREDITASI SINTA\n{sinta_label}",
         ]
 
-        if evidence:
-            lines.append(
-                "EVIDENCE\n"
-                + "\n".join(
-                    f"• {item}"
-                    for item in evidence
-                )
-            )
+        if screening.get("journal_name"):
+            lines.append(f"JURNAL TERDAFTAR DI SINTA\n{screening.get('journal_name')}")
+        if screening.get("issn_matched"):
+            lines.append(f"ISSN COCOK DI SINTA\n{screening.get('issn_matched')}")
+        if screening.get("period_start") and screening.get("period_end"):
+            lines.append(f"MASA BERLAKU SK AKREDITASI\n{screening.get('period_start')} - {screening.get('period_end')}")
+        display_note = _sinta_ui_note(screening)
+        if display_note:
+            lines.append(f"CATATAN VERIFIKASI\n{display_note}")
 
+        evidence = paper.get("dataset_usage_evidence", [])
+        if evidence:
+            lines.append("BUKTI PENGGUNAAN DATASET\n" + "\n".join(f"• {item}" for item in evidence))
+
+        limitations = paper.get("dataset_usage_limitations", [])
         if limitations:
-            lines.append(
-                "LIMITATIONS\n"
-                + "\n".join(
-                    f"• {item}"
-                    for item in limitations
-                )
-            )
+            lines.append("BATASAN PENGGUNAAN DATASET\n" + "\n".join(f"• {item}" for item in limitations))
 
         abstract = paper.get("abstract")
         if abstract:
-            lines.append(
-                f"ABSTRACT\n{abstract}"
-            )
+            lines.append(f"ABSTRAK\n{abstract}")
 
         url = paper.get("url")
-        if url:
-            lines.append(
-                f"SOURCE URL\n{url}"
-            )
+        doi = paper.get("doi")
+        openable_url = url or (f"https://doi.org/{str(doi).strip().removeprefix('doi:')}" if doi else "")
+        if openable_url:
+            lines.append(f"TAUTAN SUMBER\n{openable_url}")
 
-        self.paper_detail.setPlainText(
-            "\n\n".join(lines)
-        )
-
-        self.open_source_button.setEnabled(
-            bool(url)
-        )
+        self.paper_detail.setPlainText("\n\n".join(lines))
+        self.open_source_button.setEnabled(bool(openable_url))
 
     def _selected_paper(self):
         rows = self.paper_table.selectionModel().selectedRows()
@@ -8178,6 +8851,14 @@ class PapersToolPage(QWidget):
         return self.filtered_papers[row]
 
     def _open_selected_source(self):
+        paper = self._selected_paper()
+        if not paper:
+            return
+        url = paper.get("url")
+        doi = paper.get("doi")
+        target_url = url or (f"https://doi.org/{str(doi).strip().removeprefix('doi:')}" if doi else "")
+        if target_url:
+            QDesktopServices.openUrl(QUrl(target_url))
         paper = self._selected_paper()
 
         if not paper:

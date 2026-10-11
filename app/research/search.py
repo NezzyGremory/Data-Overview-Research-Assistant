@@ -4,18 +4,29 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List, Optional
 
+import httpx
+
 from app.research.crossref import CrossrefClient
 from app.research.deduplication import PaperDeduplicator
-from app.research.openalex import OpenAlexClient
-from app.research.semantic_scholar import SemanticScholarClient
 from app.research.europe_pmc import EuropePMCClient
-from app.research.scopus import ScopusClient
+from app.research.openalex import OpenAlexClient
 from app.research.openaire import OpenAIREClient
 from app.research.paper import Paper
+from app.research.scopus import ScopusClient
+from app.research.semantic_scholar import SemanticScholarClient
 
 
 class AcademicSearchEngine:
-    """Search and merge records from several bibliographic indexes."""
+    """Mesin pencarian literatur akademik dengan multi-provider dan deduplikasi.
+
+    Provider yang diaudit dan dipertahankan:
+    - OpenAlex: Indeks bibliografi global, bebas key (mendukung email polite pool).
+    - Crossref: Registri resmi DOI dan metadata publikasi penerbit.
+    - Europe PMC: Repositori literatur ilmu hayati & biomedis publik (EBI/PMC).
+    - OpenAIRE: Grafik penelitian publik terintegrasi Eropa.
+    - Semantic Scholar: Graf literatur akademik (API key opsional/rate-limited).
+    - Scopus: Opsional, hanya aktif jika ELSEVIER_API_KEY dikonfigurasi.
+    """
 
     def __init__(
         self,
@@ -26,8 +37,6 @@ class AcademicSearchEngine:
         europe_pmc: Optional[EuropePMCClient] = None,
         scopus: Optional[ScopusClient] = None,
         openaire: Optional[OpenAIREClient] = None,
-        scholar: Any = None,
-        scholar_api_key: Optional[str] = None,
         deduplicator: Optional[PaperDeduplicator] = None,
         **kwargs,
     ):
@@ -47,7 +56,8 @@ class AcademicSearchEngine:
         limit: int = 20,
         use_crossref: bool = True,
         **kwargs,
-    ) -> Dict:
+    ) -> Dict[str, Any]:
+        """Menjalankan pencarian paralel ke provider yang aktif dan menggabungkan hasilnya."""
         if not query or not query.strip():
             return {
                 "status": "ERROR",
@@ -68,52 +78,55 @@ class AcademicSearchEngine:
         }
         if use_crossref:
             provider_calls["Crossref"] = lambda: self.crossref.search(query=query, rows=limit)
-        provider_calls["Semantic Scholar"] = lambda: self.semantic_scholar.search(query=query, limit=limit)
         provider_calls["Europe PMC"] = lambda: self.europe_pmc.search(query=query, limit=limit)
         provider_calls["OpenAIRE"] = lambda: self.openaire.search(query=query, limit=limit)
+        provider_calls["Semantic Scholar"] = lambda: self.semantic_scholar.search(query=query, limit=limit)
 
-        provider_status = {name: "ENABLED" for name in provider_calls}
+        provider_status: Dict[str, str] = {name: "ENABLED" for name in provider_calls}
         if self.scopus.enabled:
             provider_calls["Scopus"] = lambda: self.scopus.search(query=query, limit=limit)
             provider_status["Scopus"] = "ENABLED"
         else:
             provider_status["Scopus"] = "NOT_CONFIGURED"
+
         if not use_crossref:
             provider_status["Crossref"] = "DISABLED"
 
-        provider_attempts = {name: 0 for name in provider_calls}
-        provider_errors = {name: 0 for name in provider_calls}
-        # Independent providers run in parallel; the GUI research worker owns
-        # this operation, so network latency never blocks the desktop window.
+        # Menjalankan provider secara paralel di thread pool agar tidak memblokir UI
         with ThreadPoolExecutor(max_workers=max(1, len(provider_calls))) as executor:
             futures = {
-                executor.submit(search_provider): name
-                for name, search_provider in provider_calls.items()
+                executor.submit(search_fn): name
+                for name, search_fn in provider_calls.items()
             }
             for future, provider in futures.items():
-                provider_attempts[provider] += 1
                 try:
                     results = future.result()
                     results = results if isinstance(results, list) else []
                     all_papers.extend(results)
                     candidate_source_counts[provider] = len(results)
-                except Exception:
-                    provider_errors[provider] += 1
+                    provider_status[provider] = "ENABLED"
+                except httpx.HTTPStatusError as http_err:
                     candidate_source_counts[provider] = 0
+                    if http_err.response.status_code == 429:
+                        provider_status[provider] = "RATE_LIMITED"
+                    elif http_err.response.status_code in (401, 403):
+                        provider_status[provider] = "NOT_CONFIGURED"
+                    else:
+                        provider_status[provider] = "ERROR"
+                except Exception:
+                    candidate_source_counts[provider] = 0
+                    provider_status[provider] = "ERROR"
 
-        for provider, attempts in provider_attempts.items():
-            provider_status[provider] = (
-                "ERROR" if attempts and provider_errors[provider] == attempts else "ENABLED"
-            )
-
+        # Deduplikasi berurutan: DOI -> external_id -> normalized title
         unique_papers = self.deduplicator.deduplicate(all_papers)
         unique_papers = unique_papers[:limit]
 
         sources = sorted(
             {
-                paper.source
+                source.strip()
                 for paper in unique_papers
-                if paper.source
+                for source in (paper.source or "").split(",")
+                if source.strip()
             }
         )
 
@@ -125,7 +138,7 @@ class AcademicSearchEngine:
 
         if not unique_papers:
             status = "PARTIAL" if any(
-                value == "ERROR" for value in provider_status.values()
+                value in ("ERROR", "RATE_LIMITED") for value in provider_status.values()
             ) else "SUCCESS"
         else:
             status = "SUCCESS"

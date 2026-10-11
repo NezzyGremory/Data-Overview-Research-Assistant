@@ -18,6 +18,7 @@ class Paper:
     external_id: Optional[str] = None
     keywords: List[str] = field(default_factory=list)
     issn: List[str] = field(default_factory=list)
+    sinta_screening: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -33,6 +34,7 @@ class Paper:
             "external_id": self.external_id,
             "keywords": self.keywords,
             "issn": self.issn,
+            "sinta_screening": self.sinta_screening,
         }
 
     @property

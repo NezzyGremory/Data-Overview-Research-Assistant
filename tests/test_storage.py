@@ -90,6 +90,12 @@ def main() -> None:
                         "citation_count": 25,
                         "source": "Mock",
                         "external_id": "mock-1",
+                        "issn": ["1234-5678"],
+                        "sinta_screening": {
+                            "status": "S2",
+                            "checked_for_year": 2024,
+                            "period_confirmed": True,
+                        },
                         "keywords": [
                             "machine learning",
                             "survival",
@@ -182,6 +188,12 @@ def main() -> None:
         assert paper["year"] == 2024
         assert paper["relevance_score"] == 83.0
         assert paper["rank"] == 1
+        assert paper["issn"] == ["1234-5678"]
+        assert paper["sinta_screening"] == {
+            "status": "S2",
+            "checked_for_year": 2024,
+            "period_confirmed": True,
+        }
 
         assert paper["score_breakdown"]["keyword"] == 100.0
         assert paper["score_breakdown"]["domain"] == 65.0

@@ -93,8 +93,10 @@ class PaperDeduplicator:
                 first.source = (
                     f"{first.source}, {second.source}"
                 )
-
         elif second.source:
             first.source = second.source
+
+        if not first.sinta_screening and second.sinta_screening:
+            first.sinta_screening = second.sinta_screening
 
         return first

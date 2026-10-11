@@ -245,8 +245,74 @@ class Database:
                 ON transformation_trail(
                     project_id, from_version
                 );
+
+                -- ============================================
+                -- JOURNAL SCREENING & ACCREDITATION PERSISTENCE
+                -- ============================================
+
+                CREATE TABLE IF NOT EXISTS journal_screening (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    doi TEXT,
+                    paper_key TEXT,
+                    journal_name TEXT,
+                    issn_matched TEXT,
+                    rank TEXT,
+                    status TEXT NOT NULL,
+                    period_start INTEGER,
+                    period_end INTEGER,
+                    period_confirmed INTEGER DEFAULT 0,
+                    checked_for_year INTEGER,
+                    verification_source TEXT,
+                    source_url TEXT,
+                    is_ambiguous INTEGER DEFAULT 0,
+                    ambiguity_reason TEXT,
+                    notes TEXT,
+                    screening_json TEXT,
+                    checked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE INDEX IF NOT EXISTS
+                    idx_screening_doi
+                ON journal_screening(doi);
+
+                CREATE INDEX IF NOT EXISTS
+                    idx_screening_paper_key
+                ON journal_screening(paper_key);
                 """
             )
+
+            cursor = connection.cursor()
+            cursor.execute("PRAGMA table_info(papers)")
+            columns = [row[1] for row in cursor.fetchall()]
+            if "issn_json" not in columns:
+                cursor.execute("ALTER TABLE papers ADD COLUMN issn_json TEXT")
+            if "sinta_screening_json" not in columns:
+                cursor.execute("ALTER TABLE papers ADD COLUMN sinta_screening_json TEXT")
+
+            cursor.execute("PRAGMA table_info(journal_screening)")
+            screening_columns = {row[1] for row in cursor.fetchall()}
+            screening_migrations = {
+                "issn_matched": "TEXT",
+                "rank": "TEXT",
+                "period_start": "INTEGER",
+                "period_end": "INTEGER",
+                "period_confirmed": "INTEGER DEFAULT 0",
+                "checked_for_year": "INTEGER",
+                "verification_source": "TEXT",
+                "source_url": "TEXT",
+                "is_ambiguous": "INTEGER DEFAULT 0",
+                "ambiguity_reason": "TEXT",
+                "notes": "TEXT",
+                "screening_json": "TEXT",
+                "checked_at": "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP",
+                "updated_at": "TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP",
+            }
+            for column, definition in screening_migrations.items():
+                if column not in screening_columns:
+                    cursor.execute(
+                        f"ALTER TABLE journal_screening ADD COLUMN {column} {definition}"
+                    )
 
             connection.commit()
 
