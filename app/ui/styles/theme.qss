@@ -325,6 +325,26 @@ QPushButton#datasetAnalyzeButton:hover { background: var(--blue-hover); border-c
 QPushButton#datasetAnalyzeButton:pressed { background: var(--blue); }
 QPushButton#datasetAnalyzeButton:disabled { background: var(--border-solid); border-color: var(--border-solid); color: var(--muted); }
 
+/* Research Landscape */
+QPushButton#landscapeSearchButton { background: var(--blue); border: 1px solid var(--blue); border-radius: var(--button-radius); color: var(--surface); font-size: 22px; font-weight: 600; min-height: 66px; padding: 0 20px; }
+QPushButton#landscapeSearchButton:hover { background: var(--blue-hover); border-color: var(--blue-hover); }
+QPushButton#landscapeSearchButton:pressed { background: var(--blue); }
+QPushButton#landscapeSearchButton:disabled { background: var(--border-solid); border-color: var(--border-solid); color: var(--muted); }
+#landscapeStatus { color: var(--body); font-size: 20px; }
+QScrollArea#landscapeScroll { background: var(--canvas); border: none; }
+QScrollArea#landscapeDistributionViewport { background: var(--canvas); border: none; }
+QWidget#researchLandscapeContainer, QWidget#landscapeMetricsRow, QWidget#landscapeDistributionRow { background: var(--canvas); border: none; }
+#landscapeMetricCard, #landscapeDistributionCard { background: var(--surface); border: 1px solid var(--border); border-radius: var(--card-radius); }
+#landscapeMetricTitle { color: var(--body); font-size: 16px; font-weight: 700; }
+#landscapeMetricValue { color: var(--heading); font-family: "Plus Jakarta Sans"; font-size: 38px; font-weight: 700; }
+#landscapeMetricSubtitle { color: #8c8c8c; font-size: 20px; }
+#landscapeDistributionTitle { color: var(--heading); font-family: "Plus Jakarta Sans"; font-size: 29px; font-weight: 700; }
+#landscapeMethodLabel { color: var(--ink); font-size: 25px; }
+QProgressBar#landscapeMethodBar { background: #e3efff; border: none; border-radius: 4px; max-height: 8px; min-height: 8px; }
+QProgressBar#landscapeMethodBar::chunk { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #bcd9ff, stop:1 var(--blue)); border: none; border-radius: 4px; }
+#landscapeMethodValue { background: var(--quality-good); border: none; border-radius: 12px; color: var(--success); font-size: 15px; font-weight: 600; min-width: 30px; padding: 2px 8px; }
+#landscapeMethodEmpty { color: var(--muted); font-size: 18px; }
+
 /* Analysis and research surfaces */
 #analysisDatasetBanner { background: var(--surface); border: 1px solid var(--border); border-radius: var(--card-radius); min-height: 86px; }
 #analysisDatasetName { color: var(--heading); font-family: "Plus Jakarta Sans"; font-size: 24px; font-weight: 700; }

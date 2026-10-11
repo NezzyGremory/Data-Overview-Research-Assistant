@@ -9263,43 +9263,56 @@ class ResearchLandscapeToolPage(QWidget):
 
     def _build_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(20, 18, 20, 18)
-        root.setSpacing(10)
+        root.setContentsMargins(36, 20, 28, 16)
+        root.setSpacing(0)
 
         header = QHBoxLayout()
         title_layout = QVBoxLayout()
         title = QLabel("Research Landscape")
         title.setObjectName("pageTitle")
+        title.setFixedHeight(40)
         subtitle = QLabel(
             "Explore the methods, topics, and publication structure found in the analyzed literature."
         )
         subtitle.setObjectName("pageSubtitle")
         subtitle.setWordWrap(True)
+        title_layout.setContentsMargins(0, 9, 0, 0)
+        title_layout.setSpacing(5)
         title_layout.addWidget(title)
         title_layout.addWidget(subtitle)
         header.addLayout(title_layout, 1)
 
-        self.refresh_button = QPushButton("Refresh Landscape")
-        self.refresh_button.setObjectName("primaryButton")
-        self.refresh_button.setMinimumHeight(42)
+        self.refresh_button = QPushButton("Search")
+        self.refresh_button.setObjectName("landscapeSearchButton")
+        self.refresh_button.setMinimumSize(151, 66)
         self.refresh_button.setCursor(Qt.PointingHandCursor)
+        search_icon = _resource_path("assets/icons/search-white.svg")
+        if search_icon.exists():
+            self.refresh_button.setIcon(QIcon(str(search_icon)))
+            self.refresh_button.setIconSize(QSize(24, 24))
         self.refresh_button.clicked.connect(self.refresh)
         header.addWidget(self.refresh_button, 0, Qt.AlignTop)
         root.addLayout(header)
+        root.addSpacing(5)
 
         self.status_label = QLabel("No academic research result available.")
-        self.status_label.setObjectName("statusLabel")
+        self.status_label.setObjectName("landscapeStatus")
         self.status_label.setWordWrap(True)
         root.addWidget(self.status_label)
+        root.addSpacing(25)
 
         scroll = QScrollArea()
+        scroll.setObjectName("landscapeScroll")
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
         self.container = QWidget()
+        self.container.setObjectName("researchLandscapeContainer")
+        self.container.setAttribute(Qt.WA_StyledBackground, True)
         self.content = QVBoxLayout(self.container)
         self.content.setContentsMargins(0, 0, 0, 14)
-        self.content.setSpacing(12)
+        self.content.setSpacing(25)
         scroll.setWidget(self.container)
         root.addWidget(scroll, 1)
 
@@ -9376,8 +9389,26 @@ class ResearchLandscapeToolPage(QWidget):
         return str(value)
 
     def _metric_card(self, title, value, subtitle=""):
-        card = InfoCard(title, self._pretty(value), subtitle)
-        card.setObjectName("metricCard")
+        card = QFrame()
+        card.setObjectName("landscapeMetricCard")
+        card.setMinimumHeight(154)
+        apply_card_shadow(card)
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(22, 20, 22, 18)
+        layout.setSpacing(6)
+
+        title_label = QLabel(title.upper())
+        title_label.setObjectName("landscapeMetricTitle")
+        value_label = QLabel(self._pretty(value))
+        value_label.setObjectName("landscapeMetricValue")
+        value_label.setWordWrap(True)
+        subtitle_label = QLabel(subtitle)
+        subtitle_label.setObjectName("landscapeMetricSubtitle")
+        subtitle_label.setWordWrap(True)
+
+        layout.addWidget(title_label)
+        layout.addWidget(value_label)
+        layout.addWidget(subtitle_label)
         return card
 
     def _add_text_card(self, title, content):
@@ -9404,79 +9435,92 @@ class ResearchLandscapeToolPage(QWidget):
                 lines.append(f"{key}: {self._pretty(value)}")
         return "\n".join(lines)
 
-    def _add_distribution_card(self, title, value):
-        card = QFrame()
-        card.setObjectName("contentCard")
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(20, 18, 20, 18)
-        layout.setSpacing(8)
-        heading = QLabel(title)
-        heading.setObjectName("sectionTitle")
-        layout.addWidget(heading)
-
-        normalized = []
-        for item in self._listify(value):
+    @staticmethod
+    def _method_distribution_rows(value):
+        normalized = {}
+        for item in ResearchLandscapeToolPage._listify(value):
             if isinstance(item, tuple) and len(item) == 2:
                 label, amount = item
-                percent = False
             elif isinstance(item, dict):
-                label = self._pick(item, "method", "topic", "label", "name", "category", "year", default="Item")
-                raw = self._pick(item, "percentage", "percent", "confidence", "score", "count", "paper_count", "value")
-                percent = "percentage" in item or "percent" in item
-                amount = raw
+                label = ResearchLandscapeToolPage._pick(
+                    item, "method", "label", "name", "category", default=""
+                )
+                amount = ResearchLandscapeToolPage._pick(
+                    item, "percentage", "percent", "score", "count", "paper_count", "value"
+                )
             else:
-                label, amount, percent = str(item), None, False
+                continue
             try:
-                numeric = float(amount)
+                amount = float(amount)
             except (TypeError, ValueError):
-                numeric = None
-            normalized.append((str(label), numeric, percent, self._pretty(amount) if amount is not None else ""))
+                continue
+            key = re.sub(r"[^a-z0-9]", "", str(label).lower())
+            normalized[key] = (str(label), amount)
 
-        chart_rows = [row for row in normalized if row[1] is not None]
-        if chart_rows:
-            chart_rows = chart_rows[:10]
-            figure = Figure(figsize=(10, max(2.2, 0.36 * len(chart_rows) + 0.8)), tight_layout=True)
-            axis = figure.subplots()
-            labels = [row[0] for row in reversed(chart_rows)]
-            values = [row[1] for row in reversed(chart_rows)]
-            is_percent = all(row[2] for row in chart_rows)
-            bars = axis.barh(labels, values, color="#0D99FF", height=0.62)
-            axis.set_xlabel("Papers (%)" if is_percent else "Number of papers", fontsize=9, color="#64748B")
-            axis.tick_params(axis="both", labelsize=9, colors="#53667D")
-            for spine in ("top", "right", "left"):
-                axis.spines[spine].set_visible(False)
-            axis.grid(axis="x", color="#E8EEF6", linewidth=0.7)
-            axis.set_axisbelow(True)
-            maximum = max(values, default=0)
-            axis.set_xlim(0, min(110, max(1, maximum * 1.18)) if is_percent else max(1, maximum * 1.18))
-            for bar, row in zip(bars, reversed(chart_rows)):
-                label = f"{row[1]:g}%" if row[2] else f"{row[1]:g}"
-                axis.text(row[1] + max(0.15, maximum * 0.015), bar.get_y() + bar.get_height() / 2,
-                          label, va="center", fontsize=8, color="#344158")
-            canvas = FigureCanvasQTAgg(figure)
-            canvas.setMinimumHeight(180)
-            canvas.setMaximumHeight(360)
-            layout.addWidget(canvas)
-        elif normalized:
-            for label, _amount, _percent, raw in normalized[:10]:
+        preferred = [
+            ("Random Forest", ("randomforest",)),
+            ("Desicion Tree", ("decisiontree", "desiciontree")),
+            ("Logistic Regression", ("logisticregression",)),
+            ("SVM", ("svm", "supportvectormachine", "supportvectormachines")),
+            ("Gradient Boosting", ("gradientboosting",)),
+            ("Linear Regression", ("linearregression",)),
+        ]
+        rows = []
+        consumed = set()
+        for display_name, aliases in preferred:
+            for alias in aliases:
+                if alias in normalized:
+                    rows.append((display_name, normalized[alias][1]))
+                    consumed.add(alias)
+                    break
+        for key, (label, amount) in normalized.items():
+            if key not in consumed:
+                rows.append((label, amount))
+        return rows[:10]
+
+    def _add_distribution_card(self, title, rows, show_values=True):
+        card = QFrame()
+        card.setObjectName("landscapeDistributionCard")
+        card.setFixedWidth(805)
+        card.setMinimumHeight(418)
+        apply_card_shadow(card)
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(24, 22, 16, 24)
+        layout.setSpacing(19)
+        heading = QLabel(title)
+        heading.setObjectName("landscapeDistributionTitle")
+        layout.addWidget(heading)
+
+        if rows:
+            maximum = max((amount for _, amount in rows), default=1) or 1
+            for label, amount in rows:
                 row = QHBoxLayout()
+                row.setSpacing(12)
                 name = QLabel(label)
-                name.setObjectName("cardDescription")
-                value_label = QLabel(raw)
-                value_label.setObjectName("scoreBadge")
-                row.addWidget(name, 1)
-                row.addWidget(value_label)
+                name.setObjectName("landscapeMethodLabel")
+                name.setFixedWidth(259)
+
+                bar = QProgressBar()
+                bar.setObjectName("landscapeMethodBar")
+                bar.setRange(0, 1000)
+                bar.setValue(round(max(0, amount) / maximum * 1000))
+                bar.setTextVisible(False)
+                bar.setFixedHeight(8)
+
+                row.addWidget(name)
+                row.addWidget(bar, 1)
+                if show_values:
+                    value_label = QLabel(f"{amount:.2f}".rstrip("0").rstrip(".").replace(".", ","))
+                    value_label.setObjectName("landscapeMethodValue")
+                    value_label.setAlignment(Qt.AlignCenter)
+                    row.addWidget(value_label)
                 layout.addLayout(row)
+            layout.addStretch(1)
         else:
-            empty = QLabel("Belum ada data distribusi untuk ditampilkan.")
-            empty.setObjectName("cardDescription")
+            empty = QLabel("No method distribution available.")
+            empty.setObjectName("landscapeMethodEmpty")
             layout.addWidget(empty)
-        if getattr(self, "_distribution_grid", None) is not None:
-            index = self._distribution_card_index
-            self._distribution_grid.addWidget(card, index // 2, index % 2)
-            self._distribution_card_index += 1
-        else:
-            self.content.addWidget(card)
+        return card
 
     def update_from_result(self, result):
         if not isinstance(result, dict) or not result:
@@ -9488,7 +9532,6 @@ class ResearchLandscapeToolPage(QWidget):
 
         landscape = self._safe_dict(result.get("landscape"))
         summary = self._safe_dict(landscape.get("summary"))
-
         papers = result.get("papers", [])
         if not isinstance(papers, list):
             papers = []
@@ -9498,92 +9541,68 @@ class ResearchLandscapeToolPage(QWidget):
             "paper_count", "papers_analyzed", "total_papers", "papers_found",
             default=len(papers),
         )
+        methods = self._pick(
+            landscape,
+            "method_distribution", "methods", "method_counts", "top_methods", "dominant_methods",
+            default={},
+        )
+        method_rows = self._method_distribution_rows(methods)
         dominant_method = self._pick(
             summary,
             "dominant_method", "top_method", "most_common_method",
-            default="-",
+            default=(max(method_rows, key=lambda row: row[1])[0] if method_rows else "-"),
         )
         latest_year = self._pick(
             summary,
             "latest_publication_year", "latest_year", "max_year",
-            default="-",
+            default=max(
+                (str(paper.get("year")) for paper in papers if paper.get("year")),
+                default="-",
+            ),
         )
 
         self.status_label.setText(
-            f"Landscape loaded from Academic Research • {paper_count} papers analyzed"
+            f"Landscape loaded from Academic Research | {paper_count} papers analyzed"
         )
 
         cards_widget = QWidget()
+        cards_widget.setObjectName("landscapeMetricsRow")
         cards = QHBoxLayout(cards_widget)
         cards.setContentsMargins(0, 0, 0, 0)
-        cards.setSpacing(12)
+        cards.setSpacing(14)
         cards.addWidget(self._metric_card("Papers", paper_count, "Literature analyzed"))
-        cards.addWidget(self._metric_card("Dominant Method", dominant_method, "Most represented method"))
+        cards.addWidget(self._metric_card("Dominan Method", dominant_method, "Most represented method"))
         cards.addWidget(self._metric_card("Latest Publication", latest_year, "Newest publication year"))
+        cards.setStretch(0, 46)
+        cards.setStretch(1, 49)
+        cards.setStretch(2, 50)
         self.content.addWidget(cards_widget)
 
+        distribution_area = QScrollArea()
+        distribution_area.setObjectName("landscapeDistributionViewport")
+        distribution_area.setWidgetResizable(False)
+        distribution_area.setFrameShape(QFrame.NoFrame)
+        distribution_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        distribution_area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        distribution_area.setFixedHeight(418)
+        distribution_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
         distribution_widget = QWidget()
-        self._distribution_grid = QGridLayout(distribution_widget)
-        self._distribution_grid.setContentsMargins(0, 0, 0, 0)
-        self._distribution_grid.setHorizontalSpacing(12)
-        self._distribution_grid.setVerticalSpacing(12)
-        self._distribution_grid.setColumnStretch(0, 1)
-        self._distribution_grid.setColumnStretch(1, 1)
-        self._distribution_card_index = 0
-        self.content.addWidget(distribution_widget)
-
-        # Common analyzer field names + generic aliases.
-        methods = self._pick(
-            landscape,
-            "method_distribution", "methods", "method_counts", "top_methods", "dominant_methods",
+        distribution_widget.setObjectName("landscapeDistributionRow")
+        distribution_widget.setFixedSize(1628, 418)
+        distribution = QHBoxLayout(distribution_widget)
+        distribution.setContentsMargins(0, 0, 0, 0)
+        distribution.setSpacing(18)
+        distribution.addWidget(
+            self._add_distribution_card("Method Distribution", method_rows, show_values=True)
         )
-        sources = self._pick(landscape, "source_distribution", "sources", "source_counts")
-        topics = self._pick(
-            landscape,
-            "topic_distribution", "topics", "topic_counts", "top_topics", "research_topics",
+        distribution.addWidget(
+            self._add_distribution_card("Method Distribution", method_rows, show_values=False)
         )
-        venues = self._pick(
-            landscape,
-            "venue_distribution", "venues", "venue_counts", "top_venues",
-        )
-        years = self._pick(
-            landscape,
-            "publication_years", "year_distribution", "years", "publication_trend",
-        )
-
-        if methods:
-            self._add_distribution_card("Method Distribution", methods)
-        if sources:
-            self._add_distribution_card("Publication Sources", sources)
-        if topics:
-            self._add_distribution_card("Research Topics", topics)
-        if venues:
-            self._add_distribution_card("Publication Venues", venues)
-        if years:
-            self._add_distribution_card("Publication Years", years)
-
-        # Always expose the full structured landscape so no backend field is hidden.
-        if not any((methods, sources, topics, venues, years)):
-            self._add_text_card(
-                "Landscape Analysis",
-                self._format_mapping(landscape) or "No landscape details available.",
-            )
-        else:
-            details = {k: v for k, v in landscape.items() if k not in {
-                "summary", "paper_count", "status", "status_type",
-                "method_distribution", "methods", "method_counts", "top_methods", "dominant_methods",
-                "source_distribution", "sources", "source_counts", "research_activity",
-                "topic_distribution", "topics", "topic_counts", "top_topics", "research_topics",
-                "venue_distribution", "venues", "venue_counts", "top_venues",
-                "publication_years", "year_distribution", "years", "publication_trend",
-            }}
-            if details:
-                self._add_text_card("Additional Landscape Details", self._format_mapping(details))
-
+        distribution_area.setWidget(distribution_widget)
+        self.content.addWidget(distribution_area)
         self.content.addStretch()
-        self._distribution_grid = None
         self._rendered_result_id = id(result)
-
 
 
 
