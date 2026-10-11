@@ -10359,10 +10359,9 @@ class AboutPage(QWidget):
 
         add_card(0, 0, "Pengembang", "Abdul Muhis\nSains Data, UIN K.H. Abdurrahman Wahid Pekalongan")
         add_card(
-            0, 1, "Lisensi",
-            "MIT License. Penggunaan dan distribusi harus menyertakan pemberitahuan "
-            "hak cipta serta teks lisensi. Lisensi pustaka pihak ketiga mengikuti "
-            "ketentuan masing-masing.\nCopyright (c) 2026 Abdul Muhis",
+            0, 1, "Copyright",
+            "© 2026 Dataset Research.\n"
+            "Contoh teks hak cipta ini hanya untuk pratinjau tampilan.",
         )
         add_card(
             1, 0, "Data dan privasi",
@@ -10884,7 +10883,7 @@ class MainWindow(QMainWindow):
         divider.setFixedSize(1, 34)
         layout.addSpacing(10)
         layout.addWidget(divider)
-        version = QLabel("\u00a9 2026 [nama tim] v.")
+        version = QLabel("2026 Dataset Research v4.0.0")
         version.setObjectName("topbarVersion")
         layout.addSpacing(18)
         layout.addWidget(version)
