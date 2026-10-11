@@ -146,3 +146,66 @@ QWidget {
 #uploadSearchButton:hover {
     background: #f1f7ff;
 }
+
+/* Dataset loaded / data preview screen */
+#datasetPreviewHeader {
+    background: transparent;
+    border: none;
+}
+
+#datasetPreviewFileCard,
+#datasetPreviewMetricCard,
+#datasetPreviewTableCard,
+#datasetPreviewColumnsCard,
+#datasetPreviewFooter {
+    background: #ffffff;
+    border: 1px solid rgba(0, 107, 184, 0.3);
+    border-radius: 12px;
+}
+
+#datasetPreviewLoadedBadge {
+    background: #d8f8dd;
+    border-radius: 10px;
+    color: #098e00;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 6px 10px;
+}
+
+#datasetPreviewFileName {
+    color: #111111;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+#datasetPreviewFileDetails,
+#datasetPreviewFooterText {
+    color: #757575;
+    font-size: 11px;
+}
+
+#datasetPreviewMetricTitle {
+    color: #564e4e;
+    font-size: 9px;
+    font-weight: 700;
+}
+
+#datasetPreviewMetricValue {
+    color: #111111;
+    font-size: 22px;
+    font-weight: 700;
+}
+
+#datasetPreviewTable,
+#datasetPreviewColumnsCard {
+    background: #ffffff;
+}
+
+#datasetPreviewColumnList {
+    color: #454545;
+    font-size: 11px;
+}
+
+#datasetPreviewFooter {
+    border: none;
+}

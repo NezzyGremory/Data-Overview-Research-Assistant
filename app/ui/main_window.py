@@ -10288,7 +10288,7 @@ class MainWindow(QMainWindow):
         self.dashboard = DashboardPage(self)
         self.upload_page = UploadPage(self)
         self.dataset_search_page = DatasetSearchPage(self)
-        self.dataset_preview_page = DatasetPreviewPage()
+        self.dataset_preview_page = DatasetPreviewPage(self)
         self.datasets_tabs = QTabWidget()
         self.datasets_tabs.setObjectName("datasetsTabs")
         self.datasets_tabs.addTab(self.upload_page, "Upload from computer")
