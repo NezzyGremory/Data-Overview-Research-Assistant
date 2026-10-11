@@ -16,11 +16,12 @@ import httpx
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 
-from PySide6.QtCore import Qt, QUrl, QObject, QThread, QTimer, Signal, Slot, QMarginsF
-from PySide6.QtGui import QIcon, QPixmap, QDesktopServices, QTextDocument, QFont, QColor, QPageSize, QPageLayout
+from PySide6.QtCore import Qt, QUrl, QObject, QThread, QTimer, Signal, Slot, QMarginsF, QSize, QPoint
+from PySide6.QtGui import QIcon, QPixmap, QDesktopServices, QTextDocument, QFont, QFontDatabase, QColor, QPalette, QPageSize, QPageLayout
 from PySide6.QtPrintSupport import QPrinter
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -70,6 +71,7 @@ from app.ml.intelligence import MLIntelligenceEngine
 from app.research.intelligence import ResearchIntelligenceEngine
 from app.ui.dataset_search_page import DatasetSearchPage
 from app.ui.dataset_preview_page import DatasetPreviewPage
+from app.ui.style_utils import apply_card_shadow
 from app.storage import Database, ProjectRepository, DatasetVersionManager
 from app.reports import ReportGenerator
 from app.core.config import get_data_dir
@@ -1462,9 +1464,162 @@ class DashboardPage(QWidget):
         self._sync_workflow_connectors()
         self.update_research_result({})
 
+class UploadDatasetDialog(QDialog):
+    """Figma-style upload confirmation; settings are display-only for now."""
+
+    def __init__(self, main_window, file_path):
+        super().__init__(main_window)
+        self.main_window = main_window
+        self.file_path = Path(file_path)
+        try:
+            self.columns = [str(column) for column in pd.read_csv(self.file_path, nrows=0).columns]
+        except Exception:
+            self.columns = []
+        self.setObjectName("uploadDatasetDialog")
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.setWindowModality(Qt.ApplicationModal)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.surface = QFrame(self)
+        self.surface.setObjectName("uploadDialogSurface")
+        self.surface.setAttribute(Qt.WA_StyledBackground, True)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(self.surface)
+        self._build_ui()
+        apply_card_shadow(self.surface)
+
+        width = min(1027, max(760, main_window.width() - 48))
+        height = min(757, max(600, main_window.height() - 48))
+        self.setFixedSize(width, height)
+
+    def _field(self, label, widget):
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(20)
+        caption = QLabel(label)
+        caption.setObjectName("uploadDialogLabel")
+        layout.addWidget(caption)
+        widget.setObjectName("uploadDialogInput")
+        widget.setMinimumHeight(64)
+        layout.addWidget(widget)
+        return container
+
+    def _build_ui(self):
+        root = QVBoxLayout(self.surface)
+        root.setContentsMargins(42, 49, 42, 42)
+        root.setSpacing(0)
+
+        title = QLabel("Upload Dataset")
+        title.setObjectName("uploadDialogTitle")
+        root.addWidget(title)
+        root.addSpacing(10)
+        subtitle = QLabel("Choose a CSV file and confirm how DORA should read it.")
+        subtitle.setObjectName("uploadDialogSubtitle")
+        subtitle.setWordWrap(True)
+        root.addWidget(subtitle)
+        root.addSpacing(35)
+
+        file_card = QFrame()
+        file_card.setObjectName("uploadDialogFileCard")
+        file_card.setFixedHeight(134)
+        file_layout = QHBoxLayout(file_card)
+        file_layout.setContentsMargins(26, 20, 26, 20)
+        file_layout.setSpacing(26)
+        file_icon = QLabel()
+        file_icon.setObjectName("uploadDialogFileIcon")
+        file_icon.setAlignment(Qt.AlignCenter)
+        file_icon.setFixedSize(80, 80)
+        icon = QPixmap(str(_resource_path("assets/icons/file-text.svg")))
+        if not icon.isNull():
+            file_icon.setPixmap(icon.scaled(42, 42, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        file_layout.addWidget(file_icon)
+        file_text = QVBoxLayout()
+        file_text.setSpacing(4)
+        filename = QLabel(self.file_path.name)
+        filename.setObjectName("uploadDialogFileName")
+        size_kb = self.file_path.stat().st_size / 1024 if self.file_path.exists() else 0
+        details_text = (
+            f"{max(size_kb, 0.1):.1f} KB · {len(self.columns)} columns detected"
+            if self.columns
+            else f"{max(size_kb, 0.1):.1f} KB · CSV file selected"
+        )
+        details = QLabel(details_text)
+        details.setObjectName("uploadDialogFileDetails")
+        file_text.addWidget(filename)
+        file_text.addWidget(details)
+        file_layout.addLayout(file_text, 1)
+        root.addWidget(file_card)
+        root.addSpacing(33)
+
+        dataset_name = QLineEdit(self.file_path.name)
+        delimiter = QComboBox()
+        delimiter.addItems(["Comma (,)" , "Semicolon (;)" , "Tab"])
+        target = QComboBox()
+        target.addItems(self.columns or ["Select target column"])
+        if "Survived" in self.columns:
+            target.setCurrentText("Survived")
+        encoding = QComboBox()
+        encoding.addItems(["UTF-8", "UTF-8-SIG", "Latin-1"])
+
+        fields = QGridLayout()
+        fields.setContentsMargins(0, 0, 0, 0)
+        fields.setHorizontalSpacing(14)
+        fields.setVerticalSpacing(22)
+        fields.addWidget(self._field("DATASET NAME", dataset_name), 0, 0)
+        fields.addWidget(self._field("DEMILITER", delimiter), 0, 1)
+        fields.addWidget(self._field("TARGET COLUMN", target), 1, 0)
+        fields.addWidget(self._field("ENCODING", encoding), 1, 1)
+        fields.setColumnStretch(0, 1)
+        fields.setColumnStretch(1, 1)
+        root.addLayout(fields)
+        root.addSpacing(28)
+
+        first_row = QCheckBox("First row contains column names")
+        first_row.setObjectName("uploadDialogCheck")
+        first_row.setChecked(True)
+        root.addWidget(first_row)
+        root.addStretch(1)
+
+        actions = QHBoxLayout()
+        actions.setSpacing(12)
+        actions.addStretch(1)
+        cancel = QPushButton("Cancel")
+        cancel.setObjectName("uploadDialogCancel")
+        cancel.setFixedSize(154, 64)
+        cancel.clicked.connect(self.reject)
+        confirm = QPushButton("Upload && Preview")
+        confirm.setObjectName("primaryButton")
+        confirm.setFixedSize(290, 64)
+        confirm.clicked.connect(self.accept)
+        actions.addWidget(cancel)
+        actions.addWidget(confirm)
+        root.addLayout(actions)
+
+    def exec_with_overlay(self):
+        host = self.main_window.centralWidget()
+        overlay = QWidget(host)
+        overlay.setObjectName("dialogOverlay")
+        overlay.setAttribute(Qt.WA_StyledBackground, True)
+        overlay.setGeometry(host.rect())
+        overlay.show()
+        overlay.raise_()
+        origin = self.main_window.mapToGlobal(QPoint(0, 0))
+        self.move(
+            origin.x() + (self.main_window.width() - self.width()) // 2,
+            origin.y() + (self.main_window.height() - self.height()) // 2,
+        )
+        result = self.exec()
+        overlay.hide()
+        overlay.deleteLater()
+        return result
+
+
 class UploadPage(QWidget):
     def __init__(self, main_window):
         super().__init__()
+        self.setObjectName("uploadPage")
 
         self.main_window = main_window
 
@@ -1476,100 +1631,129 @@ class UploadPage(QWidget):
         root.setSpacing(0)
 
         self.scroll = QScrollArea()
+        self.setAttribute(Qt.WA_StyledBackground, True)
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QFrame.NoFrame)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.scroll.viewport().setObjectName("pageViewport")
+        self.scroll.viewport().setAttribute(Qt.WA_StyledBackground, True)
 
         container = QWidget()
+        container.setObjectName("uploadContainer")
+        self.main_window._apply_canvas_background(container)
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(24, 20, 24, 22)
-        layout.setSpacing(14)
+        layout.setContentsMargins(36, 30, 24, 36)
+        layout.setSpacing(32)
 
         header = QHBoxLayout()
         title_block = QVBoxLayout()
-        title_block.setSpacing(3)
-
+        title_block.setSpacing(4)
         title = QLabel("Dataset")
         title.setObjectName("pageTitle")
-
         subtitle = QLabel("Upload, preview and clean your CSV before analysis.")
         subtitle.setObjectName("pageSubtitle")
         subtitle.setWordWrap(True)
-
         title_block.addWidget(title)
         title_block.addWidget(subtitle)
         header.addLayout(title_block, 1)
 
-        self.upload_button = QPushButton("↑   Upload Dataset")
+        self.upload_button = QPushButton("Upload Dataset")
+        self.upload_button.setIcon(QIcon(str(_resource_path("assets/icons/upload.svg"))))
+        self.upload_button.setIconSize(QSize(22, 22))
         self.upload_button.setObjectName("primaryButton")
-        self.upload_button.setMinimumHeight(44)
-        self.upload_button.setMinimumWidth(172)
+        self.upload_button.setMinimumHeight(62)
+        self.upload_button.setMinimumWidth(254)
         self.upload_button.clicked.connect(self.select_dataset)
         header.addWidget(self.upload_button, 0, Qt.AlignTop)
         layout.addLayout(header)
 
         content_row = QHBoxLayout()
-        content_row.setSpacing(14)
-
+        content_row.setSpacing(22)
         upload_card = QFrame()
         upload_card.setObjectName("uploadCard")
+        upload_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        apply_card_shadow(upload_card)
         upload_layout = QVBoxLayout(upload_card)
-        upload_layout.setContentsMargins(18, 18, 18, 18)
-        upload_layout.setSpacing(14)
+        upload_layout.setContentsMargins(18, 18, 28, 28)
+        upload_layout.setSpacing(40)
 
         upload_title = QLabel("Upload a dataset")
         upload_title.setObjectName("sectionTitle")
+        upload_title.setContentsMargins(18, 20, 0, 0)
+        upload_title.setFixedHeight(44)
         upload_layout.addWidget(upload_title)
 
         dropzone = QFrame()
         dropzone.setObjectName("uploadDropzone")
+        dropzone.setFixedHeight(326)
         drop_layout = QVBoxLayout(dropzone)
         drop_layout.setContentsMargins(16, 18, 16, 18)
-        drop_layout.setSpacing(8)
+        drop_layout.setSpacing(10)
         drop_layout.addStretch(1)
-
-        icon_label = QLabel("⇧")
+        icon_label = QLabel()
         icon_label.setObjectName("uploadDropIcon")
         icon_label.setAlignment(Qt.AlignCenter)
+        icon_label.setFixedSize(68, 68)
+        upload_pixmap = QPixmap(str(_resource_path("assets/icons/file-arrow-up.svg")))
+        if not upload_pixmap.isNull():
+            icon_label.setPixmap(upload_pixmap.scaled(60, 60, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         drop_layout.addWidget(icon_label, 0, Qt.AlignHCenter)
 
-        drop_title = QLabel("Drag & drop your CSV file here")
+        drop_title = QLabel("Drag & drop your file CSV file here")
         drop_title.setObjectName("uploadDropTitle")
         drop_title.setAlignment(Qt.AlignCenter)
         drop_layout.addWidget(drop_title)
 
-        drop_description = QLabel(
-            "or use Upload Dataset above. CSV files up to 200 MB."
-        )
-        drop_description.setObjectName("uploadDropDescription")
-        drop_description.setAlignment(Qt.AlignCenter)
-        drop_description.setWordWrap(True)
-        drop_layout.addWidget(drop_description)
+        description_row = QHBoxLayout()
+        description_row.setSpacing(5)
+        description_row.addStretch(1)
+        prefix = QLabel("or")
+        prefix.setObjectName("uploadDropDescription")
+        description_row.addWidget(prefix)
+        browse_link = QPushButton("browse from your computer.")
+        browse_link.setObjectName("uploadBrowseLink")
+        browse_link.setFlat(True)
+        browse_link.setCursor(Qt.PointingHandCursor)
+        browse_link.clicked.connect(self.select_dataset)
+        description_row.addWidget(browse_link)
+        suffix = QLabel("csv up to 200 MB")
+        suffix.setObjectName("uploadDropDescription")
+        description_row.addWidget(suffix)
+        description_row.addStretch(1)
+        drop_layout.addLayout(description_row)
         drop_layout.addStretch(1)
-        upload_layout.addWidget(dropzone, 1)
+        dropzone_wrap = QWidget()
+        dropzone_wrap_layout = QHBoxLayout(dropzone_wrap)
+        dropzone_wrap_layout.setContentsMargins(18, 0, 0, 0)
+        dropzone_wrap_layout.setSpacing(0)
+        dropzone_wrap_layout.addWidget(dropzone)
+        dropzone_wrap.setFixedHeight(326)
+        upload_layout.addWidget(dropzone_wrap)
 
-        steps_row = QHBoxLayout()
-        steps_row.setSpacing(8)
+        steps_wrap = QWidget()
+        steps_wrap.setFixedHeight(65)
+        steps_row = QHBoxLayout(steps_wrap)
+        steps_row.setContentsMargins(0, 0, 0, 0)
+        steps_row.setSpacing(5)
         for number, heading, detail in (
             ("1", "Upload CSV", "Choose your file"),
             ("2", "Preview", "Check the first rows"),
-            ("3", "Quality check", "Missing values & outliers"),
-            ("4", "Analyze", "Continue to analysis"),
+            ("3", "Quality check", "Missing values & outlier"),
+            ("4", "Analyze", "Continue to Analysis"),
         ):
             step = QFrame()
             step.setObjectName("uploadStep")
+            step.setFixedHeight(65)
             step_layout = QHBoxLayout(step)
-            step_layout.setContentsMargins(8, 7, 8, 7)
-            step_layout.setSpacing(8)
-
+            step_layout.setContentsMargins(9, 8, 8, 8)
+            step_layout.setSpacing(9)
             badge = QLabel(number)
             badge.setObjectName("uploadStepBadge")
             badge.setAlignment(Qt.AlignCenter)
-            badge.setFixedSize(28, 28)
-
+            badge.setFixedSize(40, 40)
             text_layout = QVBoxLayout()
-            text_layout.setSpacing(1)
+            text_layout.setSpacing(2)
             step_title = QLabel(heading)
             step_title.setObjectName("uploadStepTitle")
             step_detail = QLabel(detail)
@@ -1580,47 +1764,50 @@ class UploadPage(QWidget):
             step_layout.addWidget(badge)
             step_layout.addLayout(text_layout, 1)
             steps_row.addWidget(step, 1)
-        upload_layout.addLayout(steps_row)
-        content_row.addWidget(upload_card, 3)
+        upload_layout.addWidget(steps_wrap)
+        upload_layout.addStretch(1)
+        content_row.addWidget(upload_card, 215)
 
         side_column = QVBoxLayout()
-        side_column.setSpacing(12)
-
+        side_column.setSpacing(22)
         search_card = QFrame()
         search_card.setObjectName("uploadSearchCard")
+        search_card.setMinimumHeight(244)
+        apply_card_shadow(search_card)
         search_layout = QVBoxLayout(search_card)
-        search_layout.setContentsMargins(16, 15, 16, 15)
-        search_layout.setSpacing(8)
-
-        search_icon = QLabel("⌕")
+        search_layout.setContentsMargins(22, 20, 22, 22)
+        search_layout.setSpacing(10)
+        search_icon = QLabel()
         search_icon.setObjectName("uploadSearchIcon")
         search_icon.setAlignment(Qt.AlignCenter)
-        search_icon.setFixedSize(30, 30)
+        search_icon.setFixedSize(42, 42)
+        search_pixmap = QPixmap(str(_resource_path("assets/icons/search.svg")))
+        if not search_pixmap.isNull():
+            search_icon.setPixmap(search_pixmap.scaled(28, 28, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         search_layout.addWidget(search_icon, 0, Qt.AlignLeft)
-
         search_title = QLabel("No dataset yet?")
         search_title.setObjectName("cardTitle")
         search_layout.addWidget(search_title)
-
         search_description = QLabel(
-            "Find public datasets from Kaggle and Hugging Face, then send them straight to DORA."
+            "Find public dataset form Kaggle and Hugging Face, then send them straight to DORA"
         )
         search_description.setObjectName("cardDescription")
         search_description.setWordWrap(True)
         search_layout.addWidget(search_description)
-
         search_button = QPushButton("Open Dataset Search")
         search_button.setObjectName("uploadSearchButton")
-        search_button.setMinimumHeight(38)
+        search_button.setMinimumHeight(62)
+        search_button.setMinimumWidth(254)
         search_button.clicked.connect(self.main_window.open_dataset_search_page)
         search_layout.addWidget(search_button, 0, Qt.AlignLeft)
         side_column.addWidget(search_card)
 
         tips_card = QFrame()
         tips_card.setObjectName("uploadTipsCard")
+        apply_card_shadow(tips_card)
         tips_layout = QVBoxLayout(tips_card)
-        tips_layout.setContentsMargins(16, 15, 16, 15)
-        tips_layout.setSpacing(10)
+        tips_layout.setContentsMargins(22, 20, 22, 22)
+        tips_layout.setSpacing(12)
         tips_title = QLabel("Tips for a good upload")
         tips_title.setObjectName("cardTitle")
         tips_layout.addWidget(tips_title)
@@ -1635,15 +1822,11 @@ class UploadPage(QWidget):
         tips_layout.addWidget(tips)
         tips_layout.addStretch(1)
         side_column.addWidget(tips_card, 1)
-
-        content_row.addLayout(side_column, 1)
+        content_row.addLayout(side_column, 100)
         layout.addLayout(content_row, 1)
 
-        # Kept for the existing upload handler, which updates this status
-        # before navigating to the analysis page.
         self.info_label = QLabel("No dataset selected.")
         self.info_label.setObjectName("cardDescription")
-
         self.scroll.setWidget(container)
         root.addWidget(self.scroll)
 
@@ -1661,6 +1844,10 @@ class UploadPage(QWidget):
         )
 
         if not file_path:
+            return
+
+        upload_dialog = UploadDatasetDialog(self.main_window, file_path)
+        if upload_dialog.exec_with_overlay() != QDialog.DialogCode.Accepted:
             return
 
         try:
@@ -10104,8 +10291,8 @@ class MainWindow(QMainWindow):
             max_h = max(400, avail.height() - 48)
             min_w = min(760, max(560, int(max_w * 0.72)))
             min_h = min(540, max(420, int(max_h * 0.72)))
-            initial_w = min(1200, max(min_w, int(max_w * 0.92)))
-            initial_h = min(750, max(min_h, int(max_h * 0.92)))
+            initial_w = min(1920, max(min_w, int(max_w * 0.98)))
+            initial_h = min(1080, max(min_h, int(max_h * 0.96)))
             self.resize(initial_w, initial_h)
             self.setMinimumSize(min_w, min_h)
         else:
@@ -10266,12 +10453,42 @@ class MainWindow(QMainWindow):
             return
 
         try:
+            assets_root = Path(__file__).with_name("assets")
+            for font_file in (
+                assets_root / "fonts" / "Inter-Variable.ttf",
+                assets_root / "fonts" / "PlusJakartaSans-Variable.ttf",
+                assets_root / "fonts" / "IntelOneMono-Medium.ttf",
+            ):
+                if font_file.exists():
+                    QFontDatabase.addApplicationFont(str(font_file))
+
             stylesheet = qss_path.read_text(encoding="utf-8")
             if theme_path.exists():
-                stylesheet += "\n\n" + theme_path.read_text(encoding="utf-8")
+                theme = theme_path.read_text(encoding="utf-8")
+                tokens = dict(re.findall(r"/\*\s*@([\w-]+):\s*(.*?)\s*\*/", theme))
+                self._theme_tokens = tokens
+                theme = re.sub(
+                    r"var\(--([\w-]+)\)",
+                    lambda match: tokens.get(match.group(1), match.group(0)),
+                    theme,
+                )
+                canvas = tokens.get("canvas", "#f1f7ff")
+                palette = self.palette()
+                for role in (QPalette.Window, QPalette.Base, QPalette.AlternateBase):
+                    palette.setColor(role, QColor(canvas))
+                self.setPalette(palette)
+                stylesheet += "\n\n" + theme
             self.setStyleSheet(stylesheet)
         except OSError as error:
             print(f"Warning: failed to load stylesheet: {error}")
+
+    def _apply_canvas_background(self, widget):
+        color = QColor(self._theme_tokens.get("canvas", "#f1f7ff"))
+        palette = widget.palette()
+        palette.setColor(QPalette.Window, color)
+        palette.setColor(QPalette.Base, color)
+        widget.setPalette(palette)
+        widget.setAutoFillBackground(True)
 
     # =========================================================
     # WINDOW
@@ -10299,6 +10516,7 @@ class MainWindow(QMainWindow):
 
         self.page_stack = QStackedWidget()
         self.page_stack.setObjectName("pageStack")
+        self.page_stack.setAttribute(Qt.WA_StyledBackground, True)
         content_layout.addWidget(self.page_stack, 1)
 
         root_layout.addWidget(content, 1)
@@ -10309,10 +10527,18 @@ class MainWindow(QMainWindow):
         self.dataset_preview_page = DatasetPreviewPage(self)
         self.datasets_tabs = QTabWidget()
         self.datasets_tabs.setObjectName("datasetsTabs")
+        self.datasets_tabs.setAttribute(Qt.WA_StyledBackground, True)
         self.datasets_tabs.addTab(self.upload_page, "Upload from computer")
         self.datasets_tabs.addTab(self.dataset_search_page, "Find online")
         self.datasets_tabs.addTab(self.dataset_preview_page, "Preview")
+        self.datasets_tabs.tabBar().setVisible(False)
+        self.datasets_tab_pages = self.datasets_tabs.findChild(QStackedWidget)
+        if self.datasets_tab_pages is not None:
+            self.datasets_tab_pages.setObjectName("datasetsTabPages")
+            self.datasets_tab_pages.setAttribute(Qt.WA_StyledBackground, True)
         self.datasets_page = QWidget()
+        self.datasets_page.setObjectName("datasetsPage")
+        self.datasets_page.setAttribute(Qt.WA_StyledBackground, True)
         datasets_layout = QVBoxLayout(self.datasets_page)
         datasets_layout.setContentsMargins(0, 0, 0, 0)
         datasets_layout.setSpacing(0)
@@ -10333,27 +10559,49 @@ class MainWindow(QMainWindow):
         self.pages = {
             "dashboard": self.dashboard,
             "dataset": self.datasets_page,
+            "dataset_search": self.datasets_page,
             "analysis": self.analysis_page,
             "ml": self.ml_page,
             "research": self.research_page,
+            "papers": self.research_page,
             "insights": self.research_insights_page,
+            "landscape": self.landscape_tool_page,
+            "gap": self.gap_tool_page,
             "report": self.report_tool_page,
             "about": self.about_page,
         }
 
         for page in self.pages.values():
-            self.page_stack.addWidget(page)
+            if self.page_stack.indexOf(page) < 0:
+                self.page_stack.addWidget(page)
 
         self._page_titles = {
             "dashboard": "Dashboard",
             "dataset": "Datasets",
+            "dataset_search": "Dataset Search",
             "analysis": "Dataset Analysis",
             "ml": "ML Intelligence",
             "research": "Academic Research",
+            "papers": "Papers",
             "insights": "Research Insights",
+            "landscape": "Research Landscape",
+            "gap": "Research Gap",
             "report": "Research Report",
             "about": "About",
         }
+
+        for widget in (root, content, self.page_stack, self.datasets_page, self.datasets_tabs, self.datasets_tab_pages):
+            if widget is None:
+                continue
+            self._apply_canvas_background(widget)
+        seen_page_ids = set()
+        for page in self.pages.values():
+            if id(page) not in seen_page_ids:
+                seen_page_ids.add(id(page))
+                self._apply_canvas_background(page)
+        for scroll_area in self.findChildren(QScrollArea):
+            self._apply_canvas_background(scroll_area)
+            self._apply_canvas_background(scroll_area.viewport())
 
         self.open_dashboard()
 
@@ -10365,7 +10613,7 @@ class MainWindow(QMainWindow):
         sidebar_scroll = QScrollArea()
         self.sidebar_scroll = sidebar_scroll
         sidebar_scroll.setObjectName("sidebarScroll")
-        sidebar_scroll.setFixedWidth(250)
+        sidebar_scroll.setFixedWidth(418)
         sidebar_scroll.setWidgetResizable(True)
         sidebar_scroll.setFrameShape(QFrame.NoFrame)
         sidebar_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -10373,126 +10621,68 @@ class MainWindow(QMainWindow):
 
         sidebar = QWidget()
         sidebar.setObjectName("sidebar")
-
         layout = QVBoxLayout(sidebar)
         self.sidebar_layout = layout
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(5)
+        layout.setContentsMargins(28, 78, 28, 24)
+        layout.setSpacing(4)
 
         brand = QHBoxLayout()
-        brand.setSpacing(10)
-
-        logo = QLabel()
+        brand.setSpacing(14)
+        brand.setContentsMargins(13, 0, 0, 0)
+        logo = QLabel("D")
         logo.setObjectName("brandLogo")
-        logo.setFixedSize(44, 44)
+        logo.setFixedSize(82, 82)
         logo.setAlignment(Qt.AlignCenter)
-
         logo_path = _resource_path("assets/logo.jpg")
         if logo_path.exists():
-            pixmap = QPixmap(str(logo_path))
+            pixmap = QPixmap(str(logo_path)).copy(275, 130, 560, 650)
             if not pixmap.isNull():
-                logo.setPixmap(
-                    pixmap.scaled(
-                        44,
-                        44,
-                        Qt.KeepAspectRatio,
-                        Qt.SmoothTransformation,
-                    )
-                )
-        else:
-            logo.setText("DR")
+                logo.setPixmap(pixmap.scaled(82, 82, Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
         brand_text_container = QWidget()
         self.brand_text_container = brand_text_container
         brand_text = QVBoxLayout(brand_text_container)
         brand_text.setContentsMargins(0, 0, 0, 0)
-        brand_text.setSpacing(0)
-
-        title = QLabel("DATASET")
+        brand_text.setSpacing(2)
+        title = QLabel("DORA")
         title.setObjectName("brandTitle")
-
-        accent = QLabel("RESEARCH")
-        accent.setObjectName("brandAccent")
-
-        subtitle = QLabel("Research Workspace")
+        subtitle = QLabel("Data Overview & Research Assistant")
         subtitle.setObjectName("brandSubtitle")
-
+        subtitle.setWordWrap(True)
+        brand_text_container.setMaximumWidth(210)
         brand_text.addWidget(title)
-        brand_text.addWidget(accent)
         brand_text.addWidget(subtitle)
-
         brand.addWidget(logo)
         brand.addWidget(brand_text_container, 1)
         layout.addLayout(brand)
-
-        layout.addSpacing(20)
-
-        workspace = QLabel("WORKSPACE")
-        workspace.setObjectName("sectionLabel")
-        self.sidebar_section_labels = [workspace]
-        layout.addWidget(workspace)
+        layout.addSpacing(72)
 
         self.nav_buttons = {}
         self.nav_text_widgets = []
-
-        self._add_nav_button(layout, "dashboard", chr(0x2302), "Dashboard")
-        self._add_nav_button(layout, "dataset", chr(0x25a6), "Datasets")
-        self._add_nav_button(layout, "analysis", chr(0x25c7), "Analysis")
-        self._add_nav_button(layout, "ml", chr(0x2726), "ML Intelligence")
-        self._add_nav_button(layout, "research", chr(0x25ce), "Academic Research")
-        self._add_nav_button(layout, "insights", chr(0x25c7), "Research Insights")
-        layout.addSpacing(18)
-
-        tools = QLabel("REPORTS")
-        tools.setObjectName("sectionLabel")
-        self.sidebar_section_labels.append(tools)
-        layout.addWidget(tools)
-
-        for key, icon, text, enabled in [
-            ("report", chr(0x25b0), "Research Report", True),
-        ]:
-            self._add_nav_button(
-                layout,
-                key,
-                icon,
-                text,
-                enabled=enabled,
-                tool_item=True,
-            )
-
-        layout.addSpacing(18)
-        about_section = QLabel("APP")
-        about_section.setObjectName("sectionLabel")
-        self.sidebar_section_labels.append(about_section)
-        layout.addWidget(about_section)
-        self._add_nav_button(layout, "about", chr(0x24D8), "About", tool_item=True)
-
+        self.sidebar_section_labels = []
+        self._add_nav_section(layout, "WORKSPACE")
+        self._add_nav_button(layout, "dataset_search", "dataset-search.svg", "Dataset Search")
+        self._add_nav_button(layout, "dataset", "dataset.svg", "Dataset")
+        self._add_nav_button(layout, "analysis", "analysis.svg", "Analysis")
+        self._add_nav_button(layout, "ml", "ml-intelligence.svg", "ML Intelligence")
+        self._add_nav_button(layout, "dashboard", "overview.svg", "Overview")
+        layout.addSpacing(24)
+        self._add_nav_section(layout, "RESEARCH TOOLS")
+        self._add_nav_button(layout, "research", "academic-research.svg", "Academic Research")
+        self._add_nav_button(layout, "papers", "papers.svg", "Papers")
+        self._add_nav_button(layout, "landscape", "research-landscape.svg", "Research Landscape")
+        self._add_nav_button(layout, "gap", "research-gap.svg", "Research Gap")
+        self._add_nav_button(layout, "report", "research-report.svg", "Research Report")
         layout.addStretch()
-
-        status_card = QFrame()
-        self.sidebar_status_card = status_card
-        status_card.setObjectName("workspaceStatus")
-        status_layout = QVBoxLayout(status_card)
-        status_layout.setContentsMargins(13, 11, 13, 11)
-        status_layout.setSpacing(3)
-
-        status_title = QLabel("LOCAL WORKSPACE")
-        status_title.setObjectName("workspaceStatusTitle")
-        status_value = QLabel("●  Ready")
-        status_value.setObjectName("workspaceStatusValue")
-
-        status_layout.addWidget(status_title)
-        status_layout.addWidget(status_value)
-        layout.addWidget(status_card)
-
-        footer = QLabel("Dataset Research\n© 2024 Sains Data")
-        self.sidebar_footer = footer
-        footer.setObjectName("sidebarFooter")
-        footer.setWordWrap(True)
-        layout.addWidget(footer)
 
         sidebar_scroll.setWidget(sidebar)
         return sidebar_scroll
+
+    def _add_nav_section(self, layout, title):
+        label = QLabel(title)
+        label.setObjectName("sectionLabel")
+        self.sidebar_section_labels.append(label)
+        layout.addWidget(label)
 
     def _add_nav_button(self, layout, key, icon, text, enabled=True, tool_item=False):
         button = QPushButton()
@@ -10507,10 +10697,15 @@ class MainWindow(QMainWindow):
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(11)
 
-        icon_label = QLabel(icon)
+        icon_label = QLabel()
         icon_label.setObjectName("navIcon")
-        icon_label.setFixedWidth(22)
+        icon_label.setFixedSize(28, 28)
         icon_label.setAlignment(Qt.AlignCenter)
+        icon_path = _resource_path(Path("assets") / "icons" / icon)
+        if icon_path.exists():
+            pixmap = QPixmap(str(icon_path))
+            if not pixmap.isNull():
+                icon_label.setPixmap(pixmap.scaled(26, 26, Qt.KeepAspectRatio, Qt.SmoothTransformation))
 
         text_label = QLabel(text)
         text_label.setObjectName("navText")
@@ -10527,10 +10722,13 @@ class MainWindow(QMainWindow):
         callbacks = {
             "dashboard": self.open_dashboard,
             "dataset": self.open_datasets_page,
+            "dataset_search": self.open_dataset_search_page,
             "analysis": self.open_analysis_page,
             "ml": self.open_ml_page,
             "research": self.open_research_page,
-            "insights": self.open_insights_page,
+            "papers": self.open_papers_tool,
+            "landscape": self.open_landscape_tool,
+            "gap": self.open_gap_tool,
             "report": self.open_report_tool,
             "about": self.open_about,
         }
@@ -10545,21 +10743,36 @@ class MainWindow(QMainWindow):
     def _build_topbar(self):
         topbar = QFrame()
         topbar.setObjectName("topbar")
-        topbar.setFixedHeight(72)
+        topbar.setFixedHeight(124)
 
         layout = QHBoxLayout(topbar)
-        layout.setContentsMargins(26, 0, 26, 0)
-
+        layout.setContentsMargins(34, 0, 42, 0)
         self.page_title = QLabel("Dashboard")
         self.page_title.setObjectName("topbarTitle")
-
-        layout.addWidget(self.page_title)
+        self.page_title.hide()
         layout.addStretch()
 
-        status = QLabel("●  LOCAL WORKSPACE")
-        status.setObjectName("topbarStatus")
-        layout.addWidget(status)
-
+        about = QPushButton("About")
+        about.setObjectName("topbarLink")
+        about.setIcon(QIcon(str(_resource_path("assets/icons/about.svg"))))
+        about.setProperty("active", True)
+        about.clicked.connect(self.open_about)
+        layout.addWidget(about)
+        for label, icon_name in (("Copyright", "copyright.svg"), ("Help", "help.svg")):
+            link = QPushButton(label)
+            link.setObjectName("topbarLink")
+            link.setIcon(QIcon(str(_resource_path(Path("assets") / "icons" / icon_name))))
+            link.setFlat(True)
+            layout.addWidget(link)
+        divider = QFrame()
+        divider.setObjectName("topbarDivider")
+        divider.setFixedSize(1, 34)
+        layout.addSpacing(10)
+        layout.addWidget(divider)
+        version = QLabel("\u00a9 2026 [nama tim] v.")
+        version.setObjectName("topbarVersion")
+        layout.addSpacing(18)
+        layout.addWidget(version)
         return topbar
 
     def resizeEvent(self, event):
@@ -10568,21 +10781,19 @@ class MainWindow(QMainWindow):
         if sidebar is None:
             return
 
-        compact = event.size().width() < 1080
-        sidebar.setFixedWidth(72 if compact else 250)
+        compact = event.size().width() < 1180
+        sidebar.setFixedWidth(76 if compact else 418)
         self.sidebar_layout.setContentsMargins(
-            8 if compact else 16,
-            16,
-            8 if compact else 16,
-            16,
+            8 if compact else 28,
+            20 if compact else 78,
+            8 if compact else 28,
+            16 if compact else 24,
         )
         self.brand_text_container.setVisible(not compact)
         for label in self.nav_text_widgets:
             label.setVisible(not compact)
         for label in self.sidebar_section_labels:
             label.setVisible(not compact)
-        self.sidebar_status_card.setVisible(not compact)
-        self.sidebar_footer.setVisible(not compact)
 
     # =========================================================
     # NAVIGATION
@@ -10637,7 +10848,7 @@ class MainWindow(QMainWindow):
 
     def open_dataset_search_page(self):
         self.datasets_tabs.setCurrentWidget(self.dataset_search_page)
-        self._show_page("dataset")
+        self._show_page("dataset_search")
 
     def open_papers_tool(self):
         if not self.analysis_result or not self.research_page.research_result:
@@ -10645,7 +10856,7 @@ class MainWindow(QMainWindow):
         else:
             self.papers_tool_page.update_from_result(self.research_page.research_result)
             self.research_page.tabs.setCurrentWidget(self.research_page.papers_tab)
-        self._show_page("research")
+        self._show_page("papers")
 
     def open_insights_page(self):
         result = self.research_page.research_result
@@ -10662,11 +10873,11 @@ class MainWindow(QMainWindow):
 
     def open_landscape_tool(self):
         self.open_insights_page()
-        self.research_insights_page.tabs.setCurrentWidget(self.landscape_tool_page)
+        self._show_page("landscape")
 
     def open_gap_tool(self):
         self.open_insights_page()
-        self.research_insights_page.tabs.setCurrentWidget(self.gap_tool_page)
+        self._show_page("gap")
 
     def open_report_tool(self):
         has_data = (
