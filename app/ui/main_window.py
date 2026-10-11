@@ -1483,193 +1483,166 @@ class UploadPage(QWidget):
 
         container = QWidget()
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(24, 22, 24, 22)
-        layout.setSpacing(16)
+        layout.setContentsMargins(24, 20, 24, 22)
+        layout.setSpacing(14)
 
-        # =================================================
-        # HEADER
-        # =================================================
+        header = QHBoxLayout()
+        title_block = QVBoxLayout()
+        title_block.setSpacing(3)
 
-        title = QLabel(
-            "Upload from computer"
-        )
+        title = QLabel("Dataset")
+        title.setObjectName("pageTitle")
 
-        title.setObjectName(
-            "pageTitle"
-        )
-
-        subtitle = QLabel(
-            "Upload a CSV dataset to begin "
-            "your academic research analysis."
-        )
-
-        subtitle.setObjectName(
-            "pageSubtitle"
-        )
-
+        subtitle = QLabel("Upload, preview and clean your CSV before analysis.")
+        subtitle.setObjectName("pageSubtitle")
         subtitle.setWordWrap(True)
 
-        layout.addWidget(title)
-        layout.addWidget(subtitle)
+        title_block.addWidget(title)
+        title_block.addWidget(subtitle)
+        header.addLayout(title_block, 1)
 
-        # =================================================
-        # UPLOAD CARD
-        # =================================================
+        self.upload_button = QPushButton("↑   Upload Dataset")
+        self.upload_button.setObjectName("primaryButton")
+        self.upload_button.setMinimumHeight(44)
+        self.upload_button.setMinimumWidth(172)
+        self.upload_button.clicked.connect(self.select_dataset)
+        header.addWidget(self.upload_button, 0, Qt.AlignTop)
+        layout.addLayout(header)
+
+        content_row = QHBoxLayout()
+        content_row.setSpacing(14)
 
         upload_card = QFrame()
+        upload_card.setObjectName("uploadCard")
+        upload_layout = QVBoxLayout(upload_card)
+        upload_layout.setContentsMargins(18, 18, 18, 18)
+        upload_layout.setSpacing(14)
 
-        upload_card.setObjectName(
-            "uploadCard"
+        upload_title = QLabel("Upload a dataset")
+        upload_title.setObjectName("sectionTitle")
+        upload_layout.addWidget(upload_title)
+
+        dropzone = QFrame()
+        dropzone.setObjectName("uploadDropzone")
+        drop_layout = QVBoxLayout(dropzone)
+        drop_layout.setContentsMargins(16, 18, 16, 18)
+        drop_layout.setSpacing(8)
+        drop_layout.addStretch(1)
+
+        icon_label = QLabel("⇧")
+        icon_label.setObjectName("uploadDropIcon")
+        icon_label.setAlignment(Qt.AlignCenter)
+        drop_layout.addWidget(icon_label, 0, Qt.AlignHCenter)
+
+        drop_title = QLabel("Drag & drop your CSV file here")
+        drop_title.setObjectName("uploadDropTitle")
+        drop_title.setAlignment(Qt.AlignCenter)
+        drop_layout.addWidget(drop_title)
+
+        drop_description = QLabel(
+            "or use Upload Dataset above. CSV files up to 200 MB."
         )
+        drop_description.setObjectName("uploadDropDescription")
+        drop_description.setAlignment(Qt.AlignCenter)
+        drop_description.setWordWrap(True)
+        drop_layout.addWidget(drop_description)
+        drop_layout.addStretch(1)
+        upload_layout.addWidget(dropzone, 1)
 
-        upload_layout = QVBoxLayout(
-            upload_card
+        steps_row = QHBoxLayout()
+        steps_row.setSpacing(8)
+        for number, heading, detail in (
+            ("1", "Upload CSV", "Choose your file"),
+            ("2", "Preview", "Check the first rows"),
+            ("3", "Quality check", "Missing values & outliers"),
+            ("4", "Analyze", "Continue to analysis"),
+        ):
+            step = QFrame()
+            step.setObjectName("uploadStep")
+            step_layout = QHBoxLayout(step)
+            step_layout.setContentsMargins(8, 7, 8, 7)
+            step_layout.setSpacing(8)
+
+            badge = QLabel(number)
+            badge.setObjectName("uploadStepBadge")
+            badge.setAlignment(Qt.AlignCenter)
+            badge.setFixedSize(28, 28)
+
+            text_layout = QVBoxLayout()
+            text_layout.setSpacing(1)
+            step_title = QLabel(heading)
+            step_title.setObjectName("uploadStepTitle")
+            step_detail = QLabel(detail)
+            step_detail.setObjectName("uploadStepDetail")
+            step_detail.setWordWrap(True)
+            text_layout.addWidget(step_title)
+            text_layout.addWidget(step_detail)
+            step_layout.addWidget(badge)
+            step_layout.addLayout(text_layout, 1)
+            steps_row.addWidget(step, 1)
+        upload_layout.addLayout(steps_row)
+        content_row.addWidget(upload_card, 3)
+
+        side_column = QVBoxLayout()
+        side_column.setSpacing(12)
+
+        search_card = QFrame()
+        search_card.setObjectName("uploadSearchCard")
+        search_layout = QVBoxLayout(search_card)
+        search_layout.setContentsMargins(16, 15, 16, 15)
+        search_layout.setSpacing(8)
+
+        search_icon = QLabel("⌕")
+        search_icon.setObjectName("uploadSearchIcon")
+        search_icon.setAlignment(Qt.AlignCenter)
+        search_icon.setFixedSize(30, 30)
+        search_layout.addWidget(search_icon, 0, Qt.AlignLeft)
+
+        search_title = QLabel("No dataset yet?")
+        search_title.setObjectName("cardTitle")
+        search_layout.addWidget(search_title)
+
+        search_description = QLabel(
+            "Find public datasets from Kaggle and Hugging Face, then send them straight to DORA."
         )
+        search_description.setObjectName("cardDescription")
+        search_description.setWordWrap(True)
+        search_layout.addWidget(search_description)
 
-        upload_layout.setContentsMargins(
-            40, 40, 40, 40
+        search_button = QPushButton("Open Dataset Search")
+        search_button.setObjectName("uploadSearchButton")
+        search_button.setMinimumHeight(38)
+        search_button.clicked.connect(self.main_window.open_dataset_search_page)
+        search_layout.addWidget(search_button, 0, Qt.AlignLeft)
+        side_column.addWidget(search_card)
+
+        tips_card = QFrame()
+        tips_card.setObjectName("uploadTipsCard")
+        tips_layout = QVBoxLayout(tips_card)
+        tips_layout.setContentsMargins(16, 15, 16, 15)
+        tips_layout.setSpacing(10)
+        tips_title = QLabel("Tips for a good upload")
+        tips_title.setObjectName("cardTitle")
+        tips_layout.addWidget(tips_title)
+        tips = QLabel(
+            "1. First row contains column names\n"
+            "2. One table per file, comma separated\n"
+            "3. Choose your target column in the next step\n"
+            "4. Keep sensitive data out of shared files"
         )
+        tips.setObjectName("uploadTipsText")
+        tips.setWordWrap(True)
+        tips_layout.addWidget(tips)
+        tips_layout.addStretch(1)
+        side_column.addWidget(tips_card, 1)
 
-        upload_layout.setSpacing(15)
+        content_row.addLayout(side_column, 1)
+        layout.addLayout(content_row, 1)
 
-        icon_label = QLabel(
-            "CSV DATASET"
-        )
-
-        icon_label.setObjectName(
-            "uploadIcon"
-        )
-
-        icon_label.setAlignment(
-            Qt.AlignCenter
-        )
-
-        upload_layout.addWidget(
-            icon_label
-        )
-
-        upload_title = QLabel(
-            "Choose your dataset"
-        )
-
-        upload_title.setObjectName(
-            "cardTitle"
-        )
-
-        upload_title.setAlignment(
-            Qt.AlignCenter
-        )
-
-        upload_layout.addWidget(
-            upload_title
-        )
-
-        upload_description = QLabel(
-            "Supported format: CSV\n"
-            "The original dataset will never be modified."
-        )
-
-        upload_description.setObjectName(
-            "cardDescription"
-        )
-
-        upload_description.setAlignment(
-            Qt.AlignCenter
-        )
-
-        upload_layout.addWidget(
-            upload_description
-        )
-
-        button_layout = QHBoxLayout()
-
-        button_layout.addStretch()
-
-        self.upload_button = QPushButton(
-            "Select CSV Dataset"
-        )
-
-        self.upload_button.setObjectName(
-            "primaryButton"
-        )
-
-        self.upload_button.setMinimumHeight(
-            45
-        )
-
-        self.upload_button.setMinimumWidth(
-            200
-        )
-
-        self.upload_button.clicked.connect(
-            self.select_dataset
-        )
-
-        button_layout.addWidget(
-            self.upload_button
-        )
-
-        button_layout.addStretch()
-
-        upload_layout.addLayout(
-            button_layout
-        )
-
-        layout.addWidget(
-            upload_card
-        )
-
-        # =================================================
-        # FILE INFORMATION
-        # =================================================
-
-        info_card = QFrame()
-
-        info_card.setObjectName(
-            "contentCard"
-        )
-
-        info_layout = QVBoxLayout(
-            info_card
-        )
-
-        info_layout.setContentsMargins(
-            22, 20, 22, 20
-        )
-
-        info_title = QLabel(
-            "Dataset Information"
-        )
-
-        info_title.setObjectName(
-            "sectionTitle"
-        )
-
-        self.info_label = QLabel(
-            "No dataset selected."
-        )
-
-        self.info_label.setObjectName(
-            "cardDescription"
-        )
-
-        self.info_label.setWordWrap(
-            True
-        )
-
-        info_layout.addWidget(
-            info_title
-        )
-
-        info_layout.addWidget(
-            self.info_label
-        )
-
-        layout.addWidget(
-            info_card
-        )
-
-        layout.addStretch()
+        # Kept for the existing upload handler, which updates this status
+        # before navigating to the analysis page.
+        self.info_label = QLabel("No dataset selected.")
+        self.info_label.setObjectName("cardDescription")
 
         self.scroll.setWidget(container)
         root.addWidget(self.scroll)
@@ -10268,6 +10241,7 @@ class MainWindow(QMainWindow):
     def _load_stylesheet(self):
         """Load the UI stylesheet located beside this module."""
         qss_path = Path(__file__).with_name("app.qss")
+        theme_path = Path(__file__).with_name("styles") / "theme.qss"
 
         if not qss_path.exists():
             print(f"Warning: stylesheet not found: {qss_path}")
@@ -10275,6 +10249,8 @@ class MainWindow(QMainWindow):
 
         try:
             stylesheet = qss_path.read_text(encoding="utf-8")
+            if theme_path.exists():
+                stylesheet += "\n\n" + theme_path.read_text(encoding="utf-8")
             self.setStyleSheet(stylesheet)
         except OSError as error:
             print(f"Warning: failed to load stylesheet: {error}")

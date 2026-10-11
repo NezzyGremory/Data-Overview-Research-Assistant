@@ -1,0 +1,148 @@
+/* Shared visual foundation derived from the DORA Figma file. */
+QMainWindow,
+#appRoot,
+#pageStack,
+#contentContainer {
+    background: #f1f7ff;
+    color: #222222;
+}
+
+QWidget {
+    font-family: "Segoe UI";
+    color: #222222;
+}
+
+#datasetsTabs QTabBar {
+    max-height: 0px;
+}
+
+#sidebarScroll,
+#sidebar {
+    background: #ffffff;
+    border: none;
+    border-right: 1px solid #006bb8;
+}
+
+#brandTitle,
+#brandAccent {
+    color: #0071c2;
+}
+
+#topbar {
+    background: #ffffff;
+    border: none;
+    border-bottom: 1px solid #006bb8;
+}
+
+#topbarTitle,
+#pageTitle {
+    color: #111111;
+}
+
+#pageSubtitle,
+#pageDescription {
+    color: #564e4e;
+}
+
+#contentCard,
+#statCard,
+#currentDatasetCard,
+#quickActionCard,
+#metricCard,
+#researchCard,
+#uploadCard,
+#pipelineCard,
+#pipelineStageCard,
+#heroCard,
+#heroVisual,
+#researchStatus {
+    background: #ffffff;
+    border: 1px solid rgba(0, 107, 184, 0.3);
+    border-radius: 15px;
+}
+
+#primaryButton,
+#analyzeButton,
+#runButton,
+#uploadButton {
+    background: #006bb8;
+    border: 1px solid #006bb8;
+    border-radius: 10px;
+    color: #ffffff;
+}
+
+#primaryButton:hover,
+#analyzeButton:hover,
+#runButton:hover,
+#uploadButton:hover {
+    background: #0071c2;
+    border-color: #0071c2;
+}
+
+/* Dataset upload screen */
+#uploadDropzone {
+    background: #ffffff;
+    border: 1px dashed #0d99ff;
+    border-radius: 3px;
+}
+
+#uploadDropIcon {
+    background: #eaf5ff;
+    border-radius: 12px;
+    color: #0d99ff;
+    font-size: 34px;
+    font-weight: 700;
+    min-height: 54px;
+    min-width: 54px;
+}
+
+#uploadDropTitle {
+    color: #111111;
+    font-size: 16px;
+    font-weight: 700;
+}
+
+#uploadDropDescription,
+#uploadStepDetail,
+#uploadTipsText {
+    color: #564e4e;
+    font-size: 11px;
+}
+
+#uploadStep,
+#uploadSearchCard,
+#uploadTipsCard {
+    background: #ffffff;
+    border: 1px solid rgba(0, 107, 184, 0.3);
+    border-radius: 10px;
+}
+
+#uploadStepBadge,
+#uploadSearchIcon {
+    background: #c9e0ff;
+    border-radius: 14px;
+    color: #006bb8;
+    font-size: 16px;
+    font-weight: 700;
+}
+
+#uploadStepTitle,
+#uploadSearchCard #cardTitle,
+#uploadTipsCard #cardTitle {
+    color: #111111;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+#uploadSearchButton {
+    background: #ffffff;
+    border: 1px solid #0d99ff;
+    border-radius: 8px;
+    color: #006bb8;
+    font-weight: 600;
+    padding: 5px 10px;
+}
+
+#uploadSearchButton:hover {
+    background: #f1f7ff;
+}
