@@ -4,8 +4,8 @@ from pathlib import Path
 from typing import Callable, Optional
 
 import pandas as pd
-from PySide6.QtCore import QObject, QThread, Qt, Signal, QUrl, QTimer, QStandardPaths
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QObject, QThread, Qt, Signal, QUrl, QTimer, QStandardPaths, QSize
+from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from app.ui.style_utils import apply_card_shadow
 
 from app.dataset_search.huggingface import (
     DatasetFile,
@@ -141,53 +142,63 @@ class DatasetSearchPage(QWidget):
 
     def _build_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(20, 16, 20, 18)
-        root.setSpacing(12)
+        root.setContentsMargins(36, 29, 28, 16)
+        root.setSpacing(18)
 
         title = QLabel("Dataset Search")
         title.setObjectName("pageTitle")
 
         subtitle = QLabel(
             "Search for public datasets on Hugging Face Hub and Kaggle, check their "
-            "file formats, and download them directly to DORA. Examples: Titanic, "
-            "Iris, agriculture, students, healthcare, stocks, and home prices."
+            "file formats, and then download them directly to DORA workspace. "
+            "Examples: Titanic, Iris, agriculture, students, healthcare, stocks, and home prices."
         )
-        subtitle.setObjectName("pageSubtitle")
+        subtitle.setObjectName("datasetSearchSubtitle")
         subtitle.setWordWrap(True)
 
         root.addWidget(title)
+        subtitle.setTextFormat(Qt.RichText)
+        subtitle.setText(
+            "Search for public datasets on Hugging Face Hub and Kaggle, check their file formats, "
+            "and then download them directly to DORA workspace. <b>Examples: Titanic, Iris, agriculture, "
+            "students, healthcare, stocks, and home prices.</b>"
+        )
         root.addWidget(subtitle)
 
         search_card = QFrame()
         search_card.setObjectName("datasetSearchCard")
+        search_card.setMinimumHeight(163)
         search_layout = QVBoxLayout(search_card)
-        search_layout.setContentsMargins(20, 18, 20, 18)
-        search_layout.setSpacing(12)
+        search_layout.setContentsMargins(22, 26, 22, 22)
+        search_layout.setSpacing(14)
 
         row = QHBoxLayout()
         row.setSpacing(10)
 
         self.search_input = QLineEdit()
         self.search_input.setObjectName("datasetSearchInput")
-        self.search_input.setPlaceholderText(
-            "Contoh: titanic, dataset pertanian, crop yield, diabetes, student performance..."
-        )
-        self.search_input.setMinimumHeight(44)
+        self.search_input.setText("student")
+        self.search_input.setPlaceholderText("Search datasets")
+        self.search_input.setMinimumHeight(66)
         self.search_input.returnPressed.connect(self.search_datasets)
 
         self.source_combo = QComboBox()
-        self.source_combo.setMinimumHeight(44)
-        self.source_combo.setMinimumWidth(145)
+        self.source_combo.setMinimumHeight(66)
+        self.source_combo.setMinimumWidth(260)
         self.source_combo.setObjectName("datasetProviderCombo")
-        self.source_combo.setToolTip("All providers mencari di Kaggle dan Hugging Face sekaligus.")
+        self.source_combo.addItem("Kaggle dataset", "kaggle")
+        self.source_combo.addItem("Hugging Face dataset", "huggingface")
         self.source_combo.addItem("All providers", "all")
-        self.source_combo.addItem("Kaggle", "kaggle")
-        self.source_combo.addItem("Hugging Face", "huggingface")
 
         self.search_button = QPushButton("Search")
         self.search_button.setObjectName("primaryButton")
-        self.search_button.setMinimumHeight(44)
-        self.search_button.setMinimumWidth(110)
+        self.search_button.setProperty("datasetSearch", True)
+        self.search_button.setMinimumHeight(66)
+        self.search_button.setMinimumWidth(150)
+        search_icon = Path(__file__).resolve().parent / "assets" / "icons" / "search-white.svg"
+        if search_icon.exists():
+            self.search_button.setIcon(QIcon(str(search_icon)))
+            self.search_button.setIconSize(QSize(24, 24))
         self.search_button.clicked.connect(self.search_datasets)
 
         row.addWidget(self.search_input, 1)
@@ -195,28 +206,11 @@ class DatasetSearchPage(QWidget):
         row.addWidget(self.search_button)
         search_layout.addLayout(row)
 
-        self.status_label = QLabel(
-            "Cari di All providers atau pilih Kaggle maupun Hugging Face. Unduhan tersimpan di folder Downloads laptop ini."
-        )
+        self.status_label = QLabel("Search for public datasets, then choose a file format to download.")
         self.status_label.setObjectName("cardDescription")
         self.status_label.setWordWrap(True)
         search_layout.addWidget(self.status_label)
-
-        download_location = QHBoxLayout()
-        location_label = QLabel("Lokasi unduhan")
-        location_label.setObjectName("cardDescription")
-        self.download_path_label = QLabel(str(self._download_directory()))
-        self.download_path_label.setObjectName("cardDescription")
-        self.download_path_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.download_path_label.setWordWrap(True)
-        open_downloads_button = QPushButton("Buka folder")
-        open_downloads_button.setObjectName("secondaryButton")
-        open_downloads_button.clicked.connect(self._open_download_directory)
-        download_location.addWidget(location_label)
-        download_location.addWidget(self.download_path_label, 1)
-        download_location.addWidget(open_downloads_button)
-        search_layout.addLayout(download_location)
-
+        apply_card_shadow(search_card)
         root.addWidget(search_card)
 
         self.progress = QProgressBar()
@@ -231,12 +225,14 @@ class DatasetSearchPage(QWidget):
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
         self.results_container = QWidget()
+        self.results_container.setObjectName("datasetSearchResults")
+        self.results_container.setAttribute(Qt.WA_StyledBackground, True)
         self.results_layout = QVBoxLayout(self.results_container)
         self.results_layout.setContentsMargins(0, 0, 8, 0)
         self.results_layout.setSpacing(12)
 
         self.empty_label = QLabel(
-            "Hasil pencarian akan muncul di sini."
+            "Search results will appear here."
         )
         self.empty_label.setObjectName("cardDescription")
         self.empty_label.setAlignment(Qt.AlignCenter)
@@ -291,9 +287,8 @@ class DatasetSearchPage(QWidget):
             return
 
         self.status_label.setText(
-            f"{len(self.results)} dataset ditemukan. "
-            "Hasil diurutkan berdasarkan kecocokan topik dan metadata. "
-            "Pilih format file lalu Download atau Download & Analyze."
+            f"{len(self.results)} datasets found. Results are ranked by topic match and metadata. "
+            "Choose a file format, then Download or Download & Analyze."
         )
         self._render_results()
 
@@ -334,6 +329,8 @@ class DatasetSearchPage(QWidget):
     def _build_result_card(self, result: DatasetSearchResult) -> QFrame:
         card = QFrame()
         card.setObjectName("datasetResultCard")
+        card.setMinimumHeight(370)
+        apply_card_shadow(card)
 
         layout = QVBoxLayout(card)
         layout.setContentsMargins(20, 18, 20, 18)
@@ -344,7 +341,7 @@ class DatasetSearchPage(QWidget):
         header_row.setSpacing(10)
 
         title = QLabel(result.title)
-        title.setObjectName("sectionTitle")
+        title.setObjectName("datasetResultTitle")
         title.setWordWrap(True)
         header_row.addWidget(title, 1)
 
@@ -358,30 +355,28 @@ class DatasetSearchPage(QWidget):
         repo_label = QLabel(f"ID: {clean_repo}")
         repo_label.setObjectName("cardDescription")
 
-        description = QLabel(
-            result.description or "Tidak ada deskripsi dataset."
-        )
+        description = QLabel(result.description or "No dataset description available.")
         description.setObjectName("cardDescription")
         description.setWordWrap(True)
 
         explanation = QLabel(
-            "Kenapa cocok: " + (
+            "Why it matches: " + (
                 result.match_reason
-                or "Dataset ditemukan dari kata kunci pencarian."
+                or "Matched from the dataset search keyword."
             )
         )
         explanation.setObjectName("cardDescription")
         explanation.setWordWrap(True)
 
         meta_parts = [
-            f"Sumber: {result.source_label}",
+            f"Source: {result.source_label}",
             f"Downloads: {result.downloads:,}",
             f"Votes/Likes: {result.likes:,}",
         ]
         if result.author:
             meta_parts.insert(1, f"Author: {result.author}")
 
-        meta = QLabel("  •  ".join(meta_parts))
+        meta = QLabel("  |  ".join(meta_parts))
         meta.setObjectName("cardDescription")
         meta.setWordWrap(True)
 
@@ -391,10 +386,11 @@ class DatasetSearchPage(QWidget):
         layout.addWidget(meta)
 
         if result.tags:
-            tag_text = "Tags: " + ", ".join(result.tags[:8])
+            tag_text = ", ".join(result.tags[:1])
             tags = QLabel(tag_text)
-            tags.setObjectName("cardDescription")
+            tags.setObjectName("datasetResultTag")
             tags.setWordWrap(True)
+            tags.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
             layout.addWidget(tags)
 
         # Determine file choices
@@ -406,12 +402,9 @@ class DatasetSearchPage(QWidget):
             file_row = QHBoxLayout()
             file_row.setSpacing(8)
 
-            file_label = QLabel("File:")
-            file_label.setObjectName("cardDescription")
-            file_row.addWidget(file_label)
-
             combo = QComboBox()
-            combo.setMinimumHeight(38)
+            combo.setObjectName("datasetFileSelect")
+            combo.setMinimumHeight(54)
             for file in files[:12]:
                 combo.addItem(
                     f"{file.filename}  ({file.display_size})",
@@ -427,24 +420,23 @@ class DatasetSearchPage(QWidget):
 
             open_button = QPushButton("Open Source")
             open_button.setObjectName("secondaryButton")
+            open_icon = Path(__file__).resolve().parent / "assets" / "icons" / "open-source.svg"
+            if open_icon.exists():
+                open_button.setIcon(QIcon(str(open_icon)))
+                open_button.setIconSize(QSize(18, 18))
             open_button.clicked.connect(
                 lambda _=False, url=result.url: QDesktopServices.openUrl(
                     QUrl(url)
                 )
             )
 
-            download_button = QPushButton("Download")
-            download_button.setObjectName("secondaryButton")
-            download_button.clicked.connect(
-                lambda _=False, r=result, c=combo: self._download_result(
-                    r,
-                    c.currentData(),
-                    analyze=False,
-                )
-            )
-
-            analyze_button = QPushButton("Download & Analyze")
-            analyze_button.setObjectName("primaryButton")
+            analyze_button = QPushButton("Download && Analyze")
+            analyze_button.setObjectName("datasetAnalyzeButton")
+            analyze_button.setAccessibleName("Download & Analyze")
+            analyze_icon = Path(__file__).resolve().parent / "assets" / "icons" / "download.svg"
+            if analyze_icon.exists():
+                analyze_button.setIcon(QIcon(str(analyze_icon)))
+                analyze_button.setIconSize(QSize(18, 18))
             analyze_button.clicked.connect(
                 lambda _=False, r=result, c=combo: self._download_result(
                     r,
@@ -453,9 +445,8 @@ class DatasetSearchPage(QWidget):
                 )
             )
 
-            buttons.addWidget(open_button)
             buttons.addStretch()
-            buttons.addWidget(download_button)
+            buttons.addWidget(open_button)
             buttons.addWidget(analyze_button)
             layout.addLayout(buttons)
         else:
