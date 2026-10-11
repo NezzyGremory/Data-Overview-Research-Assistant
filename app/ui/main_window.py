@@ -16,8 +16,8 @@ import httpx
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 
-from PySide6.QtCore import Qt, QUrl, QObject, QThread, QTimer, Signal, Slot, QMarginsF, QSize, QPoint
-from PySide6.QtGui import QIcon, QPixmap, QDesktopServices, QTextDocument, QFont, QFontDatabase, QColor, QPalette, QPageSize, QPageLayout
+from PySide6.QtCore import Qt, QUrl, QObject, QThread, QTimer, Signal, Slot, QMarginsF, QSize, QPoint, QRectF
+from PySide6.QtGui import QIcon, QPixmap, QDesktopServices, QTextDocument, QFont, QFontDatabase, QColor, QPalette, QPageSize, QPageLayout, QPainter
 from PySide6.QtPrintSupport import QPrinter
 from PySide6.QtWidgets import (
     QApplication,
@@ -48,6 +48,8 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QComboBox,
     QCheckBox,
+    QStyle,
+    QStyleOptionButton,
 )
 
 from app.analyzer.loader import DatasetLoader
@@ -1491,6 +1493,58 @@ class DashboardPage(QWidget):
         self._sync_workflow_connectors()
         self.update_research_result({})
 
+class SwitchCheckBox(QCheckBox):
+    """Checkbox painted as a pill switch while keeping normal Qt behavior."""
+
+    def __init__(self, text, colors, parent=None):
+        super().__init__(text, parent)
+        self._surface = QColor(colors.get("surface", "#FFFFFF"))
+        self._thumb = self._surface
+        self._track_on = QColor(colors.get("blue-bright", "#0D99FF"))
+        self._track_off = QColor(colors.get("switch-off", "#E7E7E7"))
+        self._track_disabled = QColor(colors.get("border-solid", "#C7C6C6"))
+        self.setCursor(Qt.PointingHandCursor)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        indicator = self.style().subElementRect(
+            QStyle.SE_CheckBoxIndicator, option, self
+        )
+        if not indicator.isValid() or indicator.height() <= 0:
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen)
+        track_color = (
+            self._track_disabled
+            if not self.isEnabled()
+            else self._track_on if self.isChecked() else self._track_off
+        )
+        painter.setBrush(self._surface)
+        painter.drawRect(QRectF(indicator))
+        painter.setBrush(track_color)
+        track = QRectF(indicator)
+        painter.drawRoundedRect(track, indicator.height() / 2, indicator.height() / 2)
+
+        painter.setBrush(self._thumb)
+        thumb_diameter = max(8, indicator.height() - 8)
+        thumb_left = (
+            indicator.right() - thumb_diameter - 4
+            if self.isChecked()
+            else indicator.left() + 4
+        )
+        thumb = QRectF(
+            thumb_left,
+            indicator.top() + (indicator.height() - thumb_diameter) / 2,
+            thumb_diameter,
+            thumb_diameter,
+        )
+        painter.drawEllipse(thumb)
+
+
 class UploadDatasetDialog(QDialog):
     """Figma-style upload confirmation; settings are display-only for now."""
 
@@ -1642,7 +1696,10 @@ class UploadDatasetDialog(QDialog):
         content_layout.addLayout(fields)
         content_layout.addSpacing(18 if self.compact_layout else 28)
 
-        first_row = QCheckBox("First row contains column names")
+        first_row = SwitchCheckBox(
+            "First row contains column names",
+            getattr(self.main_window, "_theme_tokens", {}),
+        )
         first_row.setObjectName("uploadDialogCheck")
         first_row.setChecked(True)
         content_layout.addWidget(first_row)

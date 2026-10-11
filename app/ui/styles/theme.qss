@@ -10,6 +10,7 @@
 /* @blue: #006bb8 */
 /* @blue-hover: #0071c2 */
 /* @blue-bright: #0d99ff */
+/* @switch-off: #e7e7e7 */
 /* @blue-active: #c9e0ff */
 /* @success: #098e00 */
 /* @danger: #e00000 */
@@ -414,7 +415,7 @@ QComboBox#uploadDialogInput {
 QLineEdit#uploadDialogInput:focus,
 QComboBox#uploadDialogInput:focus { border: 1px solid var(--blue); }
 QCheckBox#uploadDialogCheck { color: var(--ink); font-size: 18px; spacing: 12px; }
-QCheckBox#uploadDialogCheck::indicator { width: 46px; height: 28px; border: 1px solid var(--border-solid); border-radius: 14px; background: #e7e7e7; }
+QCheckBox#uploadDialogCheck::indicator { width: 46px; height: 28px; border: 1px solid var(--border-solid); border-radius: 14px; background: var(--switch-off); }
 QCheckBox#uploadDialogCheck::indicator:checked { background: var(--blue-bright); border-color: var(--blue-bright); }
 QDialog#uploadDatasetDialog QPushButton#primaryButton { font-size: 18px; }
 QPushButton#uploadDialogCancel {
