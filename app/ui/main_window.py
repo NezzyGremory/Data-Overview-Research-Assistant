@@ -17,7 +17,7 @@ import httpx
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 
-from PySide6.QtCore import Qt, QUrl, QObject, QThread, QTimer, Signal, Slot, QMarginsF, QSize, QPoint, QRectF
+from PySide6.QtCore import Qt, QUrl, QObject, QThread, QTimer, Signal, Slot, QMarginsF, QSize, QPoint, QRect, QRectF
 from PySide6.QtGui import QIcon, QPixmap, QDesktopServices, QTextDocument, QFont, QFontDatabase, QColor, QPalette, QPageSize, QPageLayout, QPainter, QRegion
 from PySide6.QtPrintSupport import QPrinter
 from PySide6.QtWidgets import (
@@ -1528,19 +1528,19 @@ class SwitchCheckBox(QCheckBox):
         painter.setBrush(self._surface)
         painter.drawRect(QRectF(indicator))
         painter.setBrush(track_color)
-        track = QRectF(indicator)
+        track = QRectF(indicator).adjusted(5, 0, -5, 0)
         painter.drawRoundedRect(track, indicator.height() / 2, indicator.height() / 2)
 
         painter.setBrush(self._thumb)
-        thumb_diameter = max(8, indicator.height() - 8)
+        thumb_diameter = max(8, round(track.height()) - 8)
         thumb_left = (
-            indicator.right() - thumb_diameter - 4
+            track.right() - thumb_diameter - 4
             if self.isChecked()
-            else indicator.left() + 4
+            else track.left() + 4
         )
         thumb = QRectF(
             thumb_left,
-            indicator.top() + (indicator.height() - thumb_diameter) / 2,
+            track.top() + (track.height() - thumb_diameter) / 2,
             thumb_diameter,
             thumb_diameter,
         )
@@ -1567,6 +1567,16 @@ class UploadDatasetDialog(QDialog):
         self.available_geometry = (
             screen.availableGeometry() if screen is not None else main_window.frameGeometry()
         )
+        if (
+            main_window.width() > self.available_geometry.width()
+            or main_window.height() > self.available_geometry.height()
+        ):
+            self.available_geometry = QRect(
+                0,
+                0,
+                max(main_window.width(), self.available_geometry.width()),
+                max(main_window.height(), self.available_geometry.height()),
+            )
         safe_width = min(
             max(1, self.available_geometry.width() - 32),
             max(1, main_window.width() - 32),
@@ -1577,7 +1587,7 @@ class UploadDatasetDialog(QDialog):
         )
         self.dialog_width = min(1027, safe_width)
         self.dialog_height = min(757, safe_height)
-        self.compact_layout = self.dialog_width < 900 or self.dialog_height < 700
+        self.compact_layout = self.dialog_width < 900 or self.dialog_height < 740
         self.setProperty("compact", self.compact_layout)
 
         self.surface = QFrame(self)
@@ -1608,9 +1618,9 @@ class UploadDatasetDialog(QDialog):
     def _build_ui(self):
         root = QVBoxLayout(self.surface)
         root.setContentsMargins(
-            26 if self.compact_layout else 42,
-            24 if self.compact_layout else 49,
-            26 if self.compact_layout else 42,
+            26 if self.compact_layout else 43,
+            24 if self.compact_layout else 47,
+            26 if self.compact_layout else 51,
             20 if self.compact_layout else 42,
         )
         root.setSpacing(0)
@@ -1633,21 +1643,21 @@ class UploadDatasetDialog(QDialog):
         title = QLabel("Upload Dataset")
         title.setObjectName("uploadDialogTitle")
         content_layout.addWidget(title)
-        content_layout.addSpacing(6 if self.compact_layout else 10)
+        content_layout.addSpacing(6 if self.compact_layout else 6)
         subtitle = QLabel("Choose a CSV file and confirm how DORA should read it.")
         subtitle.setObjectName("uploadDialogSubtitle")
         subtitle.setWordWrap(True)
         content_layout.addWidget(subtitle)
-        content_layout.addSpacing(18 if self.compact_layout else 35)
+        content_layout.addSpacing(18 if self.compact_layout else 25)
 
         file_card = QFrame()
         file_card.setObjectName("uploadDialogFileCard")
-        file_card.setFixedHeight(108 if self.compact_layout else 134)
+        file_card.setFixedHeight(108 if self.compact_layout else 133)
         file_layout = QHBoxLayout(file_card)
         if self.compact_layout:
             file_layout.setContentsMargins(16, 12, 16, 12)
         else:
-            file_layout.setContentsMargins(26, 20, 26, 20)
+            file_layout.setContentsMargins(25, 20, 26, 20)
         file_layout.setSpacing(16 if self.compact_layout else 26)
         file_icon = QLabel()
         file_icon.setObjectName("uploadDialogFileIcon")
@@ -1673,7 +1683,7 @@ class UploadDatasetDialog(QDialog):
         file_text.addWidget(details)
         file_layout.addLayout(file_text, 1)
         content_layout.addWidget(file_card)
-        content_layout.addSpacing(18 if self.compact_layout else 33)
+        content_layout.addSpacing(18 if self.compact_layout else 27)
 
         dataset_name = QLineEdit(self.file_path.name)
         delimiter = QComboBox()
@@ -1686,17 +1696,21 @@ class UploadDatasetDialog(QDialog):
         encoding.addItems(["UTF-8", "UTF-8-SIG", "Latin-1"])
 
         fields = QGridLayout()
-        fields.setContentsMargins(0, 0, 0, 0)
-        fields.setHorizontalSpacing(10 if self.compact_layout else 14)
-        fields.setVerticalSpacing(14 if self.compact_layout else 22)
+        fields.setContentsMargins(0, 0, 0 if self.compact_layout else 8, 0)
+        fields.setHorizontalSpacing(10 if self.compact_layout else 15)
+        fields.setVerticalSpacing(14 if self.compact_layout else 25)
         fields.addWidget(self._field("DATASET NAME", dataset_name), 0, 0)
-        fields.addWidget(self._field("DELIMITER", delimiter), 0, 1)
-        fields.addWidget(self._field("TARGET COLUMN", target), 1, 0)
-        fields.addWidget(self._field("ENCODING", encoding), 1, 1)
+        fields.addWidget(self._field("DEMILITER", delimiter), 0, 1)
+        target_field = self._field("TARGET COLUMN", target)
+        encoding_field = self._field("ENCODING", encoding)
+        target_field.layout().setSpacing(17)
+        encoding_field.layout().setSpacing(17)
+        fields.addWidget(target_field, 1, 0)
+        fields.addWidget(encoding_field, 1, 1)
         fields.setColumnStretch(0, 1)
         fields.setColumnStretch(1, 1)
         content_layout.addLayout(fields)
-        content_layout.addSpacing(18 if self.compact_layout else 28)
+        content_layout.addSpacing(18 if self.compact_layout else 26)
 
         first_row = SwitchCheckBox(
             "First row contains column names",
@@ -1708,15 +1722,16 @@ class UploadDatasetDialog(QDialog):
         content_layout.addStretch(1)
 
         actions = QHBoxLayout()
-        actions.setSpacing(10 if self.compact_layout else 12)
+        actions.setContentsMargins(0, 0, 0 if self.compact_layout else 8, 0)
+        actions.setSpacing(10 if self.compact_layout else 14)
         actions.addStretch(1)
         cancel = QPushButton("Cancel")
         cancel.setObjectName("uploadDialogCancel")
-        cancel.setFixedSize(126 if self.compact_layout else 154, 52 if self.compact_layout else 64)
+        cancel.setFixedSize(126 if self.compact_layout else 153, 52 if self.compact_layout else 63)
         cancel.clicked.connect(self.reject)
         confirm = QPushButton("Upload && Preview")
         confirm.setObjectName("primaryButton")
-        confirm.setFixedSize(230 if self.compact_layout else 290, 52 if self.compact_layout else 64)
+        confirm.setFixedSize(230 if self.compact_layout else 291, 52 if self.compact_layout else 63)
         confirm.clicked.connect(self.accept)
         actions.addWidget(cancel)
         actions.addWidget(confirm)
@@ -1732,8 +1747,8 @@ class UploadDatasetDialog(QDialog):
         overlay.raise_()
         bounds = self.available_geometry
         parent_center = self.main_window.frameGeometry().center()
-        left = parent_center.x() - self.width() // 2
-        top = parent_center.y() - self.height() // 2
+        left = parent_center.x() - self.width() // 2 + 1
+        top = parent_center.y() - self.height() // 2 + 1
         left = max(bounds.left() + 16, min(left, bounds.right() - self.width() + 1 - 16))
         top = max(bounds.top() + 16, min(top, bounds.bottom() - self.height() + 1 - 16))
         self.move(left, top)

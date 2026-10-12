@@ -113,9 +113,14 @@ def main() -> int:
 
     if dialog is not None:
         dialog.resize(dialog.dialog_width, dialog.dialog_height)
+        dialog.findChild(QWidget, "uploadDialogFileName").setText("Titanic-dataset.csv")
+        dialog.findChild(QWidget, "uploadDialogFileDetails").setText(
+            "60.3 KB . 891 rows x 12 column detected"
+        )
+        dialog.findChild(QWidget, "uploadDialogInput").setText("Titanic-dataset.csv")
         dialog.move(
-            (args.width - dialog.width()) // 2,
-            (args.height - dialog.height()) // 2,
+            (args.width - dialog.width() + 1) // 2,
+            (args.height - dialog.height() + 1) // 2,
         )
         dialog.show()
         dialog.raise_()
@@ -183,6 +188,14 @@ def main() -> int:
             file_layout = page.file_card.layout()
             for index in range(file_layout.count()):
                 print(f"file item {index}: {file_layout.itemAt(index).geometry().getRect()}")
+        if args.debug_layout and dialog is not None:
+            position = dialog.mapTo(window, dialog.rect().topLeft())
+            print(f"dialog: ({position.x()}, {position.y()}, {dialog.width()}, {dialog.height()})")
+            for widget in dialog.findChildren(QWidget):
+                name = widget.objectName()
+                if name.startswith("uploadDialog") or name in {"primaryButton", "uploadDatasetDialog"}:
+                    point = widget.mapTo(dialog, widget.rect().topLeft())
+                    print(f"{name}: ({point.x()}, {point.y()}, {widget.width()}, {widget.height()})")
         image = window.grab().toImage()
         if dialog is not None:
             painter = QPainter(image)

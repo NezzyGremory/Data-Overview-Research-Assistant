@@ -8,7 +8,7 @@ Sumber desain: DORA, Page 1 (`oLQhZyWW2vIPM9FmqvYewD`). Ukuran frame utama: **19
 |---|---:|---:|---|---|
 | Dataset, belum ada dataset | `2:4` | 1920 × 1080 | `UploadPage` dalam `datasets_page` | selesai |
 | Dataset, dataset terisi | `24:42` | 1920 × 1080 | `DatasetPreviewPage` | selesai |
-| Popup Upload Dataset | `11:101` | 1920 × 1080 | `UploadDialogOverlay` | belum |
+| Popup Upload Dataset | `11:101` | 1920 × 1080 | `UploadDatasetDialog` dengan overlay | selesai |
 | Analysis | `31:406` | 1920 × 1080 | `AnalysisPage` | belum |
 | Dataset Search | `41:221` | 1920 × 1080 | `DatasetSearchPage` | belum |
 | Research Landscape | `54:843` | 1920 × 1080 | `ResearchLandscapeToolPage` di `ResearchInsightsPage` | belum |
@@ -26,7 +26,7 @@ Gaya dasar yang dibaca dari Figma: kanvas `#F1F7FF`; biru `#006BB8`, `#0071C2`, 
 |---|---|---|
 | Fondasi token, shell, skala, dan screenshot | selesai | Shell/sidebar, topbar, token, serta utilitas screenshot dibuat. Sidebar Figma berisi 10 menu. `Editor Analysis` disembunyikan, wiring internal tetap ada. |
 | Dataset kosong dan terisi | selesai | Dua kondisi disetel ke frame 1920×1080; layout kosong turun menjadi satu kolom pada jendela lebih kecil. Sinyal lama dipertahankan. Screenshot dibandingkan dengan frame Figma. |
-| Popup Upload Dataset | belum | Ukuran dialog Figma 1027 × 757 px, posisi tengah frame. |
+| Popup Upload Dataset | selesai | Dialog tepat 1027×757 px pada x=447, y=162; ukuran field dan tombol dicocokkan dari metadata. Switch menampilkan knob putih. Layout ringkas dipakai saat tinggi layar di bawah ukuran desain. Screenshot dibandingkan dengan Figma. |
 | Analysis | belum | Ada frame Figma untuk tampilan analysis. |
 | Dataset Search | belum | Ada frame Figma untuk hasil pencarian. |
 | Overview | belum | Memakai frame terbaru `144:275`; frame `104:192` diabaikan. |
@@ -57,5 +57,6 @@ Nama menu utama lainnya sudah sejalan dengan Figma. Navigasi dan backend memakai
 - Ikon SVG yang sudah ada di `app/ui/assets/icons/` akan dipakai ulang setelah dicocokkan dengan slot Figma.
 - `tools/screenshot_ui.py` menangkap 8 keadaan halaman pada 1920×1080 dan menerima ukuran lain.
 - Bukti Dataset: `screenshots/app_dataset-empty-final.png`, `screenshots/app_dataset-loaded-final.png`, dan uji responsif `screenshots/app_dataset-empty-1366x768.png`.
+- Bukti popup: `screenshots/app-popup-final.png` dan uji responsif `screenshots/app-popup-1366x768.png`.
 - Pada 1366×768, kartu di halaman Dataset kosong ditumpuk agar tidak terpotong horizontal; pada 1920×1080 susunannya mengikuti frame.
 - Logika backend, worker, koneksi signal/slot, data runtime, dan database tidak boleh diubah.

@@ -462,37 +462,37 @@ QScrollArea#uploadDialogContent::viewport,
 #uploadDialogViewport,
 #uploadDialogContentBody { background: transparent; border: none; }
 #dialogOverlay { background: var(--overlay); border: none; }
-#uploadDialogTitle { color: var(--heading); font-family: "Plus Jakarta Sans"; font-size: 30px; font-weight: 700; }
-#uploadDialogSubtitle { color: var(--body); font-size: 20px; }
+#uploadDialogTitle { color: var(--heading); font-family: "Plus Jakarta Sans"; font-size: 36px; font-weight: 700; }
+#uploadDialogSubtitle { color: var(--body); font-size: 28px; }
 #uploadDialogFileCard { background: var(--canvas); border: 1px solid var(--blue-bright); border-radius: var(--dialog-radius); }
 #uploadDialogFileIcon { background: var(--blue-active); border-radius: 16px; }
-#uploadDialogFileName { color: var(--heading); font-size: 24px; font-weight: 700; }
-#uploadDialogFileDetails { color: var(--body); font-size: 18px; }
-#uploadDialogLabel { color: var(--muted); font-size: 16px; font-weight: 600; }
+#uploadDialogFileName { color: var(--heading); font-size: 30px; font-weight: 700; }
+#uploadDialogFileDetails { color: var(--body); font-size: 24px; }
+#uploadDialogLabel { color: var(--muted); font-size: 20px; font-weight: 600; }
 QLineEdit#uploadDialogInput,
 QComboBox#uploadDialogInput {
     background: var(--surface);
     border: 1px solid var(--blue-bright);
     border-radius: var(--dialog-radius);
     color: var(--ink);
-    font-size: 20px;
-    min-height: 64px;
+    font-size: 26px;
+    min-height: 61px;
     padding: 0 24px;
 }
 QLineEdit#uploadDialogInput:focus,
 QComboBox#uploadDialogInput:focus { border: 1px solid var(--blue); }
-QCheckBox#uploadDialogCheck { color: var(--ink); font-size: 18px; spacing: 12px; }
-QCheckBox#uploadDialogCheck::indicator { width: 46px; height: 28px; border: 1px solid var(--border-solid); border-radius: 14px; background: var(--switch-off); }
+QCheckBox#uploadDialogCheck { color: var(--ink); font-size: 28px; spacing: 12px; }
+QCheckBox#uploadDialogCheck::indicator { width: 60px; height: 30px; border: 1px solid var(--border-solid); border-radius: 15px; background: var(--switch-off); }
 QCheckBox#uploadDialogCheck::indicator:checked { background: var(--blue-bright); border-color: var(--blue-bright); }
-QDialog#uploadDatasetDialog QPushButton#primaryButton { font-size: 18px; }
+QDialog#uploadDatasetDialog QPushButton#primaryButton { font-size: 24px; min-height: 61px; }
 QPushButton#uploadDialogCancel {
     background: var(--surface);
     border: 1px solid var(--blue-bright);
     border-radius: var(--button-radius);
     color: var(--blue);
-    font-size: 18px;
+    font-size: 26px;
     font-weight: 600;
-    min-height: 64px;
+    min-height: 61px;
 }
 QDialog#uploadDatasetDialog QPushButton#uploadDialogCancel { color: var(--blue); font-size: 18px; }
 QPushButton#uploadDialogCancel:hover { background: var(--canvas); }
@@ -510,7 +510,7 @@ QDialog#uploadDatasetDialog[compact="true"] QComboBox#uploadDialogInput {
 }
 QDialog#uploadDatasetDialog[compact="true"] QCheckBox#uploadDialogCheck { font-size: 14px; }
 QDialog#uploadDatasetDialog[compact="true"] QCheckBox#uploadDialogCheck::indicator {
-    width: 38px;
+    width: 46px;
     height: 24px;
 }
 QDialog#uploadDatasetDialog[compact="true"] QPushButton#primaryButton {
