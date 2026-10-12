@@ -184,6 +184,11 @@ QPushButton#helpShortcut:pressed { background: var(--blue-bright); color: var(--
     border-radius: var(--card-radius);
 }
 
+#researchSectionDivider { background: var(--border); border: none; }
+#researchPaperPreviewRow { background: var(--canvas); border: 1px solid var(--border); border-radius: var(--small-radius); }
+#researchPaperPreviewRank { background: var(--blue-active); border-radius: var(--pill-radius); color: var(--blue); font-size: 13px; font-weight: 700; padding: 6px; }
+#researchPaperPreviewTitle { color: var(--heading); font-size: 15px; font-weight: 600; }
+
 QPushButton#primaryButton,
 QPushButton#analyzeButton,
 QPushButton#runButton,

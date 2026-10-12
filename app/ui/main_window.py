@@ -5,6 +5,7 @@ from html import escape as html_escape
 from html.parser import HTMLParser
 from pathlib import Path
 import re
+import textwrap
 from types import SimpleNamespace
 import sys
 import tempfile
@@ -6192,6 +6193,7 @@ class ResearchPage(QWidget):
         header_widget = QWidget()
         self.header_widget = header_widget
         header_layout = QHBoxLayout(header_widget)
+        header_layout.setContentsMargins(0, 0, 0, 0)
         self.header_layout = header_layout
 
         title_layout = QVBoxLayout()
@@ -6206,7 +6208,7 @@ class ResearchPage(QWidget):
         )
 
         subtitle = QLabel(
-            "Research intelligence based on your dataset"
+            "Explore related papers, publication trends, and potential research gaps."
         )
         self.subtitle_label = subtitle
 
@@ -6219,11 +6221,9 @@ class ResearchPage(QWidget):
         title_layout.addWidget(subtitle)
 
         header_layout.addLayout(
-            title_layout
+            title_layout,
+            1,
         )
-
-        header_layout.addStretch()
-        self.header_spacer_index = header_layout.count() - 1
 
         self.run_button = QPushButton(
             "Run Academic Research"
@@ -6338,46 +6338,37 @@ class ResearchPage(QWidget):
             self._scroll_tab(self._create_overview_tab())
         )
 
-        self.papers_tab = (
-            self._scroll_tab(self._create_papers_tab())
-        )
+        self.papers_tab = self._create_papers_tab()
 
-        self.landscape_tab = (
-            self._scroll_tab(self._create_landscape_tab())
-        )
+        self.landscape_tab = self._create_landscape_tab()
 
-        self.trend_tab = (
-            self._scroll_tab(self._create_trend_tab())
-        )
+        self.trend_tab = self._create_trend_tab()
 
-        self.gap_tab = (
-            self._scroll_tab(self._create_gap_tab())
-        )
+        self.gap_tab = self._create_gap_tab()
 
         self.tabs.addTab(
             self.overview_tab,
             "Overview",
         )
 
-        self.tabs.addTab(
-            self.papers_tab,
-            "Ranked Papers",
-        )
-
-        self.tabs.addTab(
+        # Keep every research result in one scrollable overview. The sidebar
+        # still opens the dedicated Papers, Landscape, and Gap tools.
+        overview_content = self.overview_tab.widget()
+        overview_layout = overview_content.layout()
+        if overview_layout.count() and overview_layout.itemAt(overview_layout.count() - 1).widget() is None:
+            overview_layout.takeAt(overview_layout.count() - 1)
+        for section in (
             self.landscape_tab,
-            "Landscape",
-        )
-
-        self.tabs.addTab(
             self.trend_tab,
-            "Trend",
-        )
-
-        self.tabs.addTab(
             self.gap_tab,
-            "Research Gap",
-        )
+        ):
+            divider = QFrame()
+            divider.setObjectName("researchSectionDivider")
+            divider.setFrameShape(QFrame.NoFrame)
+            divider.setFixedHeight(1)
+            overview_layout.addWidget(divider)
+            overview_layout.addWidget(section)
+        overview_layout.addStretch(1)
 
         root.addWidget(
             self.tabs,
@@ -6399,14 +6390,27 @@ class ResearchPage(QWidget):
 
     def _apply_responsive_layout(self, width):
         compact = width < 760
+        horizontal_margin = 16 if compact else 30
+        vertical_margin = 16 if compact else 25
+        self.root_layout.setContentsMargins(
+            horizontal_margin,
+            vertical_margin,
+            horizontal_margin,
+            vertical_margin,
+        )
         self.title_label.setMinimumHeight(self.title_label.sizeHint().height())
         self.subtitle_label.setMinimumWidth(0)
         self.subtitle_label.setSizePolicy(
-            QSizePolicy.Ignored, QSizePolicy.Preferred
+            QSizePolicy.Preferred, QSizePolicy.Preferred
         )
-        subtitle_height = self.subtitle_label.heightForWidth(max(1, width - 32))
-        if subtitle_height > 0:
-            self.subtitle_label.setMinimumHeight(subtitle_height)
+        self.header_layout.setDirection(
+            QBoxLayout.TopToBottom if compact else QBoxLayout.LeftToRight
+        )
+        subtitle_width = width - 2 * horizontal_margin
+        if not compact:
+            subtitle_width -= self.run_button.sizeHint().width() + self.header_layout.spacing()
+        subtitle_height = self.subtitle_label.heightForWidth(max(1, subtitle_width))
+        self.subtitle_label.setMinimumHeight(max(0, subtitle_height))
         if compact:
             self.header_widget.setMinimumHeight(
                 self.title_label.minimumHeight()
@@ -6416,20 +6420,45 @@ class ResearchPage(QWidget):
             )
         else:
             self.header_widget.setMinimumHeight(0)
-        self.root_layout.setContentsMargins(
-            16 if compact else 30,
-            16 if compact else 25,
-            16 if compact else 30,
-            16 if compact else 25,
-        )
-        self.header_layout.setDirection(
-            QBoxLayout.TopToBottom if compact else QBoxLayout.LeftToRight
-        )
-        self.header_layout.setStretch(self.header_spacer_index, 0 if compact else 1)
         overview_cards = getattr(self, "_overview_cards_layout", None)
         if overview_cards is not None:
             overview_cards.setDirection(
                 QBoxLayout.TopToBottom if width < 1000 else QBoxLayout.LeftToRight
+            )
+        for metrics_layout in (
+            getattr(self, "_landscape_metrics_layout", None),
+            getattr(self, "_trend_metrics_layout", None),
+        ):
+            if metrics_layout is not None:
+                metrics_layout.setDirection(
+                    QBoxLayout.TopToBottom if width < 1000 else QBoxLayout.LeftToRight
+                )
+        compact = width < 1100
+        for layout_name in (
+            "_paper_toolbar_layout",
+            "_provider_row_layout",
+            "_sinta_controls_layout",
+        ):
+            child_layout = getattr(self, layout_name, None)
+            if child_layout is not None:
+                child_layout.setDirection(
+                    QBoxLayout.TopToBottom if compact else QBoxLayout.LeftToRight
+                )
+        selection_layout = getattr(self, "_paper_selection_layout", None)
+        if selection_layout is not None:
+            selection_layout.setDirection(
+                QBoxLayout.TopToBottom if width < 1250 else QBoxLayout.LeftToRight
+            )
+        chart_stacked = width < 1100
+        if (
+            self.research_result
+            and getattr(self, "_landscape_chart_stacked", None) is not None
+            and chart_stacked != self._landscape_chart_stacked
+        ):
+            landscape = self.research_result.get("landscape") or {}
+            self._render_landscape_chart(landscape)
+            self._render_trend_chart(
+                self.research_result.get("trend") or {}, landscape
             )
 
     def resizeEvent(self, event):
@@ -6599,7 +6628,7 @@ class ResearchPage(QWidget):
         )
 
         top_title = QLabel(
-            "Top Ranked Paper"
+            "Ranked Papers"
         )
 
         top_title.setObjectName(
@@ -6633,6 +6662,23 @@ class ResearchPage(QWidget):
         top_layout.addWidget(
             self.top_paper_info
         )
+
+        self.additional_papers_title = QLabel("More relevant papers")
+        self.additional_papers_title.setObjectName("sectionTitle")
+        self.additional_papers_title.setVisible(False)
+        top_layout.addWidget(self.additional_papers_title)
+
+        self.overview_papers_layout = QVBoxLayout()
+        self.overview_papers_layout.setContentsMargins(0, 0, 0, 0)
+        self.overview_papers_layout.setSpacing(8)
+        top_layout.addLayout(self.overview_papers_layout)
+
+        self.overview_papers_status = QLabel(
+            "Run Academic Research to see ranked papers here."
+        )
+        self.overview_papers_status.setObjectName("cardDescription")
+        self.overview_papers_status.setWordWrap(True)
+        top_layout.addWidget(self.overview_papers_status)
 
         layout.addWidget(
             top_frame
@@ -6672,6 +6718,7 @@ class ResearchPage(QWidget):
         filter_panel = QFrame()
         filter_panel.setObjectName("paperScreeningToolbar")
         toolbar = QHBoxLayout(filter_panel)
+        self._paper_toolbar_layout = toolbar
         toolbar.setContentsMargins(10, 8, 10, 8)
         toolbar.setSpacing(8)
 
@@ -6738,6 +6785,7 @@ class ResearchPage(QWidget):
         self.ucl_search_query = ""
 
         provider_row = QHBoxLayout()
+        self._provider_row_layout = provider_row
         provider_row.setContentsMargins(0, 0, 0, 0)
         provider_row.setSpacing(8)
         provider_row.addWidget(self.provider_status_label, 1)
@@ -6840,6 +6888,7 @@ class ResearchPage(QWidget):
         screening_layout.addWidget(screening_note)
 
         screening_controls = QHBoxLayout()
+        self._sinta_controls_layout = screening_controls
         screening_controls.setSpacing(8)
 
         self.sinta_status_combo = QComboBox()
@@ -6906,6 +6955,7 @@ class ResearchPage(QWidget):
         selection_panel = QFrame()
         selection_panel.setObjectName("paperSelectionPanel")
         selection_layout = QHBoxLayout(selection_panel)
+        self._paper_selection_layout = selection_layout
         selection_layout.setContentsMargins(10, 8, 10, 8)
         selection_layout.setSpacing(12)
         selection_layout.addWidget(self.paper_detail, 3)
@@ -6951,6 +7001,7 @@ class ResearchPage(QWidget):
         layout.addWidget(description)
 
         metrics = QHBoxLayout()
+        self._landscape_metrics_layout = metrics
         self.landscape_papers_metric = self._create_metric_card("Papers analyzed", "0")
         self.landscape_methods_metric = self._create_metric_card("Methods identified", "0")
         self.landscape_venues_metric = self._create_metric_card("Publication venues", "0")
@@ -6965,8 +7016,11 @@ class ResearchPage(QWidget):
         chart_layout = QVBoxLayout(chart_card)
         chart_layout.setContentsMargins(12, 10, 12, 10)
         self.landscape_figure = Figure(figsize=(11, 3.6))
-        self.landscape_axes = self.landscape_figure.subplots(1, 3)
+        self.landscape_axes = list(self.landscape_figure.subplots(1, 3).ravel())
+        self._landscape_chart_stacked = None
         self.landscape_canvas = FigureCanvasQTAgg(self.landscape_figure)
+        self.landscape_canvas.setMinimumWidth(0)
+        self.landscape_canvas.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         chart_layout.addWidget(self.landscape_canvas)
         layout.addWidget(chart_card, 1)
 
@@ -6995,6 +7049,7 @@ class ResearchPage(QWidget):
         layout.addWidget(description)
 
         metrics = QHBoxLayout()
+        self._trend_metrics_layout = metrics
         self.trend_years_metric = self._create_metric_card("Years represented", "0")
         self.trend_peak_metric = self._create_metric_card("Peak publication year", "-")
         self.trend_direction_metric = self._create_metric_card("Recent direction", "-")
@@ -7008,9 +7063,11 @@ class ResearchPage(QWidget):
         chart_card.setObjectName("researchCard")
         chart_layout = QVBoxLayout(chart_card)
         chart_layout.setContentsMargins(12, 10, 12, 10)
-        self.trend_figure = Figure(figsize=(10, 3.8), tight_layout=True)
+        self.trend_figure = Figure(figsize=(10, 3.8))
         self.trend_axes = self.trend_figure.subplots()
         self.trend_canvas = FigureCanvasQTAgg(self.trend_figure)
+        self.trend_canvas.setMinimumWidth(0)
+        self.trend_canvas.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         chart_layout.addWidget(self.trend_canvas)
         layout.addWidget(chart_card, 1)
 
@@ -7198,6 +7255,7 @@ class ResearchPage(QWidget):
         self.top_paper_info.setText(
             ""
         )
+        self._render_overview_papers([])
 
         self.paper_table.setRowCount(
             0
@@ -7709,6 +7767,7 @@ class ResearchPage(QWidget):
         self._populate_papers(
             papers
         )
+        self._render_overview_papers(papers)
 
         # -----------------------------------------------------
         # LANDSCAPE
@@ -7786,6 +7845,22 @@ class ResearchPage(QWidget):
         QDesktopServices.openUrl(QUrl(url))
 
     def _render_landscape_chart(self, landscape):
+        stacked = self.width() < 1100
+        if stacked != self._landscape_chart_stacked:
+            self.landscape_figure.clear()
+            axes = (
+                self.landscape_figure.subplots(3, 1)
+                if stacked
+                else self.landscape_figure.subplots(1, 3)
+            )
+            self.landscape_axes = list(axes.ravel())
+            figure_width = max(5.5, min(11.0, (self.width() - 100) / 100))
+            self.landscape_figure.set_size_inches(
+                figure_width, 7.5 if stacked else 3.6, forward=False
+            )
+            self.landscape_canvas.setMinimumHeight(750 if stacked else 360)
+            self._landscape_chart_stacked = stacked
+
         groups = [
             ("Sources", landscape.get("sources") or []),
             ("Methods", landscape.get("methods") or []),
@@ -7802,9 +7877,12 @@ class ResearchPage(QWidget):
                 continue
             axis.set_axis_on()
             names = [str(item["name"]) for item in reversed(entries)]
+            if stacked:
+                names = [textwrap.fill(name, width=18) for name in names]
             percentages = [float(item.get("percentage", 0) or 0) for item in reversed(entries)]
             bars = axis.barh(names, percentages, color="#4F8CFF", height=0.62)
-            axis.set_xlim(0, max(100, max(percentages, default=0) * 1.16))
+            axis_limit = max(100, max(percentages, default=0) * 1.16)
+            axis.set_xlim(0, axis_limit)
             axis.set_xlabel("Share of analyzed papers (%)", fontsize=8, color="#64748B")
             axis.tick_params(axis="both", labelsize=8, colors="#64748B")
             for spine in ("top", "right", "left"):
@@ -7812,13 +7890,27 @@ class ResearchPage(QWidget):
             axis.grid(axis="x", color="#E8EEF6", linewidth=0.7)
             axis.set_axisbelow(True)
             for bar, value in zip(bars, percentages):
-                axis.text(value + 0.8, bar.get_y() + bar.get_height() / 2, f"{value:g}%", va="center", fontsize=8, color="#344158")
+                near_edge = value >= axis_limit * 0.84
+                axis.text(
+                    value - 1.0 if near_edge else value + 0.8,
+                    bar.get_y() + bar.get_height() / 2,
+                    f"{value:g}%",
+                    ha="right" if near_edge else "left",
+                    va="center",
+                    fontsize=8,
+                    color="#FFFFFF" if near_edge else "#344158",
+                )
         # The three side-by-side horizontal charts can have long category
         # names. Reserve room for their y-axis labels explicitly instead of
         # asking tight_layout to shrink each axes until it becomes too narrow.
-        self.landscape_figure.subplots_adjust(
-            left=0.28, right=0.98, bottom=0.22, top=0.90, wspace=0.55
-        )
+        if stacked:
+            self.landscape_figure.subplots_adjust(
+                left=0.30, right=0.98, bottom=0.06, top=0.96, hspace=0.55
+            )
+        else:
+            self.landscape_figure.subplots_adjust(
+                left=0.28, right=0.98, bottom=0.22, top=0.90, wspace=0.55
+            )
         self.landscape_canvas.draw_idle()
 
     def _render_trend_chart(self, trend, landscape):
@@ -7847,7 +7939,9 @@ class ResearchPage(QWidget):
             axis.set_axisbelow(True)
             for bar, count in zip(bars, counts):
                 axis.text(bar.get_x() + bar.get_width() / 2, count, str(count), ha="center", va="bottom", fontsize=8, color="#344158")
-        self.trend_figure.tight_layout()
+        self.trend_figure.subplots_adjust(
+            left=0.08, right=0.98, bottom=0.22, top=0.90
+        )
         self.trend_canvas.draw_idle()
 
     @staticmethod
@@ -7942,6 +8036,68 @@ class ResearchPage(QWidget):
         ]
         self._all_papers = [papers[index] for index in self._all_paper_result_indices]
         self._apply_paper_filter()
+
+    def _render_overview_papers(self, papers):
+        while self.overview_papers_layout.count():
+            item = self.overview_papers_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+        papers = [
+            paper for paper in (papers if isinstance(papers, list) else [])
+            if isinstance(paper, dict)
+        ]
+        additional = papers[1:5]
+        self.additional_papers_title.setVisible(bool(additional))
+
+        for rank, paper in enumerate(additional, start=2):
+            row = QFrame()
+            row.setObjectName("researchPaperPreviewRow")
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(12, 10, 12, 10)
+            row_layout.setSpacing(12)
+
+            rank_label = QLabel(f"{rank:02d}")
+            rank_label.setObjectName("researchPaperPreviewRank")
+            rank_label.setAlignment(Qt.AlignCenter)
+            rank_label.setFixedWidth(38)
+            row_layout.addWidget(rank_label, 0, Qt.AlignTop)
+
+            details = QVBoxLayout()
+            details.setContentsMargins(0, 0, 0, 0)
+            details.setSpacing(4)
+            title = QLabel(str(paper.get("title") or "Untitled paper"))
+            title.setObjectName("researchPaperPreviewTitle")
+            title.setWordWrap(True)
+            title.setMinimumWidth(0)
+            metadata = []
+            if paper.get("year"):
+                metadata.append(str(paper["year"]))
+            if paper.get("venue"):
+                metadata.append(str(paper["venue"]))
+            score = paper.get("relevance_score")
+            if isinstance(score, (int, float)):
+                metadata.append(f"Relevance {self._format_score(score)}")
+            summary = QLabel("  ·  ".join(metadata) or "Publication details unavailable")
+            summary.setObjectName("cardDescription")
+            summary.setWordWrap(True)
+            summary.setMinimumWidth(0)
+            details.addWidget(title)
+            details.addWidget(summary)
+            row_layout.addLayout(details, 1)
+            self.overview_papers_layout.addWidget(row)
+
+        if papers:
+            shown_count = min(len(papers), 5)
+            self.overview_papers_status.setText(
+                f"Showing the top {shown_count} of {len(papers)} papers. "
+                "Open Papers from the sidebar for the full list and journal screening."
+            )
+        else:
+            self.overview_papers_status.setText(
+                "No academic papers were found for this research run."
+            )
 
     @staticmethod
     def _sinta_screening(paper):
@@ -11456,7 +11612,7 @@ class MainWindow(QMainWindow):
             "analysis": self.analysis_page,
             "ml": self.ml_page,
             "research": self.research_page,
-            "papers": self.research_page,
+            "papers": self.papers_tool_page,
             "insights": self.research_insights_page,
             # Landscape and gap are tabs inside Research Insights. Reusing
             # their parent page here keeps Qt from pulling the tab widgets
@@ -11795,7 +11951,6 @@ class MainWindow(QMainWindow):
             self.research_page.show_empty_state()
         else:
             self.papers_tool_page.update_from_result(self.research_page.research_result)
-            self.research_page.tabs.setCurrentWidget(self.research_page.papers_tab)
         self._show_page("papers")
 
     def open_insights_page(self):
