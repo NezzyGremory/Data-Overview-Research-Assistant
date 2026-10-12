@@ -11984,7 +11984,7 @@ class MainWindow(QMainWindow):
         sidebar.setObjectName("sidebar")
         layout = QVBoxLayout(sidebar)
         self.sidebar_layout = layout
-        layout.setContentsMargins(11, 70, 15, 24)
+        layout.setContentsMargins(11, 70, 14, 24)
         layout.setSpacing(0)
 
         brand = QHBoxLayout()
@@ -12026,14 +12026,15 @@ class MainWindow(QMainWindow):
         self.sidebar_group_layouts = []
         self._add_nav_section(layout, "WORKSPACE")
         layout.itemAt(layout.count() - 1).widget().setFixedHeight(32)
-        self._add_nav_group(layout, 263, 12, 11, (
+        layout.addSpacing(2)
+        self._add_nav_group(layout, 263, 15, 8, (
             ("dataset_search", "dataset-search.svg", "Dataset Search"),
             ("dataset", "dataset.svg", "Dataset"),
             ("analysis", "analysis.svg", "Analysis"),
             ("ml", "ml-intelligence.svg", "ML Intelligence"),
             ("dashboard", "overview.svg", "Overview"),
         ))
-        layout.addSpacing(12)
+        layout.addSpacing(11)
         self._add_nav_section(layout, "RESEARCH TOOLS")
         layout.itemAt(layout.count() - 1).widget().setFixedHeight(32)
         layout.addSpacing(15)
@@ -12054,7 +12055,7 @@ class MainWindow(QMainWindow):
         card.setObjectName("sidebarMenuCard")
         card.setFixedHeight(height)
         group_layout = QVBoxLayout(card)
-        group_layout.setContentsMargins(35, top_margin, 15, bottom_margin)
+        group_layout.setContentsMargins(41, top_margin, 9, bottom_margin)
         group_layout.setSpacing(0)
         self.sidebar_group_cards.append(card)
         self.sidebar_group_layouts.append(group_layout)
@@ -12080,18 +12081,36 @@ class MainWindow(QMainWindow):
         )
 
         row = QHBoxLayout(button)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(11)
+        row.setContentsMargins(5, 0, 0, 0)
+        row.setSpacing(25)
 
         icon_label = QLabel()
         icon_label.setObjectName("navIcon")
-        icon_label.setFixedSize(28, 28)
+        icon_label.setFixedSize(30, 30)
         icon_label.setAlignment(Qt.AlignCenter)
         icon_path = _resource_path(Path("assets") / "icons" / icon)
         if icon_path.exists():
             pixmap = QPixmap(str(icon_path))
             if not pixmap.isNull():
-                icon_label.setPixmap(pixmap.scaled(26, 26, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                icon_size = {
+                    "dataset_search": (24, 24),
+                    "dataset": (30, 30),
+                    "analysis": (24, 24),
+                    "ml": (24, 24),
+                    "dashboard": (26, 26),
+                    "research": (30, 24),
+                    "papers": (30, 30),
+                    "landscape": (30, 30),
+                    "gap": (30, 30),
+                    "report": (30, 30),
+                }.get(key, (24, 24))
+                icon_label.setPixmap(
+                    pixmap.scaled(
+                        *icon_size,
+                        Qt.KeepAspectRatio,
+                        Qt.SmoothTransformation,
+                    )
+                )
 
         text_label = QLabel(text)
         text_label.setObjectName("navText")
@@ -12134,7 +12153,7 @@ class MainWindow(QMainWindow):
         topbar.setFixedHeight(124)
 
         layout = QHBoxLayout(topbar)
-        layout.setContentsMargins(34, 0, 130, 0)
+        layout.setContentsMargins(34, 4, 127, 0)
         layout.setSpacing(13)
         self.topbar_layout = layout
         self.page_title = QLabel("Dashboard")
@@ -12170,10 +12189,18 @@ class MainWindow(QMainWindow):
             layout.addWidget(link)
         divider = QFrame()
         divider.setObjectName("topbarDivider")
-        divider.setFixedSize(1, 34)
+        divider.setFixedSize(1, 38)
         self.topbar_divider = divider
-        layout.addSpacing(56)
-        layout.addWidget(divider)
+        divider_container = QWidget()
+        divider_container.setFixedSize(1, 50)
+        divider_layout = QVBoxLayout(divider_container)
+        divider_layout.setContentsMargins(0, 0, 0, 0)
+        divider_layout.setSpacing(0)
+        divider_layout.addSpacing(11)
+        divider_layout.addWidget(divider)
+        divider_layout.addStretch(1)
+        layout.addSpacing(42)
+        layout.addWidget(divider_container)
         version = QLabel("2026 UIN HIJAU v5")
         version.setObjectName("topbarVersion")
         self.topbar_version = version
@@ -12181,7 +12208,7 @@ class MainWindow(QMainWindow):
         self.topbar_version_container = version_container
         version_layout = QHBoxLayout(version_container)
         version_layout.setContentsMargins(0, 0, 0, 0)
-        version_layout.setSpacing(11)
+        version_layout.setSpacing(12)
         version_icon = QLabel()
         version_icon.setObjectName("topbarVersionIcon")
         version_icon.setFixedSize(24, 24)
@@ -12192,7 +12219,7 @@ class MainWindow(QMainWindow):
                 version_icon.setPixmap(pixmap.scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         version_layout.addWidget(version_icon)
         version_layout.addWidget(version)
-        layout.addSpacing(18)
+        layout.addSpacing(26)
         layout.addWidget(version_container)
         return topbar
 
@@ -12206,18 +12233,18 @@ class MainWindow(QMainWindow):
         compact = sidebar_width < 288
         sidebar.setFixedWidth(sidebar_width)
         self.sidebar_layout.setContentsMargins(
-            8 if compact else 10,
+            8 if compact else 11,
             20 if compact else 70,
-            8 if compact else 15,
+            8 if compact else 14,
             16 if compact else 24,
         )
         self.sidebar_logo.setFixedSize(48 if compact else 82, 48 if compact else 82)
         for group_index, (group, group_layout) in enumerate(zip(self.sidebar_group_cards, self.sidebar_group_layouts)):
             group_layout.setContentsMargins(
-                (4 if compact else 35),
-                (10 if compact else (12 if group_index == 0 else 6)),
-                (4 if compact else 15),
-                (10 if compact else (11 if group_index == 0 else 17)),
+            (4 if compact else 41),
+            (10 if compact else (15 if group_index == 0 else 6)),
+            (4 if compact else 9),
+            (10 if compact else (8 if group_index == 0 else 17)),
             )
             group.setProperty("compact", compact)
             group.style().unpolish(group)
@@ -12232,8 +12259,8 @@ class MainWindow(QMainWindow):
         self.topbar.setFixedHeight(78 if event.size().height() < 620 else 124)
         self.topbar_layout.setContentsMargins(
             12 if compact_topbar else 34,
-            0,
-            12 if compact_topbar else 130,
+            0 if compact_topbar else 4,
+            12 if compact_topbar else 127,
             0,
         )
         for key, link in self.topbar_links.items():

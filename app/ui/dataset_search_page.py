@@ -156,8 +156,8 @@ class DatasetSearchPage(QWidget):
         self.container = QWidget()
         self.container.setObjectName("datasetSearchContainer")
         body = QVBoxLayout(self.container)
-        body.setContentsMargins(36, 29, 28, 16)
-        body.setSpacing(18)
+        body.setContentsMargins(36, 29, 27, 16)
+        body.setSpacing(0)
 
         title = QLabel("Dataset Search")
         title.setObjectName("pageTitle")
@@ -171,8 +171,10 @@ class DatasetSearchPage(QWidget):
         subtitle.setWordWrap(True)
         subtitle.setMinimumWidth(0)
         subtitle.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+        subtitle.setMaximumWidth(1339)
 
         body.addWidget(title)
+        body.addSpacing(4)
         subtitle.setTextFormat(Qt.RichText)
         subtitle.setText(
             "Search for public datasets on Hugging Face Hub and Kaggle, check their file formats, "
@@ -180,11 +182,14 @@ class DatasetSearchPage(QWidget):
             "students, healthcare, stocks, and home prices.</b>"
         )
         body.addWidget(subtitle)
+        body.addSpacing(27)
 
         search_card = QFrame()
+        self.search_card = search_card
         search_card.setObjectName("datasetSearchCard")
         search_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         search_layout = QVBoxLayout(search_card)
+        self.search_layout = search_layout
         search_layout.setContentsMargins(22, 26, 22, 22)
         search_layout.setSpacing(14)
 
@@ -197,6 +202,7 @@ class DatasetSearchPage(QWidget):
         self.search_input.setText("student")
         self.search_input.setPlaceholderText("Search datasets")
         self.search_input.setMinimumHeight(66)
+        self.search_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.search_input.returnPressed.connect(self.search_datasets)
 
         self.source_combo = QComboBox()
@@ -227,9 +233,11 @@ class DatasetSearchPage(QWidget):
         self.status_label = QLabel("Search for public datasets, then choose a file format to download.")
         self.status_label.setObjectName("cardDescription")
         self.status_label.setWordWrap(True)
+        self.status_label.setContentsMargins(1, 0, 0, 0)
         search_layout.addWidget(self.status_label)
         apply_card_shadow(search_card)
         body.addWidget(search_card)
+        body.addSpacing(17)
 
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)
@@ -241,7 +249,7 @@ class DatasetSearchPage(QWidget):
         self.results_container.setObjectName("datasetSearchResults")
         self.results_container.setAttribute(Qt.WA_StyledBackground, True)
         self.results_layout = QVBoxLayout(self.results_container)
-        self.results_layout.setContentsMargins(0, 0, 8, 0)
+        self.results_layout.setContentsMargins(0, 0, 2, 0)
         self.results_layout.setSpacing(12)
 
         self.empty_label = QLabel(
@@ -260,6 +268,14 @@ class DatasetSearchPage(QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         width = self.scroll.viewport().width()
+        compact = width < 760
+        desktop_reference = width >= 1400
+        self.container.layout().setContentsMargins(
+            16 if compact else 36,
+            16 if compact else 29,
+            16 if compact else 27,
+            12 if compact else 16,
+        )
         stacked_controls = width < 900
         self.search_controls_layout.setDirection(
             QBoxLayout.TopToBottom if stacked_controls else QBoxLayout.LeftToRight
@@ -267,11 +283,87 @@ class DatasetSearchPage(QWidget):
         self.search_input.setMinimumHeight(50 if stacked_controls else 66)
         self.source_combo.setMinimumHeight(50 if stacked_controls else 66)
         self.search_button.setMinimumHeight(50 if stacked_controls else 66)
+        if desktop_reference:
+            self.search_card.setFixedHeight(163)
+            self.search_layout.setContentsMargins(21, 23, 21, 22)
+            self.search_layout.setSpacing(14)
+            self.search_input.setFixedWidth(800)
+            self.search_input.setFixedHeight(66)
+            self.source_combo.setFixedWidth(426)
+            self.source_combo.setFixedHeight(66)
+            self.search_button.setFixedSize(151, 66)
+            self.status_label.setFixedHeight(25)
+        else:
+            self.search_card.setMinimumHeight(163)
+            self.search_card.setMaximumHeight(16777215)
+            self.search_input.setMinimumWidth(0)
+            self.search_input.setMaximumWidth(16777215)
+            self.search_input.setMaximumHeight(16777215)
+            self.source_combo.setMinimumWidth(0)
+            self.source_combo.setMaximumWidth(16777215)
+            self.source_combo.setMaximumHeight(16777215)
+            self.search_button.setMinimumWidth(120)
+            self.search_button.setMaximumWidth(16777215)
+            self.search_button.setMinimumHeight(50 if stacked_controls else 66)
+            self.search_button.setMaximumHeight(16777215)
+            self.status_label.setMinimumHeight(0)
+            self.status_label.setMaximumHeight(16777215)
         # Two result cards contain long metadata and action labels. Keep one
         # column until the actual scroll viewport is wide enough for both.
-        direction = QBoxLayout.TopToBottom if width < 1500 else QBoxLayout.LeftToRight
+        direction = QBoxLayout.TopToBottom if width < 1400 else QBoxLayout.LeftToRight
         for row in self._result_rows:
-            row.layout().setDirection(direction)
+            row_layout = row.layout()
+            row_layout.setDirection(direction)
+            row_layout.setSpacing(12 if direction == QBoxLayout.TopToBottom else 17)
+            for index in range(row_layout.count()):
+                card = row_layout.itemAt(index).widget()
+                if card is not None:
+                    if direction == QBoxLayout.LeftToRight:
+                        row_layout.setStretch(index, 719 if index == 0 else 703)
+                        card.setMinimumHeight(373)
+                        for object_name, height in (
+                            ("datasetResultTitle", 28),
+                            ("datasetResultId", 24),
+                            ("datasetResultDescription", 24),
+                            ("datasetResultMatch", 24),
+                            ("datasetResultMeta", 48),
+                        ):
+                            label = card.findChild(QLabel, object_name)
+                            if label is not None:
+                                label.setFixedHeight(height)
+                        meta = card.findChild(QLabel, "datasetResultMeta")
+                        if meta is not None:
+                            meta.setProperty("searchSide", "right" if index == 1 else "left")
+                            meta.style().unpolish(meta)
+                            meta.style().polish(meta)
+                            meta.setFixedWidth(607 if index == 0 else 570)
+                        header_row = card.layout().itemAt(0).layout()
+                        header_row.setContentsMargins(0, 0, 7 if index == 1 else 0, 0)
+                        if index == 0:
+                            card.layout().setContentsMargins(21, 20, 18, 15)
+                        else:
+                            card.layout().setContentsMargins(27, 20, 27, 15)
+                    else:
+                        row_layout.setStretch(index, 1)
+                        card.setMinimumHeight(373)
+                        for object_name in (
+                            "datasetResultTitle", "datasetResultId",
+                            "datasetResultDescription", "datasetResultMatch",
+                            "datasetResultMeta",
+                        ):
+                            label = card.findChild(QLabel, object_name)
+                            if label is not None:
+                                label.setMinimumHeight(0)
+                                label.setMaximumHeight(16777215)
+                        meta = card.findChild(QLabel, "datasetResultMeta")
+                        if meta is not None:
+                            meta.setProperty("searchSide", "left")
+                            meta.style().unpolish(meta)
+                            meta.style().polish(meta)
+                            meta.setMinimumWidth(0)
+                            meta.setMaximumWidth(16777215)
+                        card.layout().itemAt(0).layout().setContentsMargins(0, 0, 0, 0)
+                        card.layout().setContentsMargins(20, 20, 20, 15)
 
     def search_datasets(self):
         query = self.search_input.text().strip()
@@ -346,18 +438,34 @@ class DatasetSearchPage(QWidget):
         for start in range(0, len(self.results), 2):
             row = QWidget()
             row_layout = QHBoxLayout(row)
-            row_layout.setDirection(
-                QBoxLayout.TopToBottom
-                if self.scroll.viewport().width() < 1500
-                else QBoxLayout.LeftToRight
-            )
+            horizontal = self.scroll.viewport().width() >= 1400
+            row_layout.setDirection(QBoxLayout.LeftToRight if horizontal else QBoxLayout.TopToBottom)
             row_layout.setContentsMargins(0, 0, 0, 0)
-            row_layout.setSpacing(12)
+            row_layout.setSpacing(17 if horizontal else 12)
             row.setMinimumWidth(0)
             row.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-            row_layout.addWidget(self._build_result_card(self.results[start]), 1)
+            first_card = self._build_result_card(self.results[start])
+            first_card.setMinimumHeight(373)
+            if horizontal:
+                first_card.layout().setContentsMargins(21, 20, 18, 15)
+                first_meta = first_card.findChild(QLabel, "datasetResultMeta")
+                first_meta.setProperty("searchSide", "left")
+                first_meta.style().unpolish(first_meta)
+                first_meta.style().polish(first_meta)
+                first_meta.setFixedWidth(607)
+            row_layout.addWidget(first_card, 719 if horizontal and start + 1 < len(self.results) else 1)
             if start + 1 < len(self.results):
-                row_layout.addWidget(self._build_result_card(self.results[start + 1]), 1)
+                second_card = self._build_result_card(self.results[start + 1])
+                second_card.setMinimumHeight(373)
+                if horizontal:
+                    second_card.layout().setContentsMargins(27, 20, 27, 15)
+                    second_meta = second_card.findChild(QLabel, "datasetResultMeta")
+                    second_meta.setProperty("searchSide", "right")
+                    second_meta.style().unpolish(second_meta)
+                    second_meta.style().polish(second_meta)
+                    second_meta.setFixedWidth(570)
+                    second_card.layout().itemAt(0).layout().setContentsMargins(0, 0, 7, 0)
+                row_layout.addWidget(second_card, 703 if horizontal else 1)
             self.results_layout.addWidget(row)
             self._result_rows.append(row)
 
@@ -366,14 +474,14 @@ class DatasetSearchPage(QWidget):
     def _build_result_card(self, result: DatasetSearchResult) -> QFrame:
         card = QFrame()
         card.setObjectName("datasetResultCard")
-        card.setMinimumHeight(370)
+        card.setMinimumHeight(373)
         card.setMinimumWidth(0)
         card.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         apply_card_shadow(card)
 
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(20, 18, 20, 18)
-        layout.setSpacing(9)
+        layout.setContentsMargins(20, 20, 20, 15)
+        layout.setSpacing(0)
 
         # Header: Title + Source badge
         header_row = QHBoxLayout()
@@ -388,19 +496,22 @@ class DatasetSearchPage(QWidget):
 
         source_badge = QLabel(f" {result.source_label} ")
         source_badge.setObjectName("scoreBadge")
+        source_badge.setFixedSize(83, 28)
+        source_badge.setAlignment(Qt.AlignCenter)
         header_row.addWidget(source_badge)
 
         layout.addLayout(header_row)
+        layout.addSpacing(4)
 
         clean_repo = result.dataset_id.replace("kaggle:", "")
         repo_label = QLabel(f"ID: {clean_repo}")
-        repo_label.setObjectName("cardDescription")
+        repo_label.setObjectName("datasetResultId")
         repo_label.setWordWrap(True)
         repo_label.setMinimumWidth(0)
         repo_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
 
         description = QLabel(result.description or "No dataset description available.")
-        description.setObjectName("cardDescription")
+        description.setObjectName("datasetResultDescription")
         description.setWordWrap(True)
         description.setMinimumWidth(0)
         description.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
@@ -411,7 +522,7 @@ class DatasetSearchPage(QWidget):
                 or "Matched from the dataset search keyword."
             )
         )
-        explanation.setObjectName("cardDescription")
+        explanation.setObjectName("datasetResultMatch")
         explanation.setWordWrap(True)
         explanation.setMinimumWidth(0)
         explanation.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
@@ -424,23 +535,32 @@ class DatasetSearchPage(QWidget):
         if result.author:
             meta_parts.insert(1, f"Author: {result.author}")
 
-        meta = QLabel("  |  ".join(meta_parts))
-        meta.setObjectName("cardDescription")
+        meta_text = " | ".join(meta_parts)
+        if len(meta_parts) > 3:
+            meta_text = " | ".join(meta_parts[:-1]) + " |\n" + meta_parts[-1]
+        meta = QLabel(meta_text)
+        meta.setObjectName("datasetResultMeta")
         meta.setWordWrap(True)
         meta.setMinimumWidth(0)
         meta.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
 
         layout.addWidget(repo_label)
+        layout.addSpacing(4)
         layout.addWidget(description)
+        layout.addSpacing(4)
         layout.addWidget(explanation)
+        layout.addSpacing(4)
         layout.addWidget(meta)
 
         if result.tags:
             tag_text = ", ".join(result.tags[:1])
             tags = QLabel(tag_text)
             tags.setObjectName("datasetResultTag")
+            tags.setFixedSize(83, 28)
+            tags.setAlignment(Qt.AlignCenter)
             tags.setWordWrap(True)
             tags.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+            layout.addSpacing(17)
             layout.addWidget(tags)
 
         # Determine file choices
@@ -454,7 +574,7 @@ class DatasetSearchPage(QWidget):
 
             combo = QComboBox()
             combo.setObjectName("datasetFileSelect")
-            combo.setMinimumHeight(54)
+            combo.setFixedHeight(54)
             combo.setMinimumWidth(0)
             for file in files[:12]:
                 combo.addItem(
@@ -464,17 +584,19 @@ class DatasetSearchPage(QWidget):
             combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             file_row.addWidget(combo, 1)
 
+            layout.addSpacing(17)
             layout.addLayout(file_row)
 
             buttons = QHBoxLayout()
-            buttons.setSpacing(8)
+            buttons.setSpacing(14)
 
             open_button = QPushButton("Open Source")
             open_button.setObjectName("secondaryButton")
+            open_button.setFixedSize(165, 42)
             open_icon = Path(__file__).resolve().parent / "assets" / "icons" / "open-source.svg"
             if open_icon.exists():
                 open_button.setIcon(QIcon(str(open_icon)))
-                open_button.setIconSize(QSize(18, 18))
+                open_button.setIconSize(QSize(20, 20))
             open_button.clicked.connect(
                 lambda _=False, url=result.url: QDesktopServices.openUrl(
                     QUrl(url)
@@ -483,11 +605,12 @@ class DatasetSearchPage(QWidget):
 
             analyze_button = QPushButton("Download && Analyze")
             analyze_button.setObjectName("datasetAnalyzeButton")
+            analyze_button.setFixedSize(241, 42)
             analyze_button.setAccessibleName("Download & Analyze")
             analyze_icon = Path(__file__).resolve().parent / "assets" / "icons" / "download.svg"
             if analyze_icon.exists():
                 analyze_button.setIcon(QIcon(str(analyze_icon)))
-                analyze_button.setIconSize(QSize(18, 18))
+                analyze_button.setIconSize(QSize(24, 24))
             analyze_button.clicked.connect(
                 lambda _=False, r=result, c=combo: self._download_result(
                     r,
@@ -499,6 +622,7 @@ class DatasetSearchPage(QWidget):
             buttons.addStretch()
             buttons.addWidget(open_button)
             buttons.addWidget(analyze_button)
+            layout.addSpacing(14)
             layout.addLayout(buttons)
         else:
             note = QLabel(

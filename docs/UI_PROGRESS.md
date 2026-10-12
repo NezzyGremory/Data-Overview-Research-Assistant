@@ -10,7 +10,7 @@ Sumber desain: DORA, Page 1 (`oLQhZyWW2vIPM9FmqvYewD`). Ukuran frame utama: **19
 | Dataset, dataset terisi | `24:42` | 1920 × 1080 | `DatasetPreviewPage` | selesai |
 | Popup Upload Dataset | `11:101` | 1920 × 1080 | `UploadDatasetDialog` dengan overlay | selesai |
 | Analysis | `31:406` | 1920 × 1080 | `AnalysisPage` | selesai |
-| Dataset Search | `41:221` | 1920 × 1080 | `DatasetSearchPage` | belum |
+| Dataset Search | `41:221` | 1920 × 1080 | `DatasetSearchPage` | selesai |
 | Research Landscape | `54:843` | 1920 × 1080 | `ResearchLandscapeToolPage` di `ResearchInsightsPage` | belum |
 | Overview, versi terbaru | `144:275` | 1920 × 1080 | `DashboardPage` | belum |
 | About | `141:373` | 1920 × 1080 | `AboutPage` | belum |
@@ -24,11 +24,11 @@ Gaya dasar yang dibaca dari Figma: kanvas `#F1F7FF`; biru `#006BB8`, `#0071C2`, 
 
 | Area | Status | Catatan |
 |---|---|---|
-| Fondasi token, shell, skala, dan screenshot | selesai | Shell/sidebar, topbar, token, serta utilitas screenshot dibuat. Sidebar Figma berisi 10 menu. `Editor Analysis` disembunyikan, wiring internal tetap ada. |
+| Fondasi token, shell, skala, dan screenshot | selesai | Shell/sidebar dan topbar dicocokkan ulang ke posisi node Figma; token serta utilitas screenshot tersedia. Sidebar Figma berisi 10 menu. `Editor Analysis` disembunyikan, wiring internal tetap ada. |
 | Dataset kosong dan terisi | selesai | Dua kondisi disetel ke frame 1920×1080; layout kosong turun menjadi satu kolom pada jendela lebih kecil. Sinyal lama dipertahankan. Screenshot dibandingkan dengan frame Figma. |
 | Popup Upload Dataset | selesai | Dialog tepat 1027×757 px pada x=447, y=162; ukuran field dan tombol dicocokkan dari metadata. Switch menampilkan knob putih. Layout ringkas dipakai saat tinggi layar di bawah ukuran desain. Screenshot dibandingkan dengan Figma. |
 | Analysis | selesai | Banner, tombol, area visualisasi, kartu fingerprint, dan kartu kualitas dicocokkan ke koordinat node `31:406`. Subtitle responsif dan detail hasil tetap tersedia di bawah ringkasan. Screenshot 1920×1080 dibandingkan dengan Figma; 1366×768 diperiksa agar teks membungkus tanpa menumpuk. |
-| Dataset Search | belum | Ada frame Figma untuk hasil pencarian. |
+| Dataset Search | selesai | Judul, deskripsi, panel pencarian, dua kolom kartu hasil, metadata, file, dan tombol dicocokkan ke koordinat node `41:221`. Kontrol pencarian dan aksi download tetap memakai handler lama. Screenshot 1920×1080 dibandingkan dengan Figma; 1366×768 diperiksa untuk susunan responsif. |
 | Overview | belum | Memakai frame terbaru `144:275`; frame `104:192` diabaikan. |
 | Research Landscape | belum | Ada frame Figma dengan ringkasan dan dua distribusi. |
 | About | belum | Ada frame Figma. |
@@ -59,5 +59,6 @@ Nama menu utama lainnya sudah sejalan dengan Figma. Navigasi dan backend memakai
 - Bukti Dataset: `screenshots/app_dataset-empty-final.png`, `screenshots/app_dataset-loaded-final.png`, dan uji responsif `screenshots/app_dataset-empty-1366x768.png`.
 - Bukti popup: `screenshots/app-popup-final.png` dan uji responsif `screenshots/app-popup-1366x768.png`.
 - Bukti Analysis: `screenshots/app-analysis-final.png` dan uji responsif `screenshots/app-analysis-1366x768.png`.
+- Bukti Dataset Search: `screenshots/app-dataset-search-final.png` dan uji responsif `screenshots/app-dataset-search-1366x768.png`.
 - Pada 1366×768, kartu di halaman Dataset kosong ditumpuk agar tidak terpotong horizontal; pada 1920×1080 susunannya mengikuti frame.
 - Logika backend, worker, koneksi signal/slot, data runtime, dan database tidak boleh diubah.

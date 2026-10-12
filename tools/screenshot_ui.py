@@ -117,6 +117,42 @@ def main() -> int:
         window._show_page("dataset")
     elif args.page == "dataset-search":
         window.open_dataset_search_page()
+        from app.dataset_search.huggingface import DatasetFile, DatasetSearchResult
+
+        preview_files = [
+            DatasetFile(
+                filename="student-performance.csv (Auto Extract)",
+                size_bytes=106803,
+            )
+        ]
+        window.dataset_search_page.search_input.setText("student")
+        window.dataset_search_page.source_combo.setCurrentIndex(0)
+        window.dataset_search_page._on_search_finished([
+            DatasetSearchResult(
+                dataset_id="kaggle:whenamancodes/student-performance",
+                author="Aman Chauhan",
+                description="Predict student performance in secondary education (high school)",
+                downloads=45339,
+                likes=520,
+                tags=["tabular"],
+                files=preview_files,
+                match_reason="Kaggle dataset (520 votes, usability 100%)",
+            ),
+            DatasetSearchResult(
+                dataset_id="kaggle:spscientist/student-performance-in-exams",
+                author="Spescientist",
+                description="Marks secured by student in various subjects",
+                downloads=280114,
+                likes=3210,
+                tags=["tabular"],
+                files=preview_files,
+                match_reason="Kaggle dataset (3120 votes, usability 100%)",
+            ),
+        ])
+        window.dataset_search_page.status_label.setText(
+            "15 datasets found. Results are ranked by topic match and metadata. "
+            "Choose a file format, then Download or Download & Analyze."
+        )
     elif args.page == "analysis":
         window.current_dataset = _preview_dataframe()
         window.current_file_path = Path("Titanic-Dataset.csv")
@@ -241,6 +277,43 @@ def main() -> int:
                     "analysisFingerprintValue", "analysisQualityCritical",
                     "analysisQualityWarning", "analysisQualityGood",
                 }:
+                    position = widget.mapTo(window, widget.rect().topLeft())
+                    print(f"{widget.objectName()}: ({position.x()}, {position.y()}, {widget.width()}, {widget.height()})")
+        if args.debug_layout and args.page == "dataset-search":
+            page = window.dataset_search_page
+            print(f"dataset_search_viewport_width: {page.scroll.viewport().width()}")
+            for key, button in window.nav_buttons.items():
+                for name, widget in (
+                    ("button", button),
+                    ("icon", button.findChild(QWidget, "navIcon")),
+                    ("text", button.findChild(QWidget, "navText")),
+                ):
+                    if widget is not None:
+                        point = widget.mapTo(window, widget.rect().topLeft())
+                        print(f"nav_{key}_{name}: ({point.x()}, {point.y()}, {widget.width()}, {widget.height()})")
+            for key, widget in window.topbar_links.items():
+                point = widget.mapTo(window, widget.rect().topLeft())
+                print(f"topbar_{key}: ({point.x()}, {point.y()}, {widget.width()}, {widget.height()})")
+            for name, widget in (
+                ("sidebar_group_workspace", window.sidebar_group_cards[0]),
+                ("sidebar_group_research", window.sidebar_group_cards[1]),
+                ("topbar_divider", window.topbar_divider),
+                ("topbar_version", window.topbar_version_container),
+            ):
+                point = widget.mapTo(window, widget.rect().topLeft())
+                print(f"{name}: ({point.x()}, {point.y()}, {widget.width()}, {widget.height()})")
+            for widget in window.topbar_version_container.findChildren(QWidget):
+                if widget.objectName() in {"topbarVersionIcon", "topbarVersion"}:
+                    point = widget.mapTo(window, widget.rect().topLeft())
+                    print(f"{widget.objectName()}: ({point.x()}, {point.y()}, {widget.width()}, {widget.height()})")
+            for widget in page.findChildren(QWidget):
+                if widget.objectName() in {
+                    "datasetSearchCard", "datasetSearchInput", "datasetProviderCombo",
+                    "datasetSearchResults", "datasetResultCard", "datasetResultTitle",
+                    "datasetResultId", "datasetResultDescription", "datasetResultMatch",
+                    "datasetResultMeta", "datasetResultTag", "datasetFileSelect",
+                    "datasetAnalyzeButton", "secondaryButton", "scoreBadge", "cardDescription",
+                } or widget.property("datasetSearch"):
                     position = widget.mapTo(window, widget.rect().topLeft())
                     print(f"{widget.objectName()}: ({position.x()}, {position.y()}, {widget.width()}, {widget.height()})")
         if args.debug_layout and dialog is not None:
