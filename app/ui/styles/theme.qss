@@ -225,7 +225,7 @@ QPushButton#primaryButton:disabled,
 QPushButton#analyzeButton:disabled,
 QPushButton#runButton:disabled,
 QPushButton#uploadButton:disabled { background: var(--border-solid); border-color: var(--border-solid); color: var(--muted); }
-QPushButton#primaryButton[analysisRun="true"] { font-size: 23px; min-height: 64px; padding: 0 24px; }
+QPushButton#primaryButton[analysisRun="true"] { border-radius: var(--small-radius); font-size: 23px; min-height: 61px; padding: 0 24px; }
 
 QPushButton#secondaryButton,
 #uploadSearchButton {
@@ -426,21 +426,27 @@ QProgressBar#landscapeMethodBar::chunk { background: qlineargradient(x1:0, y1:0,
 #landscapeMethodEmpty { color: var(--muted); font-size: 18px; }
 
 /* Analysis and research surfaces */
+#analysisPageScroll,
+#analysisPageScroll::viewport,
+#analysisPageContent,
+#analysisResultScroll,
+#analysisResultScroll::viewport { background: var(--canvas); border: none; }
+QScrollArea#analysisResultScroll QScrollBar:vertical { width: 0; margin: 0; }
 #analysisDatasetBanner { background: var(--surface); border: 1px solid var(--border); border-radius: var(--card-radius); min-height: 86px; }
-#analysisDatasetName { color: var(--heading); font-family: "Plus Jakarta Sans"; font-size: 24px; font-weight: 700; }
+#analysisDatasetName { color: var(--heading); font-family: "Plus Jakarta Sans"; font-size: 20px; font-weight: 700; }
 #analysisDatasetMetrics { color: var(--body); font-size: 22px; }
-#analysisSubtitle { color: var(--body); font-size: 22px; }
+#analysisSubtitle { color: var(--body); font-size: 23px; }
 #analysisOverview { background: transparent; border: none; }
 #analysisFingerprintCard, #analysisQualitySummaryCard { background: var(--surface); border: 1px solid var(--border); border-radius: var(--card-radius); }
 #analysisPanelTitle { color: var(--heading); font-family: "Plus Jakarta Sans"; font-size: 24px; font-weight: 700; }
-#analysisPanelSubtitle { color: var(--muted); font-size: 18px; }
+#analysisPanelSubtitle { color: var(--muted); font-size: 22px; }
 #analysisFingerprintValue { background: var(--fingerprint-surface); border: none; border-radius: var(--small-radius); color: var(--body); font-family: "Intel One Mono"; font-size: 16px; padding: 12px; }
 #analysisQualityCritical { background: var(--quality-critical); border: none; border-radius: var(--small-radius); }
 #analysisQualityWarning { background: var(--quality-warning); border: none; border-radius: var(--small-radius); }
 #analysisQualityGood { background: var(--quality-good); border: none; border-radius: var(--small-radius); }
 #analysisVisualizationTitle { color: var(--heading); font-family: "Plus Jakarta Sans"; font-size: 24px; font-weight: 700; }
 #analysisControlLabel { color: var(--body); font-size: 18px; }
-QComboBox#analysisControlSelect { background: var(--surface); border: 1px solid var(--border); border-radius: var(--card-radius); color: var(--ink); font-size: 20px; min-height: 66px; padding: 0 18px; }
+QComboBox#analysisControlSelect { background: var(--surface); border: 1px solid var(--border); border-radius: var(--card-radius); color: var(--ink); font-size: 20px; min-height: 65px; padding: 0 18px; }
 QComboBox#analysisControlSelect:focus { border: 1px solid var(--blue-bright); }
 QComboBox#analysisControlSelect QAbstractItemView { background: var(--surface); selection-background-color: var(--blue-active); }
 #analysisChartMessage { color: var(--muted); font-size: 18px; }

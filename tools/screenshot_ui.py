@@ -14,6 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 import pandas as pd
+import numpy as np
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import QApplication, QWidget
@@ -37,8 +38,8 @@ def _preview_dataframe() -> pd.DataFrame:
     repeated = pd.concat([frame] * 128, ignore_index=True).iloc[:891].copy()
     repeated.reset_index(drop=True, inplace=True)
     repeated["PassengerId"] = range(1, len(repeated) + 1)
-    repeated["Age"] = repeated["Age"].fillna(28)
-    repeated.iloc[5, repeated.columns.get_loc("Age")] = pd.NA
+    age_values = np.random.default_rng(2026).normal(29, 14, len(repeated))
+    repeated["Age"] = np.clip(age_values, 0, 80).round(1)
     repeated["Cabin"] = repeated["Cabin"].fillna("C42")
     repeated.iloc[:7, repeated.columns.get_loc("Cabin")] = frame["Cabin"].to_numpy()
     repeated.loc[7:182, "Age"] = pd.NA
@@ -53,6 +54,28 @@ def _write_popup_csv() -> Path:
     path = Path(filename)
     _preview_dataframe().to_csv(path, index=False)
     return path
+
+
+def _analysis_preview_result(window, dataframe: pd.DataFrame) -> dict:
+    analyzers = {
+        "profile": window.profiler.profile,
+        "statistics": window.statistics.analyze,
+        "missing_values": window.missing_analyzer.analyze,
+        "duplicates": window.duplicate_analyzer.analyze,
+        "outliers": window.outlier_analyzer.analyze,
+        "correlations": window.correlation_analyzer.analyze,
+        "fingerprint": window.fingerprint_analyzer.generate,
+    }
+    result = {name: analyzer(dataframe) for name, analyzer in analyzers.items()}
+    result["data_quality"] = window.quality_diagnoser.diagnose(
+        dataframe=dataframe,
+        profile=result["profile"],
+        missing_values=result["missing_values"],
+        duplicates=result["duplicates"],
+        outliers=result["outliers"],
+        fingerprint=result["fingerprint"],
+    )
+    return result
 
 
 def main() -> int:
@@ -95,6 +118,11 @@ def main() -> int:
     elif args.page == "dataset-search":
         window.open_dataset_search_page()
     elif args.page == "analysis":
+        window.current_dataset = _preview_dataframe()
+        window.current_file_path = Path("Titanic-Dataset.csv")
+        window.analysis_result = _analysis_preview_result(
+            window, window.current_dataset
+        )
         window.open_analysis_page()
     elif args.page == "overview":
         window.open_dashboard()
@@ -188,6 +216,33 @@ def main() -> int:
             file_layout = page.file_card.layout()
             for index in range(file_layout.count()):
                 print(f"file item {index}: {file_layout.itemAt(index).geometry().getRect()}")
+        if args.debug_layout and args.page == "analysis":
+            page = window.analysis_page
+            for name, widget in (
+                ("analysis_page", page),
+                ("title", page._title_label),
+                ("subtitle", page._subtitle_label),
+                ("run_button", page.analyze_button),
+                ("dataset_banner", page.dataset_label),
+                ("overview", page.findChild(QWidget, "analysisOverview")),
+                ("visualization_card", page.visualization_card),
+                ("fingerprint_card", page.findChild(QWidget, "analysisFingerprintCard")),
+                ("quality_card", page.findChild(QWidget, "analysisQualitySummaryCard")),
+                ("chart_type", page.chart_type),
+                ("chart_column", page.chart_column),
+                ("chart_canvas", page.chart_canvas),
+            ):
+                if widget is not None:
+                    position = widget.mapTo(window, widget.rect().topLeft())
+                    print(f"{name}: ({position.x()}, {position.y()}, {widget.width()}, {widget.height()})")
+            for widget in page.findChildren(QWidget):
+                if widget.objectName() in {
+                    "analysisPanelTitle", "analysisPanelSubtitle", "analysisQualitySubtitle",
+                    "analysisFingerprintValue", "analysisQualityCritical",
+                    "analysisQualityWarning", "analysisQualityGood",
+                }:
+                    position = widget.mapTo(window, widget.rect().topLeft())
+                    print(f"{widget.objectName()}: ({position.x()}, {position.y()}, {widget.width()}, {widget.height()})")
         if args.debug_layout and dialog is not None:
             position = dialog.mapTo(window, dialog.rect().topLeft())
             print(f"dialog: ({position.x()}, {position.y()}, {dialog.width()}, {dialog.height()})")

@@ -2193,8 +2193,8 @@ class AnalysisPage(QWidget):
         root_layout = QVBoxLayout(content)
         self._root_layout = root_layout
 
-        root_layout.setContentsMargins(36, 29, 28, 16)
-        root_layout.setSpacing(18)
+        root_layout.setContentsMargins(36, 29, 25, 16)
+        root_layout.setSpacing(0)
 
         # =================================================
         # HEADER
@@ -2204,8 +2204,12 @@ class AnalysisPage(QWidget):
         self._header_widget = header_widget
         header_layout = QHBoxLayout(header_widget)
         self._header_layout = header_layout
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(0)
 
         title_layout = QVBoxLayout()
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(4)
 
         title = QLabel(
             "Dataset Analysis"
@@ -2215,6 +2219,7 @@ class AnalysisPage(QWidget):
         title.setObjectName(
             "pageTitle"
         )
+        title.setFixedHeight(40)
 
         subtitle = QLabel(
             "Understand the structure, quality, "
@@ -2227,6 +2232,7 @@ class AnalysisPage(QWidget):
         )
 
         subtitle.setWordWrap(True)
+        subtitle.setMinimumHeight(28)
 
         title_layout.addWidget(title)
         title_layout.addWidget(subtitle)
@@ -2240,23 +2246,26 @@ class AnalysisPage(QWidget):
         )
         self.analyze_button.setProperty("analysisRun", True)
 
-        self.analyze_button.setMinimumHeight(
-            64
-        )
+        self.analyze_button.setFixedSize(236, 63)
         run_icon = _resource_path("assets/icons/run.svg")
         if run_icon.exists():
             self.analyze_button.setIcon(QIcon(str(run_icon)))
-            self.analyze_button.setIconSize(QSize(24, 24))
+            self.analyze_button.setIconSize(QSize(32, 32))
 
         self.analyze_button.clicked.connect(
             self.run_analysis
         )
 
-        header_layout.addWidget(
-            self.analyze_button
-        )
+        analyze_button_container = QWidget()
+        analyze_button_container.setFixedSize(236, 65)
+        analyze_button_layout = QVBoxLayout(analyze_button_container)
+        analyze_button_layout.setContentsMargins(0, 2, 0, 0)
+        analyze_button_layout.setSpacing(0)
+        analyze_button_layout.addWidget(self.analyze_button)
+        header_layout.addWidget(analyze_button_container, 0, Qt.AlignTop)
 
         root_layout.addWidget(header_widget)
+        root_layout.addSpacing(24)
 
         # =================================================
         # DATASET READINESS SUMMARY
@@ -2313,9 +2322,10 @@ class AnalysisPage(QWidget):
         self.dataset_label.setObjectName(
             "analysisDatasetBanner"
         )
+        self.dataset_label.setFixedHeight(86)
         dataset_banner_layout = QHBoxLayout(self.dataset_label)
         self.dataset_banner_layout = dataset_banner_layout
-        dataset_banner_layout.setContentsMargins(32, 0, 32, 0)
+        dataset_banner_layout.setContentsMargins(32, 0, 19, 0)
         dataset_banner_layout.setSpacing(12)
         self.dataset_name_label = QLabel("No dataset loaded")
         self.dataset_name_label.setObjectName("analysisDatasetName")
@@ -2329,12 +2339,14 @@ class AnalysisPage(QWidget):
         apply_card_shadow(self.dataset_label)
 
         root_layout.addWidget(self.dataset_label)
+        root_layout.addSpacing(20)
 
         # =================================================
         # RESULT AREA
         # =================================================
 
         scroll = QScrollArea()
+        scroll.setObjectName("analysisResultScroll")
 
         scroll.setWidgetResizable(
             True
@@ -2404,9 +2416,11 @@ class AnalysisPage(QWidget):
         self._subtitle_label.setSizePolicy(
             QSizePolicy.Ignored, QSizePolicy.Preferred
         )
-        subtitle_height = self._subtitle_label.heightForWidth(max(1, width - 32))
-        if subtitle_height > 0:
-            self._subtitle_label.setMinimumHeight(subtitle_height)
+        horizontal_margin = 32 if compact else 61
+        button_width = 0 if compact else self.analyze_button.width()
+        subtitle_width = max(1, width - horizontal_margin - button_width)
+        subtitle_height = self._subtitle_label.heightForWidth(subtitle_width)
+        self._subtitle_label.setFixedHeight(max(28, subtitle_height))
         if compact:
             self._header_widget.setMinimumHeight(
                 self._title_label.minimumHeight()
@@ -2419,7 +2433,7 @@ class AnalysisPage(QWidget):
         self._root_layout.setContentsMargins(
             16 if compact else 36,
             16 if compact else 29,
-            16 if compact else 28,
+            16 if compact else 25,
             12 if compact else 16,
         )
         self._header_layout.setDirection(
@@ -2435,6 +2449,17 @@ class AnalysisPage(QWidget):
             if width < 720
             else QBoxLayout.LeftToRight
         )
+        self.dataset_label.setFixedHeight(112 if width < 720 else 86)
+        chart_controls = getattr(self, "chart_controls", None)
+        if chart_controls is not None:
+            if width < 900:
+                chart_controls.setDirection(QBoxLayout.TopToBottom)
+                self.chart_type.setFixedWidth(max(180, width - 80))
+                self.chart_column.setMinimumWidth(0)
+            else:
+                chart_controls.setDirection(QBoxLayout.LeftToRight)
+                self.chart_type.setFixedWidth(338)
+                self.chart_column.setMinimumWidth(200)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -2667,9 +2692,9 @@ class AnalysisPage(QWidget):
         overview.setMinimumHeight(682)
         overview_layout = QHBoxLayout(overview)
         self._overview_layout = overview_layout
-        overview_layout.setContentsMargins(0, 0, 0, 0)
+        overview_layout.setContentsMargins(0, 0, 6, 0)
         overview_layout.setSpacing(16)
-        overview_layout.addWidget(self.visualization_card, 68)
+        overview_layout.addWidget(self.visualization_card, 1)
 
         side_panel = QWidget()
         side_column = QVBoxLayout(side_panel)
@@ -2677,9 +2702,10 @@ class AnalysisPage(QWidget):
         side_column.setSpacing(18)
         side_column.addWidget(self._build_fingerprint_card(fingerprint))
         side_column.addWidget(self._build_quality_summary_card(), 1)
-        overview_layout.addWidget(side_panel, 32)
+        overview_layout.addWidget(side_panel)
         self._overview_side_column = side_panel
         self.result_layout.addWidget(overview)
+        self.result_layout.addSpacing(28)
 
         # Keep the analyzer's detailed result views and their action handlers
         # available below the Figma overview.
@@ -2727,12 +2753,21 @@ class AnalysisPage(QWidget):
         overview_layout = getattr(self, "_overview_layout", None)
         if overview_layout is None:
             return
-        stacked = width < 1050
+        stacked = width < 1250
         overview_layout.setDirection(
             QBoxLayout.TopToBottom if stacked else QBoxLayout.LeftToRight
         )
-        overview_layout.setStretch(0, 68)
-        overview_layout.setStretch(1, 32)
+        overview_layout.setStretch(0, 1)
+        overview_layout.setStretch(1, 0)
+        side_panel = getattr(self, "_overview_side_column", None)
+        if side_panel is not None:
+            if stacked:
+                overview_layout.setContentsMargins(0, 0, 0, 0)
+                side_panel.setMinimumWidth(0)
+                side_panel.setMaximumWidth(16777215)
+            else:
+                overview_layout.setContentsMargins(0, 0, 6, 0)
+                side_panel.setFixedWidth(450)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -2744,19 +2779,22 @@ class AnalysisPage(QWidget):
         card.setObjectName("analysisFingerprintCard")
         card.setMinimumHeight(162)
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(18, 16, 18, 16)
-        layout.setSpacing(6)
+        layout.setContentsMargins(15, 14, 15, 16)
+        layout.setSpacing(2)
 
         title = QLabel("Sidik jari dataset")
         title.setObjectName("analysisPanelTitle")
+        title.setFixedHeight(30)
         layout.addWidget(title)
         algorithm = QLabel("SHA-256")
         algorithm.setObjectName("analysisPanelSubtitle")
+        algorithm.setFixedHeight(42)
         layout.addWidget(algorithm)
 
         hash_value = fingerprint.get("fingerprint") if isinstance(fingerprint, dict) else ""
         value = QLabel(f"{hash_value[:32]}.." if hash_value else "Belum tersedia")
         value.setObjectName("analysisFingerprintValue")
+        value.setFixedHeight(48)
         value.setTextInteractionFlags(Qt.TextSelectableByMouse)
         value.setToolTip(str(hash_value or ""))
         layout.addWidget(value)
@@ -2768,23 +2806,25 @@ class AnalysisPage(QWidget):
         card.setObjectName("analysisQualitySummaryCard")
         card.setMinimumHeight(500)
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(18, 16, 18, 18)
-        layout.setSpacing(8)
+        layout.setContentsMargins(15, 16, 15, 18)
+        layout.setSpacing(6)
 
         title = QLabel("Kualitas data")
         title.setObjectName("analysisPanelTitle")
         layout.addWidget(title)
         subtitle = QLabel("Temuan pada nilai kosong, duplikasi, dan outliers")
-        subtitle.setObjectName("analysisPanelSubtitle")
+        subtitle.setObjectName("analysisQualitySubtitle")
         subtitle.setWordWrap(True)
         layout.addWidget(subtitle)
-        layout.addSpacing(2)
+        layout.addSpacing(5)
 
-        for object_name in ("analysisQualityCritical", "analysisQualityWarning", "analysisQualityGood"):
+        for index, object_name in enumerate(("analysisQualityCritical", "analysisQualityWarning", "analysisQualityGood")):
             indicator = QFrame()
             indicator.setObjectName(object_name)
-            indicator.setMinimumHeight(92)
+            indicator.setFixedHeight(93)
             layout.addWidget(indicator)
+            if index < 2:
+                layout.addSpacing(5)
         layout.addStretch(1)
         apply_card_shadow(card)
         return card
@@ -2801,15 +2841,18 @@ class AnalysisPage(QWidget):
         card.setObjectName("contentCard")
         card.setMinimumHeight(682)
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(32, 24, 32, 20)
+        layout.setContentsMargins(33, 28, 32, 37)
         layout.setSpacing(12)
 
         title = QLabel("Visualisasi Data")
         title.setObjectName("analysisVisualizationTitle")
         layout.addWidget(title)
-        layout.addSpacing(14)
+        layout.addSpacing(20)
 
         controls = QHBoxLayout()
+        self.chart_controls = controls
+        controls.setContentsMargins(0, 0, 4, 0)
+        controls.setSpacing(0)
         self.chart_type = QComboBox()
         self.chart_type.setObjectName("analysisControlSelect")
         self.chart_type.addItem("Histogram", "histogram")
@@ -2826,14 +2869,20 @@ class AnalysisPage(QWidget):
 
         chart_type_label = QLabel("Jenis Grafik")
         chart_type_label.setObjectName("analysisControlLabel")
+        chart_type_label.setFixedWidth(108)
         controls.addWidget(chart_type_label)
-        controls.addWidget(self.chart_type, 1)
+        controls.addSpacing(14)
+        self.chart_type.setFixedWidth(338)
+        controls.addWidget(self.chart_type)
+        controls.addSpacing(26)
         column_label = QLabel("Kolom")
         column_label.setObjectName("analysisControlLabel")
+        column_label.setFixedWidth(57)
         controls.addWidget(column_label)
+        controls.addSpacing(10)
         controls.addWidget(self.chart_column, 1)
         layout.addLayout(controls)
-        layout.addSpacing(24)
+        layout.addSpacing(10)
 
         self.chart_message = QLabel("Jalankan analisis untuk melihat visualisasi.")
         self.chart_message.setObjectName("analysisChartMessage")
@@ -2924,7 +2973,10 @@ class AnalysisPage(QWidget):
                 chart_grid = theme.get("chart-grid", "#e5e5e5")
                 chart_text = theme.get("chart-text", "#564e4e")
                 axis.hist(values, bins="auto", color=chart_blue, edgecolor="white", linewidth=0.7)
-                axis.set_title(f"Distribusi {column_name}", fontsize=12, color=chart_text, pad=12)
+                axis.set_title(
+                    f"Distribusi {column_name}", fontsize=12, fontweight="bold",
+                    color=chart_text, pad=6,
+                )
                 axis.set_xlabel("")
                 axis.set_ylabel("")
                 axis.set_axisbelow(True)
