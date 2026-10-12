@@ -1,44 +1,29 @@
-# =====================================================================
-# Python & Environment Virtualenv
-# =====================================================================
+# Python bytecode, virtual environments, and local tooling caches
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
 .Python
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# Virtual Environment
 .venv/
 venv/
 env/
 ENV/
-env.bak/
-venv.bak/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.tox/
+.nox/
+.coverage
+htmlcov/
+*.egg-info/
 
-# =====================================================================
-# Sensitive Files & API Keys
-# =====================================================================
+# Local secrets and credentials
 .env
 .env.*
 !.env.example
 .envrc
 .secrets
 .secrets.*
-data/config.json
 *.pem
 *.key
 *.cert
@@ -53,14 +38,31 @@ backend/.env
 backend/.env.*
 !backend/.env.example
 
-# =====================================================================
-# Application Runtime Data & Downloads (User Datasets & Cache)
-# =====================================================================
+# Local AI/editor instructions and agent state
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+COPILOT_INSTRUCTIONS.md
+.agents/
+.codex/
+.claude/
+.cursor/
+.github/copilot-instructions.md
+
+# Runtime databases, logs, and local datasets
 data/*
 !data/.gitkeep
-data/evaluation/
-
-# Dataset files can contain user data; ignore them wherever they are saved.
+!data/**/.gitkeep
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.dump
+*.sql.gz
+*.backup
+*.bak
+*.log
+logs/
 *.csv
 *.tsv
 *.parquet
@@ -79,44 +81,10 @@ data/evaluation/
 *.pkl
 *.joblib
 
-# Keep empty folder placeholder files
-!data/**/.gitkeep
-
-# =====================================================================
-# Databases & State
-# =====================================================================
-*.db
-*.sqlite
-*.sqlite3
-*.db-journal
-*.dump
-*.sql.gz
-*.backup
-*.bak
-
-# =====================================================================
-# Logs & Testing
-# =====================================================================
-*.log
-logs/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.hypothesis/
-.coverage
-htmlcov/
-.tox/
-.nox/
-*.prof
-
-# =====================================================================
-# Build & Compilation (PyInstaller / PySide / C extensions)
-# =====================================================================
+# Generated builds, installers, and binary archives
 build/
 dist/
 hasil_compile/
-*.spec
-!Dataset\ Research.spec
 *.exe
 *.dll
 *.pyd
@@ -126,10 +94,13 @@ hasil_compile/
 *.rar
 *.tar
 *.gz
+*.spec
+!Dataset\ Research.spec
 
-# =====================================================================
-# IDEs & OS Specific Files
-# =====================================================================
+# Generated screenshots; existing tracked documentation screenshots stay tracked
+screenshots/*.png
+
+# IDE and operating-system files
 .vscode/
 .idea/
 *.swp

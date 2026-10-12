@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import sys
 import sysconfig
 from pathlib import Path
@@ -16,11 +17,21 @@ from PySide6.QtCore import (
     QProcess,
     QProcessEnvironment,
     QPropertyAnimation,
+    QRegularExpression,
+    Signal,
     QStandardPaths,
     QTimer,
     Qt,
 )
-from PySide6.QtGui import QImage, QPixmap, QTextCursor
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QImage,
+    QPixmap,
+    QSyntaxHighlighter,
+    QTextCharFormat,
+    QTextCursor,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QBoxLayout,
@@ -43,6 +54,61 @@ from PySide6.QtWidgets import (
 )
 
 from app.ui.style_utils import apply_card_shadow
+
+
+class PythonCodeHighlighter(QSyntaxHighlighter):
+    """Lightweight Python syntax colors for the notebook code editor."""
+
+    def __init__(self, document):
+        super().__init__(document)
+        self.rules = []
+        self._add_rule(
+            r"\b(?:False|None|True|and|as|assert|async|await|break|class|continue|def|del|"
+            r"elif|else|except|finally|for|from|global|if|import|in|is|lambda|nonlocal|not|"
+            r"or|pass|raise|return|try|while|with|yield|match|case)\b",
+            "#c792ea",
+            bold=True,
+        )
+        self._add_rule(
+            r"\b(?:abs|all|any|bool|dict|enumerate|filter|float|int|len|list|map|max|min|"
+            r"print|range|set|sorted|str|sum|tuple|type|zip|display|help)\b",
+            "#82aaff",
+        )
+        self._add_rule(r"@[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*", "#ffcb6b")
+        self._add_rule(r"(?<=\bdef )\w+|(?<=\bclass )\w+", "#82aaff", bold=True)
+        self._add_rule(r"\b(?:0[xX][\da-fA-F]+|\d+(?:\.\d*)?(?:[eE][+-]?\d+)?)\b", "#f78c6c")
+        self._add_rule(
+            r"(?i)(?:[rubf]{0,2})?(?:\"\"\".*?\"\"\"|'''.*?'''|\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*')",
+            "#c3e88d",
+        )
+        self._add_rule(r"#.*$", "#7f8c9a", italic=True)
+
+    def _add_rule(self, pattern: str, color: str, *, bold: bool = False, italic: bool = False):
+        text_format = QTextCharFormat()
+        text_format.setForeground(QColor(color))
+        if bold:
+            text_format.setFontWeight(QFont.Bold)
+        if italic:
+            text_format.setFontItalic(True)
+        self.rules.append((QRegularExpression(pattern), text_format))
+
+    def highlightBlock(self, text: str):
+        for expression, text_format in self.rules:
+            matches = expression.globalMatch(text)
+            while matches.hasNext():
+                match = matches.next()
+                self.setFormat(match.capturedStart(), match.capturedLength(), text_format)
+
+
+class PythonCodeEditor(QPlainTextEdit):
+    runRequested = Signal()
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter) and event.modifiers() & Qt.ControlModifier:
+            self.runRequested.emit()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
 
 class EditorAnalysisPage(QWidget):
@@ -471,6 +537,7 @@ print(f"Rata-rata: {scores.mean():.3f} ± {scores.std():.3f}")
         self._queue_had_error = False
         self._package_process: QProcess | None = None
         self._package_log = ""
+        self._installing_packages: list[str] = []
         self._notebook_path: Path | None = None
         self._run_timeout = QTimer(self)
         self._run_timeout.setSingleShot(True)
@@ -869,8 +936,11 @@ plt.tight_layout()
         self.library_row.addWidget(library_label)
         self.library_input = QLineEdit()
         self.library_input.setObjectName("editorAnalysisLibraryInput")
-        self.library_input.setPlaceholderText("contoh: seaborn atau xgboost==2.1.0")
-        self.library_input.setToolTip("Nama paket PyPI; satu paket setiap pemasangan.")
+        self.library_input.setPlaceholderText("pip install seaborn pandas atau xgboost==2.1.0")
+        self.library_input.setToolTip(
+            "Ketik pip install diikuti satu atau beberapa nama paket PyPI."
+        )
+        self.library_input.returnPressed.connect(self._install_library)
         self.library_row.addWidget(self.library_input, 1)
         self.install_library_button = QPushButton("Pasang")
         self.install_library_button.setObjectName("secondaryButton")
@@ -909,11 +979,19 @@ plt.tight_layout()
         self.target_row.addStretch(1)
         layout.addLayout(self.target_row)
 
-        self.code_editor = QPlainTextEdit()
+        self.code_editor = PythonCodeEditor()
         self.code_editor.setObjectName("editorAnalysisCodeEditor")
         self.code_editor.setPlaceholderText("Pilih tahapan untuk memuat template kode.")
         self.code_editor.setLineWrapMode(QPlainTextEdit.NoWrap)
-        self.code_editor.setTabStopDistance(32)
+        code_font = self.code_editor.font()
+        code_font.setStyleHint(QFont.Monospace)
+        code_font.setFamily("Consolas")
+        code_font.setPixelSize(14)
+        self.code_editor.setFont(code_font)
+        self.code_editor.setTabStopDistance(self.code_editor.fontMetrics().horizontalAdvance(" ") * 4)
+        self.code_highlighter = PythonCodeHighlighter(self.code_editor.document())
+        self.code_editor.runRequested.connect(self._execute_code)
+        self.code_editor.setToolTip("Ctrl+Enter untuk menjalankan kode yang sedang dipilih.")
         self.code_editor.setMinimumHeight(300)
         self.code_editor.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.code_editor.textChanged.connect(self._save_current_code)
@@ -1510,14 +1588,40 @@ plt.tight_layout()
         cursor.movePosition(QTextCursor.End)
         self.library_output.setTextCursor(cursor)
 
-    def _install_library(self):
-        spec = self.library_input.text().strip()
-        allowed = re.fullmatch(
-            r"[A-Za-z0-9][A-Za-z0-9._-]*(?:\[[A-Za-z0-9_,.-]+\])?(?:(?:==|~=|>=|<=|!=|>|<)[A-Za-z0-9.*+!-]+)?",
-            spec,
+    @staticmethod
+    def _parse_package_specs(command: str) -> list[str]:
+        """Accept package names or a safe, pip-install-shaped command."""
+        try:
+            parts = shlex.split(command.strip(), posix=True)
+        except ValueError:
+            return []
+        if not parts:
+            return []
+
+        lowered = [part.casefold() for part in parts]
+        if lowered[:2] in (["pip", "install"], ["pip3", "install"]):
+            parts = parts[2:]
+        elif len(lowered) >= 4 and lowered[1:4] == ["-m", "pip", "install"] and lowered[0] in {
+            "python", "python3", "python.exe", "py",
+        }:
+            parts = parts[4:]
+        elif any(part in {"pip", "pip3", "install", "-m"} for part in lowered[:4]):
+            return []
+
+        package_pattern = re.compile(
+            r"[A-Za-z0-9][A-Za-z0-9._-]*(?:\[[A-Za-z0-9_,.-]+\])?"
+            r"(?:(?:==|~=|>=|<=|!=|>|<)[A-Za-z0-9.*+!-]+)?"
         )
-        if not allowed:
-            self.library_status.setText("Masukkan satu nama paket PyPI, misalnya seaborn atau xgboost==2.1.0.")
+        if not parts or any(not package_pattern.fullmatch(part) for part in parts):
+            return []
+        return list(dict.fromkeys(parts))
+
+    def _install_library(self):
+        packages = self._parse_package_specs(self.library_input.text())
+        if not packages:
+            self.library_status.setText(
+                "Tulis pip install diikuti nama paket, misalnya pip install seaborn pandas."
+            )
             return
         if self._dataframe is None:
             self.library_status.setText("Muat dataset dan proyek sebelum memasang library.")
@@ -1525,23 +1629,26 @@ plt.tight_layout()
         if self._kernel_busy or self._execution_queue or self._package_process is not None:
             return
         self._stop_kernel()
+        self._installing_packages = packages
         self._package_log = ""
         self.library_output.clear()
         self.output_tabs.setCurrentIndex(2)
-        self.library_status.setText(f"Memasang {spec} ke lingkungan proyek...")
+        self.library_status.setText(
+            f"Memasang {', '.join(packages)} ke lingkungan proyek..."
+        )
         self.install_library_button.setEnabled(False)
         self.run_button.setEnabled(False)
         self.run_all_button.setEnabled(False)
         self.execution_note.setText("Pemasangan library sedang berjalan...")
         self._run_animation.start()
-        self._ensure_environment(lambda: self._start_package_install(spec))
+        self._ensure_environment(lambda: self._start_package_install(packages))
 
-    def _start_package_install(self, spec: str):
+    def _start_package_install(self, packages: list[str]):
         process = QProcess(self)
         self._package_process = process
         process.setProgram(str(self._execution_interpreter()))
         process.setArguments([
-            "-m", "pip", "install", "--disable-pip-version-check", "--upgrade", spec,
+            "-m", "pip", "install", "--disable-pip-version-check", "--upgrade", *packages,
         ])
         process.setWorkingDirectory(str(self._project_workspace))
         environment = QProcessEnvironment.systemEnvironment()
@@ -1580,8 +1687,10 @@ plt.tight_layout()
         self.run_button.setEnabled(self._dataframe is not None)
         self.run_all_button.setEnabled(self._dataframe is not None)
         if exit_code == 0:
-            package = self.library_input.text().strip()
-            self.library_status.setText(f"{package} terpasang. Jalankan ulang bagian analisis untuk memakai library ini.")
+            package_names = ", ".join(self._installing_packages)
+            self.library_status.setText(
+                f"{package_names} terpasang. Jalankan ulang bagian analisis untuk memakai library ini."
+            )
             self.execution_note.setText("Library siap digunakan pada sesi Python berikutnya.")
         else:
             self.library_status.setText("Pemasangan gagal. Periksa log pada tab Library.")

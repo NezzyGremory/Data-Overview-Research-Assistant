@@ -1,16 +1,26 @@
 {
+  "intro": "A Metriks Studio Production",
   "app": "DORA",
   "tagline": "Data Overview & Research Assistant",
   "team": "Metriks Studio",
   "sections": [
-    {"role": "Pembimbing", "names": ["Bapak Rohmad Abidin, M.Kom"]},
-    {"role": "UI/UX Design", "names": ["Lyra Anindita Ferani"]},
-    {"role": "Full-Stack Developer", "names": ["Abdul Muhis"]},
-    {"role": "Built With", "names": ["Python", "PySide6", "Figma"]},
-    {"role": "Special Thanks", "names": [
-      "UIN K.H. Abdurrahman Wahid Pekalongan",
-      "Keluarga dan teman-teman"
-    ]}
+    {
+      "role": "Academic Supervisor",
+      "names": ["Rohmad Abidin, M.Kom"]
+    },
+    {
+      "role": "UI/UX Design",
+      "names": ["Lyra Anindita Ferani"]
+    },
+    {
+      "role": "Software Engineering",
+      "names": ["Abdul Muhis"]
+    },
+    {
+      "role": "Special Thanks",
+      "names": ["UIN K.H. Abdurrahman Wahid Pekalongan"]
+    }
   ],
-  "footer": "© 2026 Metriks Studio"
+  "closing": "Thank you for using DORA",
+  "footer": "© 2026 Metriks Studio. All rights reserved."
 }

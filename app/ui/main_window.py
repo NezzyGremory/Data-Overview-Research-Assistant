@@ -410,6 +410,78 @@ class SintaBatchLookupWorker(QObject):
         self.finished.emit(total)
 
 
+class JournalIndexBatchLookupWorker(QObject):
+    """Check public/entitled non-SINTA journal index sources in the background."""
+
+    progress = Signal(int, int, int, str, object)
+    finished = Signal(int)
+    failed = Signal(str)
+
+    def __init__(self, tasks):
+        super().__init__()
+        self.tasks = tasks
+
+    def run(self):
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from app.research.journal_index_verifier import JournalIndexVerifier
+
+        groups = {}
+        for task in self.tasks:
+            normalized_issns = tuple(sorted({
+                JournalIndexVerifier.normalize_issn(value)
+                for value in task.get("issn", [])
+                if JournalIndexVerifier.normalize_issn(value)
+            }))
+            groups.setdefault(normalized_issns, []).append(task)
+
+        verifier = JournalIndexVerifier(timeout=8.0)
+        total = len(self.tasks)
+        completed = 0
+        try:
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                futures = {
+                    executor.submit(verifier.verify, list(key)): (key, group)
+                    for key, group in groups.items()
+                    if key
+                }
+                for key, group in groups.items():
+                    if key:
+                        continue
+                    result = verifier.verify([])
+                    for task in group:
+                        completed += 1
+                        self.progress.emit(
+                            completed,
+                            total,
+                            task["paper_index"],
+                            task["identity"],
+                            result,
+                        )
+                for future in as_completed(futures):
+                    _key, group = futures[future]
+                    try:
+                        result = future.result()
+                    except Exception as error:
+                        result = {
+                            "status": "FAILED",
+                            "indexes": [],
+                            "sources": {},
+                            "message": f"Pemeriksaan indeks belum berhasil: {error}",
+                        }
+                    for task in group:
+                        completed += 1
+                        self.progress.emit(
+                            completed,
+                            total,
+                            task["paper_index"],
+                            task["identity"],
+                            result,
+                        )
+            self.finished.emit(total)
+        except Exception as error:
+            self.failed.emit(str(error))
+
+
 class _SintaTextParser(HTMLParser):
     """Extract visible directory text into short lines for conservative matching."""
 
@@ -1457,6 +1529,7 @@ class UploadPage(QWidget):
         dropzone = QFrame()
         self.upload_dropzone = dropzone
         dropzone.setObjectName("uploadDropzone")
+        dropzone.setCursor(Qt.PointingHandCursor)
         dropzone.setMaximumWidth(895)
         dropzone.setFixedHeight(325)
         drop_layout = QVBoxLayout(dropzone)
@@ -1488,6 +1561,7 @@ class UploadPage(QWidget):
         prefix.setObjectName("uploadDropDescription")
         prefix.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         browse_link = QPushButton("browse from your computer.")
+        self.upload_browse_link = browse_link
         browse_link.setObjectName("uploadBrowseLink")
         browse_link.setFlat(True)
         browse_link.setCursor(Qt.PointingHandCursor)
@@ -1503,6 +1577,7 @@ class UploadPage(QWidget):
         drop_layout.addStretch(1)
         drop_layout.setStretch(0, 5)
         drop_layout.setStretch(drop_layout.count() - 1, 9)
+        self._install_dropzone_interaction(dropzone)
         dropzone_wrap = QWidget()
         dropzone_wrap_layout = QHBoxLayout(dropzone_wrap)
         dropzone_wrap_layout.setContentsMargins(5, 0, 0, 0)
@@ -1663,16 +1738,71 @@ class UploadPage(QWidget):
     # SELECT DATASET
     # =====================================================
 
-    def select_dataset(self):
+    def _install_dropzone_interaction(self, dropzone):
+        self._dropzone_targets = [dropzone, *dropzone.findChildren(QWidget)]
+        for target in self._dropzone_targets:
+            target.setAcceptDrops(True)
+            target.installEventFilter(self)
+            if target is not self.upload_browse_link:
+                target.setCursor(Qt.PointingHandCursor)
 
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select Dataset",
-            "",
-            "CSV Files (*.csv)"
-        )
+    @staticmethod
+    def _csv_paths_from_drop(event):
+        mime_data = event.mimeData()
+        if not mime_data.hasUrls():
+            return []
+        return [Path(url.toLocalFile()) for url in mime_data.urls() if url.isLocalFile()]
+
+    def eventFilter(self, watched, event):
+        if watched in getattr(self, "_dropzone_targets", ()):
+            event_type = event.type()
+            if event_type in (QEvent.DragEnter, QEvent.DragMove):
+                paths = self._csv_paths_from_drop(event)
+                if paths and all(path.suffix.lower() == ".csv" for path in paths):
+                    event.acceptProposedAction()
+                    return True
+                event.ignore()
+                return True
+            if event_type == QEvent.Drop:
+                paths = self._csv_paths_from_drop(event)
+                if len(paths) != 1 or paths[0].suffix.lower() != ".csv":
+                    QMessageBox.information(
+                        self,
+                        "Choose one CSV file",
+                        "Drop one CSV dataset at a time.",
+                    )
+                else:
+                    self.select_dataset(str(paths[0]))
+                event.acceptProposedAction()
+                return True
+            if (
+                event_type == QEvent.MouseButtonRelease
+                and event.button() == Qt.LeftButton
+                and watched is not self.upload_browse_link
+            ):
+                self.select_dataset()
+                return True
+        return super().eventFilter(watched, event)
+
+    def select_dataset(self, file_path=None):
+        if not isinstance(file_path, (str, Path)) or not str(file_path):
+            file_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "Select Dataset",
+                "",
+                "CSV Files (*.csv)",
+            )
 
         if not file_path:
+            return
+
+        file_path = str(file_path)
+        if Path(file_path).suffix.lower() != ".csv":
+            QMessageBox.information(
+                self,
+                "Unsupported file",
+                "Please choose a CSV dataset.",
+            )
             return
 
         upload_dialog = UploadDatasetDialog(self.main_window, file_path)
@@ -5889,6 +6019,8 @@ class ResearchPage(QWidget):
         self._sinta_thread: QThread | None = None
         self._sinta_worker: SintaLookupWorker | None = None
         self._sinta_lookup_cache = {}
+        self._journal_index_thread: QThread | None = None
+        self._journal_index_worker: JournalIndexBatchLookupWorker | None = None
         self._sinta_table_refresh_timer = QTimer(self)
         self._sinta_table_refresh_timer.setSingleShot(True)
         self._sinta_table_refresh_timer.setInterval(140)
@@ -6439,7 +6571,7 @@ class ResearchPage(QWidget):
         )
 
         description = QLabel(
-            "Tinjau artikel dan sumbernya, lalu filter jurnal berdasarkan status SINTA yang telah dikonfirmasi."
+            "Tinjau artikel dan sumbernya, lalu filter status SINTA dan indeks jurnal yang diperiksa otomatis."
         )
         description.setObjectName("cardDescription")
 
@@ -6458,14 +6590,14 @@ class ResearchPage(QWidget):
         self.paper_search_input.textChanged.connect(self._apply_paper_filter)
         toolbar.addWidget(self.paper_search_input, 1)
 
-        filter_label = QLabel("Status SINTA")
+        filter_label = QLabel("Status jurnal")
         filter_label.setObjectName("cardDescription")
         toolbar.addWidget(filter_label)
 
         self.sinta_filter = QComboBox()
         self.sinta_filter.setMinimumHeight(34)
         self.sinta_filter.setMinimumWidth(185)
-        self.sinta_filter.addItem("Semua Status Akreditasi", "ALL")
+        self.sinta_filter.addItem("Semua Status Jurnal", "ALL")
         for rank in range(1, 7):
             self.sinta_filter.addItem(f"SINTA {rank}", f"S{rank}")
         self.sinta_filter.addItem("Tidak Terakreditasi", "NOT_ACCREDITED")
@@ -6477,6 +6609,13 @@ class ResearchPage(QWidget):
         self.sinta_filter.addItem("Peringkat Tidak Terbaca", "RANK_UNAVAILABLE")
         self.sinta_filter.addItem("Tidak Ditemukan", "NOT_FOUND")
         self.sinta_filter.addItem("Perlu Dicoba Lagi", "FAILED")
+        self.sinta_filter.insertSeparator(self.sinta_filter.count())
+        self.sinta_filter.addItem("Terindeks DOAJ", "INDEX_DOAJ")
+        self.sinta_filter.addItem("Terindeks Scopus", "INDEX_SCOPUS")
+        self.sinta_filter.addItem("Indeks lain belum diperiksa", "INDEX_UNVERIFIED")
+        self.sinta_filter.addItem("Tidak ditemukan di indeks yang dicek", "INDEX_NOT_FOUND")
+        self.sinta_filter.addItem("Pemeriksaan indeks parsial", "INDEX_PARTIAL")
+        self.sinta_filter.addItem("Metadata ISSN tidak tersedia", "INDEX_NO_METADATA")
         self.sinta_filter.currentIndexChanged.connect(self._apply_paper_filter)
         toolbar.addWidget(self.sinta_filter)
 
@@ -6488,6 +6627,16 @@ class ResearchPage(QWidget):
         )
         self.sinta_batch_button.clicked.connect(self._check_pending_sinta_batch)
         toolbar.addWidget(self.sinta_batch_button)
+
+        self.other_index_button = QPushButton("Periksa Indeks Lain")
+        self.other_index_button.setObjectName("secondaryButton")
+        self.other_index_button.setMinimumHeight(34)
+        self.other_index_button.setToolTip(
+            "Cek ISSN otomatis di DOAJ. Scopus dicek bila API Elsevier sudah memiliki akses."
+        )
+        self.other_index_button.setEnabled(False)
+        self.other_index_button.clicked.connect(self._check_pending_other_indexes)
+        toolbar.addWidget(self.other_index_button)
 
         self.paper_count_label = QLabel("0 paper")
         self.paper_count_label.setObjectName("topbarStatus")
@@ -6533,7 +6682,7 @@ class ResearchPage(QWidget):
                 "ISSN",
                 "Sumber",
                 "Relevansi",
-                "Status SINTA",
+                "SINTA / Indeks",
             ]
         )
 
@@ -7763,6 +7912,9 @@ class ResearchPage(QWidget):
             index for index, paper in enumerate(papers) if isinstance(paper, dict)
         ]
         self._all_papers = [papers[index] for index in self._all_paper_result_indices]
+        self.other_index_button.setEnabled(
+            bool(self._all_papers) and self._journal_index_thread is None
+        )
         self._apply_paper_filter()
 
     def _render_overview_papers(self, papers):
@@ -7944,7 +8096,26 @@ class ResearchPage(QWidget):
             "Tidak Terakreditasi": "Tanpa Akreditasi",
             "Belum Terverifikasi": "Belum Pasti",
         }
-        return compact_labels.get(label, label)
+        base_label = compact_labels.get(label, label)
+        other_indexes = screening.get("other_indexes", {})
+        indexed_sources = [
+            name
+            for name, details in (other_indexes.get("sources", {}) or {}).items()
+            if isinstance(details, dict) and details.get("status") == "INDEXED"
+        ] if isinstance(other_indexes, dict) else []
+        if indexed_sources:
+            return f"{base_label} · {'/'.join(indexed_sources)}"
+        if isinstance(other_indexes, dict):
+            extra_labels = {
+                "PARTIAL": "Indeks Parsial",
+                "NOT_FOUND": "Indeks tak cocok",
+                "NO_METADATA": "ISSN kosong",
+                "FAILED": "Cek indeks gagal",
+            }
+            extra_label = extra_labels.get(other_indexes.get("status"))
+            if extra_label:
+                return f"{base_label} · {extra_label}"
+        return base_label
 
     @staticmethod
     def _screening_journal_display_name(paper, screening):
@@ -7978,6 +8149,21 @@ class ResearchPage(QWidget):
         if selected_status in {None, "ALL"}:
             return True
         screening = cls._sinta_screening(paper)
+        other_indexes = screening.get("other_indexes", {})
+        if selected_status in {"INDEX_DOAJ", "INDEX_SCOPUS"}:
+            source_name = selected_status.removeprefix("INDEX_")
+            sources = other_indexes.get("sources", {}) if isinstance(other_indexes, dict) else {}
+            source = sources.get(source_name, {}) if isinstance(sources, dict) else {}
+            return isinstance(source, dict) and source.get("status") == "INDEXED"
+        if selected_status == "INDEX_UNVERIFIED":
+            return not isinstance(other_indexes, dict) or not other_indexes.get("checked_at")
+        other_status = other_indexes.get("status") if isinstance(other_indexes, dict) else None
+        if selected_status == "INDEX_NOT_FOUND":
+            return other_status == "NOT_FOUND"
+        if selected_status == "INDEX_PARTIAL":
+            return other_status in {"PARTIAL", "FAILED"}
+        if selected_status == "INDEX_NO_METADATA":
+            return other_status == "NO_METADATA"
         status = str(screening.get("status") or "UNVERIFIED")
         lookup_status = str(screening.get("lookup_status") or "UNVERIFIED")
         if selected_status == "UNVERIFIED":
@@ -8092,6 +8278,7 @@ class ResearchPage(QWidget):
                 elif column == 7:
                     screening = self._sinta_screening(paper)
                     status = str(screening.get("status") or "UNVERIFIED")
+                    external = screening.get("other_indexes", {})
                     if status in {f"S{rank}" for rank in range(1, 7)}:
                         item.setForeground(QColor("#0F766E"))
                         item.setBackground(QColor("#F0FDF4"))
@@ -8106,7 +8293,8 @@ class ResearchPage(QWidget):
                         item.setBackground(QColor("#F1F5F9"))
                     item.setToolTip(
                         f"{full_sinta_label}. "
-                        f"{_sinta_ui_note(screening) or screening.get('source_url') or 'Pilih baris ini untuk memeriksa akreditasi.'}"
+                        f"{_sinta_ui_note(screening) or screening.get('source_url') or 'Status SINTA belum diperiksa.'} "
+                        f"{self._other_index_tooltip(external)}"
                     )
 
                 if not item.toolTip():
@@ -8124,9 +8312,13 @@ class ResearchPage(QWidget):
             in checked_states
             for paper in self._all_papers
         )
+        other_index_checked = sum(
+            bool(self._sinta_screening(paper).get("other_indexes", {}).get("checked_at"))
+            for paper in self._all_papers
+        )
         self.paper_count_label.setText(
             f"{len(self.filtered_paper_indices)} dari {len(self._all_papers)} paper | "
-            f"{checked_count} sudah diperiksa | {len(self._all_papers) - checked_count} belum diperiksa"
+            f"SINTA {checked_count} diperiksa | indeks lain {other_index_checked} diperiksa"
         )
 
         if self.filtered_paper_indices:
@@ -8145,7 +8337,7 @@ class ResearchPage(QWidget):
                     "dataset pribadi tidak harus sudah dipublikasikan sebelumnya."
                 )
             else:
-                self.paper_detail.setPlainText("Tidak ada paper yang cocok dengan pencarian atau filter SINTA ini.")
+                self.paper_detail.setPlainText("Tidak ada paper yang cocok dengan pencarian atau filter saat ini.")
             self.save_sinta_button.setEnabled(False)
             self.check_sinta_button.setEnabled(False)
             self.sinta_status_combo.setCurrentIndex(0)
@@ -8156,6 +8348,27 @@ class ResearchPage(QWidget):
     # =========================================================
     # PAPER DETAIL
     # =========================================================
+
+    @staticmethod
+    def _other_index_tooltip(result):
+        if not isinstance(result, dict) or not result.get("checked_at"):
+            return "Indeks lain belum diperiksa."
+        pieces = []
+        for name, source in (result.get("sources", {}) or {}).items():
+            if not isinstance(source, dict):
+                continue
+            status = source.get("status")
+            if status == "INDEXED":
+                pieces.append(f"{name}: terindeks")
+            elif status == "NOT_INDEXED":
+                pieces.append(f"{name}: tidak ditemukan")
+            elif status == "NOT_CONFIGURED":
+                pieces.append(f"{name}: API belum dikonfigurasi")
+            elif status == "NO_METADATA":
+                pieces.append(f"{name}: ISSN tidak tersedia")
+            elif status in {"FAILED", "UNAVAILABLE"}:
+                pieces.append(f"{name}: belum dapat dipastikan")
+        return "Indeks lain — " + ("; ".join(pieces) or "belum ada hasil sumber.")
 
     def _show_selected_paper(self):
         rows = self.paper_table.selectionModel().selectedRows()
@@ -8263,6 +8476,38 @@ class ResearchPage(QWidget):
         verification_src = screening.get("verification_source") or "Direktori Resmi SINTA (Kemdiktisaintek RI)"
         checked_at = screening.get("verification_date") or screening.get("checked_at") or "-"
         display_journal_name = self._screening_journal_display_name(paper, screening)
+        other_indexes = screening.get("other_indexes", {})
+        other_index_lines = []
+        if isinstance(other_indexes, dict) and other_indexes.get("checked_at"):
+            for source_name, source_result in (other_indexes.get("sources", {}) or {}).items():
+                if not isinstance(source_result, dict):
+                    continue
+                source_status = source_result.get("status")
+                source_label = {
+                    "INDEXED": "Terindeks",
+                    "NOT_INDEXED": "Tidak ditemukan",
+                    "NOT_CONFIGURED": "API belum dikonfigurasi",
+                    "NO_METADATA": "ISSN tidak tersedia",
+                    "FAILED": "Belum dapat diperiksa",
+                    "UNAVAILABLE": "Akses tidak tersedia",
+                }.get(source_status, "Belum diperiksa")
+                source_journal = source_result.get("journal_name")
+                source_line = f"<b>{esc(source_name)}:</b> {esc(source_label)}"
+                if source_journal:
+                    source_line += f" ({esc(source_journal)})"
+                source_url = str(source_result.get("source_url") or "").strip()
+                if source_url.startswith("https://"):
+                    source_line += f" — <a href='{html_escape(source_url, quote=True)}'>sumber</a>"
+                other_index_lines.append(source_line)
+        if not other_index_lines:
+            other_index_lines.append("Belum ada pemeriksaan indeks non-SINTA.")
+        external_index_block = (
+            "<div style='background:#F0F9FF;border:1px solid #BAE6FD;border-radius:6px;padding:8px 12px;margin:6px 0;'>"
+            "<h3 style='margin:0 0 4px 0;color:#1E293B;'>Indeks jurnal lain</h3>"
+            f"<p style='margin:2px 0;'>{'<br>'.join(other_index_lines)}</p>"
+            "<p style='color:#64748B;font-size:8pt;margin-top:4px;'><i>Indeksasi bukan peringkat akreditasi. DOAJ adalah direktori jurnal akses terbuka; status Scopus membutuhkan akses API Elsevier.</i></p>"
+            "</div>"
+        )
 
         ambiguity_block = ""
         if screening.get("is_ambiguous"):
@@ -8296,6 +8541,7 @@ class ResearchPage(QWidget):
             notes_block,
             "<p style='color:#64748B;font-size:8pt;margin-top:4px;'><i>Batasan: Keterindeksan di Scopus, Crossref, atau OpenAlex adalah indeksasi internasional dan BUKAN akreditasi SINTA. Akreditasi SINTA diterbitkan secara nasional oleh Kemdiktisaintek RI.</i></p>",
             "</div>",
+            external_index_block,
         ]
 
         abstract = paper.get("abstract")
@@ -8328,7 +8574,7 @@ class ResearchPage(QWidget):
         return item.data(Qt.UserRole) if item else None
 
     def _check_pending_sinta_batch(self):
-        if self._sinta_thread is not None:
+        if self._sinta_thread is not None or self._journal_index_thread is not None:
             return
 
         tasks = []
@@ -8397,6 +8643,7 @@ class ResearchPage(QWidget):
         self._sinta_batch_found = 0
         self._sinta_batch_manual = 0
         self.sinta_batch_button.setEnabled(False)
+        self.other_index_button.setEnabled(False)
         self.sinta_batch_button.setText("Memeriksa jurnal...")
         self.check_sinta_button.setEnabled(False)
         self.sinta_lookup_progress.setRange(0, len(tasks))
@@ -8416,6 +8663,139 @@ class ResearchPage(QWidget):
         self._sinta_thread.finished.connect(self._sinta_worker.deleteLater)
         self._sinta_thread.finished.connect(self._cleanup_sinta_lookup)
         self._sinta_thread.start()
+
+    def _check_pending_other_indexes(self):
+        if self._journal_index_thread is not None or self._sinta_thread is not None:
+            return
+        papers = self.research_result.get("papers", [])
+        if not isinstance(papers, list) or not papers:
+            self.sinta_lookup_message.setText(
+                "Jalankan Academic Research terlebih dahulu untuk memuat jurnal."
+            )
+            return
+
+        tasks = []
+        for paper_index, paper in enumerate(papers):
+            if not isinstance(paper, dict):
+                continue
+            screening = self._sinta_screening(paper)
+            existing = screening.get("other_indexes", {})
+            if isinstance(existing, dict) and existing.get("checked_at"):
+                source_statuses = [
+                    source.get("status")
+                    for source in (existing.get("sources", {}) or {}).values()
+                    if isinstance(source, dict)
+                ]
+                if source_statuses and all(
+                    status in {"INDEXED", "NOT_INDEXED", "NO_METADATA"}
+                    for status in source_statuses
+                ):
+                    continue
+            issn_values = paper.get("issn", [])
+            if isinstance(issn_values, str):
+                issn_values = [issn_values]
+            tasks.append({
+                "paper_index": paper_index,
+                "identity": self._paper_identity(paper),
+                "issn": [str(value).strip() for value in issn_values if str(value).strip()],
+            })
+
+        if not tasks:
+            self.sinta_lookup_message.setText(
+                "Indeks lain sudah diperiksa untuk semua artikel. Hasil yang ada tetap tersimpan."
+            )
+            return
+
+        self.other_index_button.setEnabled(False)
+        self.sinta_batch_button.setEnabled(False)
+        self.check_sinta_button.setEnabled(False)
+        self.other_index_button.setText("Memeriksa indeks...")
+        self.sinta_lookup_progress.setRange(0, len(tasks))
+        self.sinta_lookup_progress.setValue(0)
+        self.sinta_lookup_progress.setVisible(True)
+        self.sinta_lookup_message.setText(
+            f"Memeriksa DOAJ dan Scopus (jika akses tersedia): 0 dari {len(tasks)}..."
+        )
+
+        self._journal_index_thread = QThread(self)
+        self._journal_index_worker = JournalIndexBatchLookupWorker(tasks)
+        self._journal_index_worker.moveToThread(self._journal_index_thread)
+        self._journal_index_thread.started.connect(self._journal_index_worker.run)
+        self._journal_index_worker.progress.connect(self._on_other_index_progress)
+        self._journal_index_worker.finished.connect(self._finish_other_index_batch)
+        self._journal_index_worker.failed.connect(self._on_other_index_failed)
+        self._journal_index_worker.finished.connect(self._journal_index_thread.quit)
+        self._journal_index_worker.failed.connect(self._journal_index_thread.quit)
+        self._journal_index_thread.finished.connect(self._journal_index_worker.deleteLater)
+        self._journal_index_thread.finished.connect(self._cleanup_other_index_batch)
+        self._journal_index_thread.start()
+
+    @Slot(int, int, int, str, object)
+    def _on_other_index_progress(self, current, total, paper_index, identity, result):
+        papers = self.research_result.get("papers", [])
+        if (
+            isinstance(paper_index, int)
+            and 0 <= paper_index < len(papers)
+            and self._paper_identity(papers[paper_index]) == identity
+        ):
+            paper = papers[paper_index]
+            screening = self._sinta_screening(paper)
+            screening["other_indexes"] = dict(result)
+            paper["sinta_screening"] = screening
+            self._persist_sinta_screening(paper)
+            label = str(paper.get("venue") or "Jurnal")
+        else:
+            label = "Jurnal"
+        self.sinta_lookup_progress.setValue(current)
+        self.sinta_lookup_message.setText(
+            f"Pemeriksaan indeks {current} dari {total} | {label}"
+        )
+        if not self._sinta_table_refresh_timer.isActive():
+            self._sinta_table_refresh_timer.start()
+
+    @Slot(int)
+    def _finish_other_index_batch(self, total):
+        self._sinta_table_refresh_timer.stop()
+        papers = self.research_result.get("papers", [])
+        indexed = sum(
+            bool(self._sinta_screening(paper).get("other_indexes", {}).get("indexes"))
+            for paper in papers if isinstance(paper, dict)
+        )
+        partial = sum(
+            self._sinta_screening(paper).get("other_indexes", {}).get("status") == "PARTIAL"
+            for paper in papers if isinstance(paper, dict)
+        )
+        self.sinta_lookup_message.setText(
+            f"Pemeriksaan selesai: {indexed} artikel cocok dengan DOAJ/Scopus dari {total} yang diperiksa. "
+            f"{partial} hasil parsial; akses Scopus membutuhkan API Elsevier."
+        )
+        project_id = getattr(self.main_window, "current_project_id", None)
+        if project_id is not None:
+            try:
+                repository = self.main_window.repository
+                repository.save_workflow_section(project_id, "research", self.research_result)
+                repository.save_research_result(project_id, self.research_result)
+            except Exception as error:
+                print(f"Warning: hasil pemeriksaan indeks tidak dapat disimpan: {error}")
+        papers_page = getattr(self.main_window, "papers_tool_page", None)
+        if papers_page is not None:
+            papers_page.update_from_result(self.research_result)
+        self._render_filtered_papers()
+
+    @Slot(str)
+    def _on_other_index_failed(self, error):
+        self.sinta_lookup_message.setText(
+            f"Pemeriksaan indeks berhenti sebelum selesai: {error}"
+        )
+
+    def _cleanup_other_index_batch(self):
+        self.sinta_lookup_progress.setVisible(False)
+        self.other_index_button.setText("Periksa Indeks Lain")
+        self.other_index_button.setEnabled(bool(self.research_result.get("papers")))
+        self.sinta_batch_button.setEnabled(bool(self._all_papers))
+        self.check_sinta_button.setEnabled(bool(self._all_papers))
+        self._journal_index_worker = None
+        self._journal_index_thread = None
 
     @Slot(int, int, int, str, object)
     def _on_sinta_batch_progress(self, current, total, paper_index, identity, result):
@@ -8498,7 +8878,7 @@ class ResearchPage(QWidget):
         papers = self.research_result.get("papers", [])
         if not isinstance(paper_index, int) or paper_index >= len(papers):
             return
-        if self._sinta_thread is not None:
+        if self._sinta_thread is not None or self._journal_index_thread is not None:
             return
 
         paper = papers[paper_index]
@@ -8533,6 +8913,7 @@ class ResearchPage(QWidget):
 
         self.check_sinta_button.setEnabled(False)
         self.sinta_batch_button.setEnabled(False)
+        self.other_index_button.setEnabled(False)
         self.check_sinta_button.setText("Memeriksa SINTA...")
         self.sinta_lookup_progress.setVisible(True)
         self.sinta_lookup_message.setText(
@@ -8673,6 +9054,7 @@ class ResearchPage(QWidget):
         self.check_sinta_button.setText("Periksa di SINTA")
         self.sinta_batch_button.setText("Periksa jurnal belum dicek")
         self.sinta_batch_button.setEnabled(bool(self._all_papers))
+        self.other_index_button.setEnabled(bool(self._all_papers))
         self._sinta_worker = None
         self._sinta_thread = None
         self._show_selected_paper()
@@ -9025,7 +9407,7 @@ class PapersToolPage(QWidget):
         self.sinta_filter = QComboBox()
         self.sinta_filter.setMinimumHeight(38)
         self.sinta_filter.setMinimumWidth(185)
-        self.sinta_filter.addItem("Semua Status Akreditasi", "ALL")
+        self.sinta_filter.addItem("Semua Status Jurnal", "ALL")
         for rank in range(1, 7):
             self.sinta_filter.addItem(f"SINTA {rank}", f"S{rank}")
         self.sinta_filter.addItem("Tidak Terakreditasi", "NOT_ACCREDITED")
@@ -9037,6 +9419,13 @@ class PapersToolPage(QWidget):
         self.sinta_filter.addItem("Peringkat tidak terbaca", "RANK_UNAVAILABLE")
         self.sinta_filter.addItem("Perlu Dicoba Lagi", "FAILED")
         self.sinta_filter.addItem("Tidak ada hasil resmi", "NOT_FOUND")
+        self.sinta_filter.insertSeparator(self.sinta_filter.count())
+        self.sinta_filter.addItem("Terindeks DOAJ", "INDEX_DOAJ")
+        self.sinta_filter.addItem("Terindeks Scopus", "INDEX_SCOPUS")
+        self.sinta_filter.addItem("Indeks lain belum diperiksa", "INDEX_UNVERIFIED")
+        self.sinta_filter.addItem("Tidak ditemukan di indeks yang dicek", "INDEX_NOT_FOUND")
+        self.sinta_filter.addItem("Pemeriksaan indeks parsial", "INDEX_PARTIAL")
+        self.sinta_filter.addItem("Metadata ISSN tidak tersedia", "INDEX_NO_METADATA")
         self.sinta_filter.currentIndexChanged.connect(self._apply_filter)
         toolbar.addWidget(self.sinta_filter)
 
@@ -9055,6 +9444,15 @@ class PapersToolPage(QWidget):
         self.sinta_batch_button.clicked.connect(self._run_sinta_batch)
         toolbar.addWidget(self.sinta_batch_button)
 
+        self.other_index_button = QPushButton("Periksa Indeks Lain")
+        self.other_index_button.setObjectName("secondaryButton")
+        self.other_index_button.setMinimumHeight(38)
+        self.other_index_button.setToolTip(
+            "Cek ISSN otomatis di DOAJ. Scopus dicek bila API Elsevier sudah memiliki akses."
+        )
+        self.other_index_button.clicked.connect(self._run_other_index_batch)
+        toolbar.addWidget(self.other_index_button)
+
         root.addLayout(toolbar)
 
         sinta_status_panel = QFrame()
@@ -9064,7 +9462,7 @@ class PapersToolPage(QWidget):
         sinta_status_layout.setSpacing(6)
 
         self.sinta_batch_status = QLabel(
-            "Filter status SINTA langsung dari daftar. Tombol di atas memeriksa jurnal yang belum dicek."
+            "Status SINTA dan indeks lain ditampilkan terpisah. Jurnal yang tidak ada di SINTA bisa terindeks di sumber lain."
         )
         self.sinta_batch_status.setObjectName("cardDescription")
         self.sinta_batch_status.setWordWrap(True)
@@ -9073,9 +9471,9 @@ class PapersToolPage(QWidget):
         self.sinta_scope_note = QLabel(
             "Daftar artikel berasal dari Academic Research. SINTA memeriksa akreditasi jurnal dan tahun berlakunya; "
             "DOI artikel dicocokkan langsung bila tercantum pada profil resmi. "
-            "Peringkat dan status akreditasi dapat berubah, jadi hasil ini adalah "
-            "snapshot yang perlu diperiksa kembali. Akreditasi atau indeks lain "
-            "belum diperiksa."
+            "Status SINTA berbeda dari indeks jurnal. DOAJ diperiksa otomatis; Scopus membutuhkan API Elsevier. "
+            "DOAJ adalah direktori, bukan akreditasi. Status WoS dan Garuda belum diperiksa otomatis. "
+            "Status dan cakupan jurnal dapat berubah; hasil pemeriksaan adalah snapshot."
         )
         self.sinta_scope_note.setObjectName("cardDescription")
         self.sinta_scope_note.setWordWrap(True)
@@ -9109,10 +9507,10 @@ class PapersToolPage(QWidget):
             "ISSN",
             "Sumber",
             "Relevansi",
-            "Status SINTA",
+            "SINTA / Indeks",
         ]
         self._paper_compact_headers = [
-            "#", "Artikel", "Thn", "Jurnal", "ISSN", "Sumber", "Skor", "SINTA"
+            "#", "Artikel", "Thn", "Jurnal", "ISSN", "Sumber", "Skor", "SINTA/Indeks"
         ]
         self.paper_table.setHorizontalHeaderLabels(self._paper_headers)
         self.paper_table.setEditTriggers(QTableWidget.NoEditTriggers)
@@ -9206,6 +9604,7 @@ class PapersToolPage(QWidget):
         self.count_label.setText("0 papers")
         self.open_source_button.setEnabled(False)
         self.sinta_batch_button.setEnabled(False)
+        self.other_index_button.setEnabled(False)
         self.sinta_batch_progress.setVisible(False)
         self.sinta_batch_status.setText(
             "Jalankan Academic Research terlebih dahulu untuk memeriksa jurnal di SINTA."
@@ -9232,6 +9631,7 @@ class PapersToolPage(QWidget):
                 str(screening.get("lookup_status") or ""),
                 str(screening.get("rank") or ""),
                 str(screening.get("checked_at") or ""),
+                str(screening.get("other_indexes", {})),
             ))
         signature = (id(result), tuple(paper_signatures))
         if signature == self._result_signature:
@@ -9246,6 +9646,7 @@ class PapersToolPage(QWidget):
         ]
 
         self.sinta_batch_button.setEnabled(bool(self.papers))
+        self.other_index_button.setEnabled(bool(self.papers))
         self._apply_filter()
         self._follow_sinta_batch()
 
@@ -9259,13 +9660,20 @@ class PapersToolPage(QWidget):
 
     def _follow_sinta_batch(self):
         research_page = getattr(self.main_window, "research_page", None)
-        if research_page is None or getattr(research_page, "_sinta_thread", None) is None:
+        if research_page is None or (
+            getattr(research_page, "_sinta_thread", None) is None
+            and getattr(research_page, "_journal_index_thread", None) is None
+        ):
             return
         if not self._sinta_sync_timer.isActive():
             self._sinta_last_progress_value = -1
         self._sinta_batch_was_running = True
         self.sinta_batch_button.setEnabled(False)
-        self.sinta_batch_button.setText("Memeriksa jurnal...")
+        self.other_index_button.setEnabled(False)
+        if getattr(research_page, "_journal_index_thread", None) is not None:
+            self.other_index_button.setText("Memeriksa indeks...")
+        else:
+            self.sinta_batch_button.setText("Memeriksa jurnal...")
         self._sinta_sync_timer.start()
 
     def _run_sinta_batch(self):
@@ -9306,17 +9714,45 @@ class PapersToolPage(QWidget):
         self._sinta_sync_timer.start()
         self._sync_sinta_batch_state()
 
+    def _run_other_index_batch(self):
+        research_page = getattr(self.main_window, "research_page", None)
+        if research_page is None or not research_page.research_result:
+            self.sinta_batch_status.setText(
+                "Jalankan Academic Research terlebih dahulu untuk memuat daftar jurnal."
+            )
+            return
+        if getattr(research_page, "_journal_index_thread", None) is None:
+            research_page._check_pending_other_indexes()
+        if getattr(research_page, "_journal_index_thread", None) is None:
+            self.sinta_batch_status.setText(research_page.sinta_lookup_message.text())
+            self.update_from_result(research_page.research_result)
+            return
+        self._sinta_batch_was_running = True
+        self._sinta_last_progress_value = -1
+        self.other_index_button.setEnabled(False)
+        self._sinta_sync_timer.start()
+        self._sync_sinta_batch_state()
+
     def _sync_sinta_batch_state(self):
         research_page = getattr(self.main_window, "research_page", None)
         if research_page is None:
             self._sinta_sync_timer.stop()
             return
 
-        thread = getattr(research_page, "_sinta_thread", None)
+        sinta_thread = getattr(research_page, "_sinta_thread", None)
+        index_thread = getattr(research_page, "_journal_index_thread", None)
+        thread = sinta_thread or index_thread
         if thread is not None:
             self._sinta_batch_was_running = True
+            is_index_check = index_thread is not None
             self.sinta_batch_button.setEnabled(False)
-            self.sinta_batch_button.setText("Memeriksa jurnal...")
+            self.other_index_button.setEnabled(False)
+            self.sinta_batch_button.setText(
+                "Memeriksa jurnal..." if not is_index_check else "Periksa jurnal belum dicek"
+            )
+            self.other_index_button.setText(
+                "Memeriksa indeks..." if is_index_check else "Periksa Indeks Lain"
+            )
             message = getattr(research_page, "sinta_lookup_message", None)
             if message is not None:
                 self.sinta_batch_status.setText(message.text())
@@ -9345,6 +9781,8 @@ class PapersToolPage(QWidget):
 
         self.sinta_batch_button.setText("Periksa jurnal belum dicek")
         self.sinta_batch_button.setEnabled(bool(self.papers))
+        self.other_index_button.setText("Periksa Indeks Lain")
+        self.other_index_button.setEnabled(bool(self.papers))
         self.sinta_batch_progress.setVisible(False)
         self._sinta_sync_timer.stop()
 
@@ -9548,6 +9986,25 @@ class PapersToolPage(QWidget):
             lines.append(f"ISSN COCOK DI SINTA\n{screening.get('issn_matched')}")
         if screening.get("period_start") and screening.get("period_end"):
             lines.append(f"MASA BERLAKU SK AKREDITASI\n{screening.get('period_start')} - {screening.get('period_end')}")
+        external = screening.get("other_indexes", {})
+        if isinstance(external, dict) and external.get("checked_at"):
+            lines.append("INDEKS JURNAL LAIN")
+            for source_name, source_result in (external.get("sources", {}) or {}).items():
+                if not isinstance(source_result, dict):
+                    continue
+                source_status = source_result.get("status")
+                source_label = {
+                    "INDEXED": "Terindeks",
+                    "NOT_INDEXED": "Tidak ditemukan",
+                    "NOT_CONFIGURED": "API belum dikonfigurasi",
+                    "NO_METADATA": "ISSN tidak tersedia",
+                    "FAILED": "Belum dapat diperiksa",
+                    "UNAVAILABLE": "Akses tidak tersedia",
+                }.get(source_status, "Belum diperiksa")
+                lines.append(f"{source_name}\n{source_label}")
+            lines.append(
+                "DOAJ merupakan direktori jurnal akses terbuka. Status indeks tidak sama dengan akreditasi atau peringkat kuartil."
+            )
         display_note = _sinta_ui_note(screening)
         if display_note:
             lines.append(f"CATATAN VERIFIKASI\n{display_note}")
@@ -11219,7 +11676,7 @@ class MainWindow(QMainWindow):
             "dataset_search_page": ("_search_thread", "_download_thread"),
             "analysis_page": ("_analysis_thread", "_gemini_thread"),
             "ml_page": ("_ml_thread",),
-            "research_page": ("_research_thread", "_sinta_thread"),
+            "research_page": ("_research_thread", "_sinta_thread", "_journal_index_thread"),
             "gap_tool_page": ("_explanation_thread",),
             "report_tool_page": ("_report_thread",),
         }

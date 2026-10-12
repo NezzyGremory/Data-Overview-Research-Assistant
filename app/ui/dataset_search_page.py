@@ -5,7 +5,7 @@ from typing import Callable, Optional
 
 import pandas as pd
 from PySide6.QtCore import QObject, QThread, Qt, Signal, QUrl, QTimer, QStandardPaths, QSize
-from PySide6.QtGui import QDesktopServices, QIcon
+from PySide6.QtGui import QDesktopServices, QIcon, QPalette, QFont, QColor
 from PySide6.QtWidgets import (
     QComboBox,
     QBoxLayout,
@@ -178,8 +178,7 @@ class DatasetSearchPage(QWidget):
         subtitle.setTextFormat(Qt.RichText)
         subtitle.setText(
             "Search for public datasets on Hugging Face Hub and Kaggle, check their file formats, "
-            "and then download them directly to DORA workspace. <b>Examples: Titanic, Iris, agriculture, "
-            "students, healthcare, stocks, and home prices.</b>"
+            "and then download them directly to DORA workspace. Search by topic or keyword."
         )
         body.addWidget(subtitle)
         body.addSpacing(27)
@@ -199,8 +198,13 @@ class DatasetSearchPage(QWidget):
 
         self.search_input = QLineEdit()
         self.search_input.setObjectName("datasetSearchInput")
-        self.search_input.setText("student")
-        self.search_input.setPlaceholderText("Search datasets")
+        self.search_input.setPlaceholderText("Search datasets with a keyword")
+        search_font = QFont(self.search_input.font())
+        search_font.setPixelSize(20)
+        self.search_input.setFont(search_font)
+        search_palette = self.search_input.palette()
+        search_palette.setColor(QPalette.PlaceholderText, QColor("#8794A5"))
+        self.search_input.setPalette(search_palette)
         self.search_input.setMinimumHeight(66)
         self.search_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.search_input.returnPressed.connect(self.search_datasets)
@@ -213,6 +217,7 @@ class DatasetSearchPage(QWidget):
         self.source_combo.addItem("Kaggle dataset", "kaggle")
         self.source_combo.addItem("Hugging Face dataset", "huggingface")
         self.source_combo.addItem("All providers", "all")
+        self.source_combo.setCurrentIndex(self.source_combo.findData("all"))
 
         self.search_button = QPushButton("Search")
         self.search_button.setObjectName("primaryButton")
