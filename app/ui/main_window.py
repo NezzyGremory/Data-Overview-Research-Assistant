@@ -9232,6 +9232,7 @@ class PapersToolPage(QWidget):
         self.filtered_papers = []
         self._result_signature = None
         self._sinta_batch_was_running = False
+        self._sinta_last_progress_value = -1
         self._sinta_sync_timer = QTimer(self)
         self._sinta_sync_timer.setInterval(300)
         self._sinta_sync_timer.timeout.connect(self._sync_sinta_batch_state)
@@ -9491,6 +9492,7 @@ class PapersToolPage(QWidget):
             ))
         signature = (id(result), tuple(paper_signatures))
         if signature == self._result_signature:
+            self._follow_sinta_batch()
             return
         self._result_signature = signature
 
@@ -9502,6 +9504,7 @@ class PapersToolPage(QWidget):
 
         self.sinta_batch_button.setEnabled(bool(self.papers))
         self._apply_filter()
+        self._follow_sinta_batch()
 
     def _refresh_from_research(self):
         result = getattr(
@@ -9510,6 +9513,17 @@ class PapersToolPage(QWidget):
             {},
         )
         self.update_from_result(result)
+
+    def _follow_sinta_batch(self):
+        research_page = getattr(self.main_window, "research_page", None)
+        if research_page is None or getattr(research_page, "_sinta_thread", None) is None:
+            return
+        if not self._sinta_sync_timer.isActive():
+            self._sinta_last_progress_value = -1
+        self._sinta_batch_was_running = True
+        self.sinta_batch_button.setEnabled(False)
+        self.sinta_batch_button.setText("Memeriksa jurnal...")
+        self._sinta_sync_timer.start()
 
     def _run_sinta_batch(self):
         research_page = getattr(self.main_window, "research_page", None)
@@ -9521,6 +9535,7 @@ class PapersToolPage(QWidget):
 
         if getattr(research_page, "_sinta_thread", None) is not None:
             self._sinta_batch_was_running = True
+            self._sinta_last_progress_value = -1
             self._sinta_sync_timer.start()
             self._sync_sinta_batch_state()
             return
@@ -9543,6 +9558,7 @@ class PapersToolPage(QWidget):
             return
 
         self._sinta_batch_was_running = True
+        self._sinta_last_progress_value = -1
         self.sinta_batch_button.setEnabled(False)
         self._sinta_sync_timer.start()
         self._sync_sinta_batch_state()
@@ -9568,6 +9584,11 @@ class PapersToolPage(QWidget):
                 if minimum != maximum:
                     self.sinta_batch_progress.setValue(progress.value())
                 self.sinta_batch_progress.setVisible(True)
+                if progress.value() != self._sinta_last_progress_value:
+                    self._sinta_last_progress_value = progress.value()
+                    self.update_from_result(
+                        getattr(research_page, "research_result", {})
+                    )
             return
 
         if self._sinta_batch_was_running:
@@ -9577,6 +9598,7 @@ class PapersToolPage(QWidget):
             if message is not None and message.text():
                 self.sinta_batch_status.setText(message.text())
             self._sinta_batch_was_running = False
+            self._sinta_last_progress_value = -1
 
         self.sinta_batch_button.setText("Periksa jurnal belum dicek")
         self.sinta_batch_button.setEnabled(bool(self.papers))
