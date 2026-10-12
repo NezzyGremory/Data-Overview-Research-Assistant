@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-import sys
+import base64
+import hashlib
+import json
+import os
 import re
-import tempfile
-import textwrap
+import sys
+import sysconfig
 from pathlib import Path
 
 from PySide6.QtCore import (
@@ -13,6 +16,7 @@ from PySide6.QtCore import (
     QProcess,
     QProcessEnvironment,
     QPropertyAnimation,
+    QStandardPaths,
     QTimer,
     Qt,
 )
@@ -22,9 +26,11 @@ from PySide6.QtWidgets import (
     QBoxLayout,
     QComboBox,
     QFrame,
+    QFileDialog,
     QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QPushButton,
@@ -447,12 +453,28 @@ print(f"Rata-rata: {scores.mean():.3f} ± {scores.std():.3f}")
         self._selected_step = -1
         self._dataframe = None
         self._dataset_name = ""
-        self._run_tempdir = None
-        self._process: QProcess | None = None
+        self._project_key = ""
+        self._project_workspace: Path | None = None
+        self._project_environment: Path | None = None
+        self._environment_process: QProcess | None = None
+        self._environment_callback = None
+        self._kernel_process: QProcess | None = None
+        self._kernel_buffer = bytearray()
+        self._kernel_request_id = 0
+        self._kernel_ready = False
+        self._dataset_pickle_path: Path | None = None
+        self._kernel_busy = False
+        self._execution_queue: list[int] = []
+        self._execution_total = 0
+        self._execution_completed = 0
+        self._running_step_index = -1
+        self._queue_had_error = False
+        self._package_process: QProcess | None = None
+        self._package_log = ""
+        self._notebook_path: Path | None = None
         self._run_timeout = QTimer(self)
         self._run_timeout.setSingleShot(True)
         self._run_timeout.timeout.connect(self._on_run_timeout)
-        self._output_text = ""
         self._graphics: list[QPixmap] = []
         self.template_groups = self._build_template_groups()
         application = QApplication.instance()
@@ -520,6 +542,9 @@ print(f"Rata-rata: {scores.mean():.3f} ± {scores.std():.3f}")
                 "code": self.template_groups[
                     self.STEP_CATEGORIES.get(index, "Data Profiling")
                 ][self.STEP_TEMPLATES.get(index, "Ringkasan dataset")],
+                "output": "",
+                "charts": [],
+                "execution_count": None,
             }
             for index, (title, description) in enumerate(self.STEPS)
         ]
@@ -794,6 +819,22 @@ plt.tight_layout()
         heading_row.addWidget(self.step_title, 1)
         layout.addLayout(heading_row)
 
+        self.notebook_toolbar = QHBoxLayout()
+        self.open_notebook_button = QPushButton("Buka notebook")
+        self.open_notebook_button.setObjectName("secondaryButton")
+        self.open_notebook_button.clicked.connect(self._open_notebook)
+        self.notebook_toolbar.addWidget(self.open_notebook_button)
+        self.save_notebook_button = QPushButton("Simpan notebook")
+        self.save_notebook_button.setObjectName("secondaryButton")
+        self.save_notebook_button.clicked.connect(self._save_notebook)
+        self.notebook_toolbar.addWidget(self.save_notebook_button)
+        self.restart_kernel_button = QPushButton("Mulai ulang Python")
+        self.restart_kernel_button.setObjectName("secondaryButton")
+        self.restart_kernel_button.clicked.connect(self._restart_kernel)
+        self.notebook_toolbar.addWidget(self.restart_kernel_button)
+        self.notebook_toolbar.addStretch(1)
+        layout.addLayout(self.notebook_toolbar)
+
         self.template_toolbar = QHBoxLayout()
         self.template_toolbar.setSpacing(12)
         category_block = QVBoxLayout()
@@ -821,6 +862,25 @@ plt.tight_layout()
         self.step_description.setObjectName("editorAnalysisMuted")
         self.step_description.setWordWrap(True)
         layout.addWidget(self.step_description)
+
+        self.library_row = QHBoxLayout()
+        library_label = QLabel("Library")
+        library_label.setObjectName("editorAnalysisFieldLabel")
+        self.library_row.addWidget(library_label)
+        self.library_input = QLineEdit()
+        self.library_input.setObjectName("editorAnalysisLibraryInput")
+        self.library_input.setPlaceholderText("contoh: seaborn atau xgboost==2.1.0")
+        self.library_input.setToolTip("Nama paket PyPI; satu paket setiap pemasangan.")
+        self.library_row.addWidget(self.library_input, 1)
+        self.install_library_button = QPushButton("Pasang")
+        self.install_library_button.setObjectName("secondaryButton")
+        self.install_library_button.clicked.connect(self._install_library)
+        self.library_row.addWidget(self.install_library_button)
+        layout.addLayout(self.library_row)
+        self.library_status = QLabel("Library tambahan dipisahkan untuk proyek ini.")
+        self.library_status.setObjectName("editorAnalysisMuted")
+        self.library_status.setWordWrap(True)
+        layout.addWidget(self.library_status)
 
         editor_heading = QHBoxLayout()
         code_label = QLabel("Kode Python")
@@ -886,6 +946,12 @@ plt.tight_layout()
         self.graphics_layout.addStretch(1)
         self.graphics_scroll.setWidget(self.graphics_content)
         self.output_tabs.addTab(self.graphics_scroll, "Grafik")
+
+        self.library_output = QPlainTextEdit()
+        self.library_output.setObjectName("editorAnalysisOutputText")
+        self.library_output.setReadOnly(True)
+        self.library_output.setPlaceholderText("Log pemasangan library akan tampil di sini.")
+        self.output_tabs.addTab(self.library_output, "Library")
         self.output_tabs.setMinimumHeight(210)
         layout.addWidget(self.output_tabs)
 
@@ -911,6 +977,12 @@ plt.tight_layout()
         self.run_button.setToolTip("Jalankan kode yang sedang dipilih pada salinan dataset aktif.")
         self.run_button.clicked.connect(self._execute_code)
         execution_row.addWidget(self.run_button)
+        self.run_all_button = QPushButton("Jalankan semua")
+        self.run_all_button.setObjectName("secondaryButton")
+        self.run_all_button.setEnabled(False)
+        self.run_all_button.setToolTip("Jalankan semua tahapan secara berurutan dalam satu sesi Python.")
+        self.run_all_button.clicked.connect(self._run_all)
+        execution_row.addWidget(self.run_all_button)
         self.cancel_button = QPushButton("Hentikan")
         self.cancel_button.setObjectName("secondaryButton")
         self.cancel_button.setEnabled(False)
@@ -964,6 +1036,9 @@ plt.tight_layout()
             self.step_title.setText("Pilih tahapan analisis")
             self.step_description.clear()
             self.code_editor.clear()
+            self._update_target_controls("")
+            self.output_text.clear()
+            self._clear_graphs()
             return
         self._selected_step = index
         step = self._steps[index]
@@ -983,6 +1058,7 @@ plt.tight_layout()
         self.code_editor.setPlainText(step["code"])
         self.code_editor.blockSignals(False)
         self._update_target_controls(step["code"])
+        self._render_step_output(step)
 
     def _category_changed(self, category: str):
         if not 0 <= self._selected_step < len(self._steps):
@@ -1063,225 +1139,463 @@ plt.tight_layout()
         QApplication.clipboard().setText(self.code_editor.toPlainText())
         self.execution_note.setText("Kode berhasil disalin ke clipboard.")
 
-    def _build_runner_script(self, code_path: Path, chart_path: Path) -> str:
-        return textwrap.dedent(f'''\
-            import os
-            import sys
-            import traceback
-            from pathlib import Path
+    def _execution_interpreter(self) -> Path:
+        if self._project_environment is None:
+            raise RuntimeError("Lingkungan Python proyek belum disiapkan.")
+        if os.name == "nt":
+            return self._project_environment / "Scripts" / "python.exe"
+        return self._project_environment / "bin" / "python"
 
-            os.environ["MPLBACKEND"] = "Agg"
-            os.environ["MPLCONFIGDIR"] = str(Path(sys.argv[3]).parent / "matplotlib")
+    def _environment_site_packages(self) -> Path:
+        if self._project_environment is None:
+            raise RuntimeError("Lingkungan Python proyek belum disiapkan.")
+        if os.name == "nt":
+            return self._project_environment / "Lib" / "site-packages"
+        return self._project_environment / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
 
-            import matplotlib
-            matplotlib.use("Agg")
-            import matplotlib.pyplot as plt
-            import numpy as np
-            import pandas as pd
+    def _ensure_environment(self, callback):
+        if self._project_environment is None:
+            self.execution_note.setText("Lingkungan proyek belum tersedia.")
+            return
+        if self._execution_interpreter().exists():
+            callback()
+            return
+        if self._environment_process is not None:
+            return
+        self._environment_callback = callback
+        self._project_environment.parent.mkdir(parents=True, exist_ok=True)
+        process = QProcess(self)
+        self._environment_process = process
+        process.setProgram(sys.executable)
+        process.setArguments(["-m", "venv", str(self._project_environment)])
+        process.setWorkingDirectory(str(self._project_workspace))
+        process.setProcessChannelMode(QProcess.MergedChannels)
+        process.readyReadStandardOutput.connect(self._read_environment_output)
+        process.finished.connect(self._environment_finished)
+        process.errorOccurred.connect(self._environment_error)
+        process.start()
+        self.execution_note.setText("Menyiapkan lingkungan Python khusus proyek...")
 
-            dataset_path = Path(sys.argv[1])
-            code_path = Path(sys.argv[2])
-            chart_path = Path(sys.argv[3])
-            chart_path.mkdir(parents=True, exist_ok=True)
-            df = pd.read_pickle(dataset_path)
-            df.columns = df.columns.map(str)
+    def _read_environment_output(self):
+        process = self._environment_process
+        if process is None:
+            return
+        output = bytes(process.readAllStandardOutput()).decode("utf-8", errors="replace")
+        if output.strip():
+            self._append_library_log(output)
 
-            def display(value):
-                if hasattr(value, "to_string"):
-                    print(value.to_string())
-                else:
-                    print(value)
+    def _environment_error(self, error):
+        if self._environment_process is None or error != QProcess.FailedToStart:
+            return
+        self.execution_note.setText("Python gagal menyiapkan lingkungan proyek.")
+        self._append_library_log("Gagal membuat lingkungan Python proyek.\n")
+        self._environment_process.deleteLater()
+        self._environment_process = None
+        self._environment_callback = None
+        self._finish_execution(False)
 
-            namespace = {{
-                "__name__": "__main__",
-                "df": df,
-                "pd": pd,
-                "np": np,
-                "plt": plt,
-                "display": display,
-            }}
-            failed = False
-            try:
-                source = code_path.read_text(encoding="utf-8")
-                exec(compile(source, str(code_path), "exec"), namespace)
-                print("\\nAnalisis selesai.")
-            except BaseException:
-                failed = True
-                traceback.print_exc()
-            finally:
-                for index, number in enumerate(plt.get_fignums()[:8], start=1):
-                    try:
-                        figure = plt.figure(number)
-                        figure.savefig(chart_path / f"grafik_{{index:02d}}.png", dpi=100, bbox_inches="tight")
-                    except Exception:
-                        traceback.print_exc()
-                plt.close("all")
-            sys.exit(1 if failed else 0)
-        ''')
+    def _environment_finished(self, exit_code: int, _exit_status):
+        process = self._environment_process
+        if process is None:
+            return
+        self._read_environment_output()
+        self._environment_process = None
+        process.deleteLater()
+        callback = self._environment_callback
+        self._environment_callback = None
+        if exit_code != 0 or not self._execution_interpreter().exists():
+            self.execution_note.setText("Lingkungan Python proyek gagal dibuat.")
+            self._append_library_log("Pembuatan lingkungan Python gagal.\n")
+            self._finish_execution(False)
+            return
+        if callback is not None:
+            callback()
 
-    def _execute_code(self):
+    def _queue_execution(self, step_indexes: list[int]):
         if self._dataframe is None:
             self.execution_note.setText("Muat dataset sebelum menjalankan kode.")
             return
-        if self._process is not None:
+        if self._kernel_busy or self._execution_queue or self._package_process is not None:
             return
         if getattr(sys, "frozen", False):
             self.execution_note.setText(
-                "Runner kode belum tersedia pada paket aplikasi ini. Jalankan DORA dari environment Python project."
+                "Kernel notebook belum tersedia pada paket aplikasi ini. Jalankan DORA dari environment Python project."
             )
             return
+        self._save_current_code()
+        self._execution_queue = [index for index in step_indexes if 0 <= index < len(self._steps)]
+        if not self._execution_queue:
+            return
+        self._execution_total = len(self._execution_queue)
+        self._execution_completed = 0
+        self._queue_had_error = False
+        self.run_button.setEnabled(False)
+        self.run_all_button.setEnabled(False)
+        self.cancel_button.setEnabled(True)
+        self.install_library_button.setEnabled(False)
+        self.execution_note.setText("Menyiapkan sesi Python...")
+        self._run_animation.start()
+        self._ensure_environment(self._start_kernel)
 
-        source = self.code_editor.toPlainText()
+    def _execute_code(self):
+        if self._selected_step < 0:
+            self.execution_note.setText("Pilih bagian analisis yang akan dijalankan.")
+            return
+        self._queue_execution([self._selected_step])
+
+    def _run_all(self):
+        self._save_current_code()
+        self._queue_execution(list(range(len(self._steps))))
+
+    def _start_kernel(self):
+        if self._project_workspace is None or self._dataframe is None:
+            self._finish_execution(False)
+            return
+        if self._kernel_process is not None and self._kernel_process.state() != QProcess.NotRunning:
+            if self._kernel_ready:
+                self._send_next_cell()
+            return
+        try:
+            self._project_workspace.mkdir(parents=True, exist_ok=True)
+            dataset_path = self._project_workspace / "active_dataset.pkl"
+            self._dataframe.to_pickle(dataset_path)
+            self._dataset_pickle_path = dataset_path
+            worker_path = Path(__file__).with_name("editor_notebook_kernel.py")
+            site_packages = self._environment_site_packages()
+            site_packages.mkdir(parents=True, exist_ok=True)
+        except Exception as error:
+            self._append_library_log(f"Gagal menyiapkan kernel: {error}\n")
+            self._finish_execution(False)
+            return
+
+        process = QProcess(self)
+        self._kernel_process = process
+        self._kernel_buffer.clear()
+        self._kernel_ready = False
+        process.setProgram(str(self._execution_interpreter()))
+        process.setArguments([str(worker_path), str(site_packages), str(dataset_path), str(self._project_workspace)])
+        process.setWorkingDirectory(str(self._project_workspace))
+        environment = QProcessEnvironment.systemEnvironment()
+        app_site_packages = sysconfig.get_paths().get("purelib", "")
+        existing_pythonpath = environment.value("PYTHONPATH")
+        pythonpath = [path for path in (app_site_packages, existing_pythonpath) if path]
+        environment.insert("PYTHONPATH", os.pathsep.join(pythonpath))
+        environment.insert("PYTHONUTF8", "1")
+        environment.insert("MPLBACKEND", "Agg")
+        environment.insert("MPLCONFIGDIR", str(self._project_workspace / "matplotlib"))
+        process.setProcessEnvironment(environment)
+        process.setProcessChannelMode(QProcess.MergedChannels)
+        process.readyReadStandardOutput.connect(self._read_kernel_output)
+        process.finished.connect(
+            lambda code, status, source=process: self._kernel_finished(source, code, status)
+        )
+        process.errorOccurred.connect(
+            lambda error, source=process: self._kernel_error(source, error)
+        )
+        process.start()
+        self.execution_note.setText("Menyalakan sesi Python...")
+
+    def _send_next_cell(self):
+        process = self._kernel_process
+        if process is None or not self._kernel_ready or self._kernel_busy:
+            return
+        if not self._execution_queue:
+            self._finish_execution(not self._queue_had_error)
+            return
+        index = self._execution_queue.pop(0)
+        step = self._steps[index]
+        source = self._bind_target_column(step["code"])
         if self.TARGET_ASSIGNMENT.search(source):
             selected_target = self.target_combo.currentText()
             available_columns = {str(column) for column in self._dataframe.columns}
             if not selected_target or selected_target not in available_columns:
-                self.execution_note.setText("Pilih kolom target yang tersedia pada dataset.")
-                self._append_output("Analisis belum dijalankan: kolom target belum dipilih atau tidak tersedia.\n")
-                self.output_tabs.setCurrentIndex(0)
+                step["output"] = "Pilih kolom target yang tersedia pada dataset sebelum menjalankan bagian ini."
+                step["charts"] = []
+                step["has_error"] = True
+                self._queue_had_error = True
+                self._execution_completed += 1
+                if index == self._selected_step:
+                    self._render_step_output(step)
+                self._send_next_cell()
                 return
-            source = self.TARGET_ASSIGNMENT.sub(f"target_column = {selected_target!r}", source)
-            self.code_editor.blockSignals(True)
-            self.code_editor.setPlainText(source)
-            self.code_editor.blockSignals(False)
-            self._save_current_code()
+            step["code"] = source
+            if index == self._selected_step:
+                self.code_editor.blockSignals(True)
+                self.code_editor.setPlainText(source)
+                self.code_editor.blockSignals(False)
 
-        try:
-            self._run_tempdir = tempfile.TemporaryDirectory(prefix="dora_editor_")
-            run_dir = Path(self._run_tempdir.name)
-            dataset_path = run_dir / "dataset.pkl"
-            code_path = run_dir / "analysis.py"
-            runner_path = run_dir / "runner.py"
-            chart_path = run_dir / "charts"
-            chart_path.mkdir()
-            self._dataframe.to_pickle(dataset_path)
-            code_path.write_text(source, encoding="utf-8")
-            runner_path.write_text(
-                self._build_runner_script(code_path, chart_path), encoding="utf-8"
-            )
-        except Exception as error:
-            self._cleanup_run_files()
-            self._append_output(f"Gagal menyiapkan analisis: {error}")
-            self.output_tabs.setCurrentIndex(0)
-            return
-
-        self._output_text = ""
-        self.output_text.clear()
-        self._clear_graphs()
-        self.output_tabs.setTabText(1, "Grafik")
-        self.output_tabs.setCurrentIndex(0)
-        self.execution_note.setText("Analisis sedang dijalankan…")
-        self._run_animation.start()
-        self.run_button.setEnabled(False)
-        self.cancel_button.setEnabled(True)
-
-        process = QProcess(self)
-        self._process = process
-        environment = QProcessEnvironment.systemEnvironment()
-        environment.insert("MPLBACKEND", "Agg")
-        environment.insert("MPLCONFIGDIR", str(run_dir / "matplotlib"))
-        process.setProcessEnvironment(environment)
-        process.setWorkingDirectory(str(run_dir))
-        process.setProgram(sys.executable)
-        process.setArguments([
-            "-u",
-            str(runner_path),
-            str(dataset_path),
-            str(code_path),
-            str(chart_path),
-        ])
-        process.setProcessChannelMode(QProcess.MergedChannels)
-        process.readyReadStandardOutput.connect(self._read_process_output)
-        process.finished.connect(self._process_finished)
-        process.errorOccurred.connect(self._process_error)
-        process.start()
+        self._kernel_request_id += 1
+        self._running_step_index = index
+        self._kernel_busy = True
         self._run_timeout.start(120_000)
+        self.execution_note.setText(
+            f"Menjalankan {step['title']} ({self._execution_completed + 1}/{self._execution_total})"
+        )
+        request = {
+            "kind": "execute",
+            "id": self._kernel_request_id,
+            "code": source,
+        }
+        process.write((json.dumps(request, ensure_ascii=False) + "\n").encode("utf-8"))
 
-    def _read_process_output(self):
-        process = self._process
+    def _read_kernel_output(self):
+        process = self._kernel_process
         if process is None:
             return
-        output = bytes(process.readAllStandardOutput()).decode("utf-8", errors="replace")
-        self._append_output(output)
+        self._kernel_buffer.extend(bytes(process.readAllStandardOutput()))
+        while b"\n" in self._kernel_buffer:
+            line, _, remaining = self._kernel_buffer.partition(b"\n")
+            self._kernel_buffer = bytearray(remaining)
+            if not line.strip():
+                continue
+            try:
+                message = json.loads(line.decode("utf-8", errors="replace"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                self._append_library_log(line.decode("utf-8", errors="replace") + "\n")
+                continue
+            self._handle_kernel_message(message)
 
-    def _append_output(self, text: str):
-        self._output_text = (self._output_text + text)[-160_000:]
-        self.output_text.setPlainText(self._output_text)
-        cursor = self.output_text.textCursor()
-        cursor.movePosition(QTextCursor.End)
-        self.output_text.setTextCursor(cursor)
-
-    def _process_error(self, error):
-        if self._process is not None and error == QProcess.FailedToStart:
-            self._append_output("Python runner gagal dijalankan. Periksa environment Python aplikasi.")
-            self._finish_execution(-1)
-
-    def _terminate_run(self):
-        process = self._process
-        if process is None:
+    def _remove_dataset_snapshot(self):
+        path = self._dataset_pickle_path
+        if path is None:
             return
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            return
+        self._dataset_pickle_path = None
+
+    def _handle_kernel_message(self, message: dict):
+        if message.get("kind") == "ready":
+            self._kernel_ready = True
+            self._remove_dataset_snapshot()
+            self._send_next_cell()
+            return
+        if message.get("id") != self._kernel_request_id or not self._kernel_busy:
+            return
+        index = self._running_step_index
+        if not 0 <= index < len(self._steps):
+            return
+        step = self._steps[index]
+        step["output"] = message.get("output", "")
+        step["charts"] = message.get("charts", [])
+        step["has_error"] = bool(message.get("error"))
+        step["execution_count"] = (step.get("execution_count") or 0) + 1
+        self._queue_had_error = self._queue_had_error or step["has_error"]
+        self._kernel_busy = False
+        self._running_step_index = -1
         self._run_timeout.stop()
-        self._append_output("\nProses dihentikan pengguna.\n")
-        process.kill()
+        self._execution_completed += 1
+        if index == self._selected_step:
+            self._render_step_output(step)
+        if self._execution_queue:
+            self._send_next_cell()
+        else:
+            self._finish_execution(not self._queue_had_error)
+
+    def _kernel_error(self, process: QProcess, error):
+        if process is not self._kernel_process or error != QProcess.FailedToStart:
+            return
+        self.execution_note.setText("Kernel Python gagal dijalankan.")
+        self._kernel_process = None
+        self._kernel_ready = False
+        self._kernel_busy = False
+        self._remove_dataset_snapshot()
+        process.deleteLater()
+        self._finish_execution(False)
+
+    def _kernel_finished(self, process: QProcess, exit_code: int, _exit_status):
+        if process is not self._kernel_process:
+            return
+        self._read_kernel_output()
+        self._kernel_process = None
+        self._kernel_ready = False
+        self._kernel_busy = False
+        self._remove_dataset_snapshot()
+        process.deleteLater()
+        if self._execution_queue or self._running_step_index >= 0:
+            index = self._running_step_index
+            if index < 0 and self._execution_queue:
+                index = self._execution_queue[0]
+            if 0 <= index < len(self._steps):
+                step = self._steps[index]
+                step["output"] = (
+                    step.get("output", "")
+                    + f"\nSesi Python berhenti sebelum semua kode selesai (kode {exit_code}).\n"
+                ).strip()
+                step["charts"] = []
+                step["has_error"] = True
+                if index == self._selected_step:
+                    self._render_step_output(step)
+            self._execution_queue.clear()
+            self._running_step_index = -1
+            self._run_timeout.stop()
+            self._finish_execution(False)
 
     def _on_run_timeout(self):
-        if self._process is None:
+        index = self._running_step_index
+        if 0 <= index < len(self._steps):
+            step = self._steps[index]
+            step["output"] = (step.get("output", "") + "\nEksekusi melewati batas 120 detik; sesi Python dihentikan.\n").strip()
+            step["charts"] = []
+            step["has_error"] = True
+            if index == self._selected_step:
+                self._render_step_output(step)
+        self._execution_queue.clear()
+        self._queue_had_error = True
+        self._stop_kernel()
+        self._finish_execution(False)
+
+    def _terminate_run(self):
+        if not self._kernel_busy and not self._execution_queue:
             return
-        self._append_output("\nWaktu eksekusi melewati batas 120 detik; proses dihentikan.\n")
-        self._process.kill()
+        index = self._running_step_index
+        if 0 <= index < len(self._steps):
+            step = self._steps[index]
+            step["output"] = (step.get("output", "") + "\nProses dihentikan pengguna; sesi Python direset.\n").strip()
+            step["charts"] = []
+            step["has_error"] = True
+            if index == self._selected_step:
+                self._render_step_output(step)
+        self._execution_queue.clear()
+        self._run_timeout.stop()
+        self._stop_kernel()
+        self._finish_execution(False)
 
-    def _terminate_process_on_exit(self):
-        if self._process is not None and self._process.state() != QProcess.NotRunning:
-            self._process.kill()
-            self._process.waitForFinished(1500)
-        self._cleanup_run_files()
+    def _stop_kernel(self):
+        process = self._kernel_process
+        self._kernel_process = None
+        self._kernel_ready = False
+        self._kernel_busy = False
+        self._execution_queue.clear()
+        self._running_step_index = -1
+        self._run_timeout.stop()
+        self._kernel_buffer.clear()
+        if process is not None:
+            process.kill()
+            process.waitForFinished(1500)
+            process.deleteLater()
+        self._remove_dataset_snapshot()
 
-    def _process_finished(self, exit_code: int, _exit_status):
-        self._read_process_output()
-        self._finish_execution(exit_code)
+    def _restart_kernel(self):
+        if self._kernel_busy or self._execution_queue:
+            self.execution_note.setText("Hentikan proses yang berjalan sebelum mereset sesi Python.")
+            return
+        self._stop_kernel()
+        self.execution_note.setText("Sesi Python direset. Variabel dibersihkan saat Run berikutnya.")
 
-    def _finish_execution(self, exit_code: int):
+    def _finish_execution(self, success: bool):
         self._run_timeout.stop()
         self._run_animation.stop()
         self._run_opacity_effect.setOpacity(1.0)
-        self._load_graphs()
         self.run_button.setEnabled(self._dataframe is not None)
+        self.run_all_button.setEnabled(self._dataframe is not None)
         self.cancel_button.setEnabled(False)
-        self.execution_note.setText(
-            "Analisis selesai." if exit_code == 0 else "Analisis berhenti atau mengalami error; lihat Output teks."
+        self.install_library_button.setEnabled(self._dataframe is not None)
+        if success:
+            self.execution_note.setText("Analisis selesai. Variabel tetap tersedia di sesi Python ini.")
+        elif self._execution_completed:
+            self.execution_note.setText("Sebagian analisis selesai; periksa output pada bagian yang error.")
+        else:
+            self.execution_note.setText(
+                "Eksekusi belum selesai. Periksa output bagian analisis atau log Library."
+            )
+        if not self._execution_queue:
+            self._running_step_index = -1
+
+    def _append_library_log(self, text: str):
+        self._package_log = (self._package_log + text)[-120_000:]
+        self.library_output.setPlainText(self._package_log)
+        cursor = self.library_output.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        self.library_output.setTextCursor(cursor)
+
+    def _install_library(self):
+        spec = self.library_input.text().strip()
+        allowed = re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._-]*(?:\[[A-Za-z0-9_,.-]+\])?(?:(?:==|~=|>=|<=|!=|>|<)[A-Za-z0-9.*+!-]+)?",
+            spec,
         )
-        if self._process is not None:
-            self._process.deleteLater()
-            self._process = None
-        self._cleanup_run_files()
-
-    def _cleanup_run_files(self):
-        if self._run_tempdir is not None:
-            self._run_tempdir.cleanup()
-            self._run_tempdir = None
-
-    def _clear_graphs(self):
-        while self.graphics_layout.count():
-            item = self.graphics_layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
-        self._graphics = []
-
-    def _load_graphs(self):
-        chart_dir = Path(self._run_tempdir.name) / "charts" if self._run_tempdir else None
-        files = sorted(chart_dir.glob("grafik_*.png")) if chart_dir and chart_dir.exists() else []
-        self._clear_graphs()
-        if not files:
-            self.graphics_empty = QLabel("Kode ini belum menghasilkan grafik.")
-            self.graphics_empty.setObjectName("editorAnalysisGraphicsEmpty")
-            self.graphics_empty.setAlignment(Qt.AlignCenter)
-            self.graphics_layout.addWidget(self.graphics_empty)
-            self.graphics_layout.addStretch(1)
-            self.output_tabs.setTabText(1, "Grafik")
+        if not allowed:
+            self.library_status.setText("Masukkan satu nama paket PyPI, misalnya seaborn atau xgboost==2.1.0.")
             return
-        for path in files[:8]:
-            image = QImage.fromData(path.read_bytes(), "PNG")
+        if self._dataframe is None:
+            self.library_status.setText("Muat dataset dan proyek sebelum memasang library.")
+            return
+        if self._kernel_busy or self._execution_queue or self._package_process is not None:
+            return
+        self._stop_kernel()
+        self._package_log = ""
+        self.library_output.clear()
+        self.output_tabs.setCurrentIndex(2)
+        self.library_status.setText(f"Memasang {spec} ke lingkungan proyek...")
+        self.install_library_button.setEnabled(False)
+        self.run_button.setEnabled(False)
+        self.run_all_button.setEnabled(False)
+        self.execution_note.setText("Pemasangan library sedang berjalan...")
+        self._run_animation.start()
+        self._ensure_environment(lambda: self._start_package_install(spec))
+
+    def _start_package_install(self, spec: str):
+        process = QProcess(self)
+        self._package_process = process
+        process.setProgram(str(self._execution_interpreter()))
+        process.setArguments([
+            "-m", "pip", "install", "--disable-pip-version-check", "--upgrade", spec,
+        ])
+        process.setWorkingDirectory(str(self._project_workspace))
+        environment = QProcessEnvironment.systemEnvironment()
+        environment.insert("PYTHONUTF8", "1")
+        environment.insert("PIP_NO_INPUT", "1")
+        process.setProcessEnvironment(environment)
+        process.setProcessChannelMode(QProcess.MergedChannels)
+        process.readyReadStandardOutput.connect(self._read_package_output)
+        process.finished.connect(self._package_finished)
+        process.errorOccurred.connect(self._package_error)
+        process.start()
+
+    def _read_package_output(self):
+        process = self._package_process
+        if process is None:
+            return
+        output = bytes(process.readAllStandardOutput()).decode("utf-8", errors="replace")
+        self._append_library_log(output)
+
+    def _package_error(self, error):
+        if self._package_process is None or error != QProcess.FailedToStart:
+            return
+        self._append_library_log("pip gagal dijalankan di lingkungan proyek.\n")
+        self._package_finished(-1, QProcess.CrashExit)
+
+    def _package_finished(self, exit_code: int, _exit_status):
+        process = self._package_process
+        if process is None:
+            return
+        self._read_package_output()
+        self._package_process = None
+        process.deleteLater()
+        self._run_animation.stop()
+        self._run_opacity_effect.setOpacity(1.0)
+        self.install_library_button.setEnabled(self._dataframe is not None)
+        self.run_button.setEnabled(self._dataframe is not None)
+        self.run_all_button.setEnabled(self._dataframe is not None)
+        if exit_code == 0:
+            package = self.library_input.text().strip()
+            self.library_status.setText(f"{package} terpasang. Jalankan ulang bagian analisis untuk memakai library ini.")
+            self.execution_note.setText("Library siap digunakan pada sesi Python berikutnya.")
+        else:
+            self.library_status.setText("Pemasangan gagal. Periksa log pada tab Library.")
+            self.execution_note.setText("Library tidak berhasil dipasang.")
+
+    def _render_step_output(self, step: dict):
+        self.output_text.setPlainText(step.get("output", ""))
+        self._clear_graphs()
+        charts = step.get("charts", [])
+        for chart in charts[:8]:
+            try:
+                image = QImage.fromData(base64.b64decode(chart), "PNG")
+            except Exception:
+                continue
             if image.isNull():
                 continue
             pixmap = QPixmap.fromImage(image)
@@ -1292,8 +1606,158 @@ plt.tight_layout()
             max_width = max(320, min(900, self.graphics_scroll.viewport().width() - 32))
             label.setPixmap(pixmap.scaledToWidth(max_width, Qt.SmoothTransformation))
             self.graphics_layout.addWidget(label)
-        self.graphics_layout.addStretch(1)
-        self.output_tabs.setTabText(1, f"Grafik ({len(self._graphics)})")
+        if not self._graphics:
+            self.graphics_empty = QLabel("Bagian ini belum menghasilkan grafik.")
+            self.graphics_empty.setObjectName("editorAnalysisGraphicsEmpty")
+            self.graphics_empty.setAlignment(Qt.AlignCenter)
+            self.graphics_layout.addWidget(self.graphics_empty)
+            self.graphics_layout.addStretch(1)
+        self.output_tabs.setTabText(1, f"Grafik ({len(self._graphics)})" if self._graphics else "Grafik")
+
+    def _clear_graphs(self):
+        while self.graphics_layout.count():
+            item = self.graphics_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self._graphics = []
+
+    def _notebook_document(self) -> dict:
+        cells = []
+        for step in self._steps:
+            outputs = []
+            output_text = step.get("output", "")
+            if output_text:
+                output_type = "stderr" if step.get("has_error") else "stdout"
+                outputs.append({
+                    "output_type": "stream",
+                    "name": output_type,
+                    "text": output_text.splitlines(keepends=True),
+                })
+            for chart in step.get("charts", [])[:8]:
+                outputs.append({
+                    "output_type": "display_data",
+                    "data": {"image/png": chart, "text/plain": "Grafik analisis"},
+                    "metadata": {},
+                })
+            cells.append({
+                "cell_type": "code",
+                "execution_count": step.get("execution_count"),
+                "metadata": {
+                    "dora": {
+                        "title": step["title"],
+                        "description": step["description"],
+                        "category": step["category"],
+                        "template": step["template"],
+                        "has_error": bool(step.get("has_error")),
+                    }
+                },
+                "outputs": outputs,
+                "source": step["code"].splitlines(keepends=True),
+            })
+        return {
+            "cells": cells,
+            "metadata": {
+                "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
+                "language_info": {"name": "python", "version": sys.version.split()[0]},
+            },
+            "nbformat": 4,
+            "nbformat_minor": 5,
+        }
+
+    def _save_notebook(self):
+        if self._project_workspace is None:
+            self.library_status.setText("Pilih atau muat dataset sebelum menyimpan notebook.")
+            return
+        default_path = str(self._notebook_path or (self._project_workspace / "analisis.ipynb"))
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Simpan notebook analisis", default_path, "Jupyter Notebook (*.ipynb)"
+        )
+        if not filename:
+            return
+        path = Path(filename)
+        if path.suffix.lower() != ".ipynb":
+            path = path.with_suffix(".ipynb")
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(self._notebook_document(), ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError as error:
+            self.library_status.setText(f"Notebook gagal disimpan: {error}")
+            return
+        self._notebook_path = path
+        self.library_status.setText(f"Notebook disimpan: {path.name}")
+
+    def _open_notebook(self):
+        if self._kernel_busy or self._execution_queue:
+            self.execution_note.setText("Hentikan proses sebelum membuka notebook lain.")
+            return
+        filename, _ = QFileDialog.getOpenFileName(
+            self, "Buka notebook", str(self._notebook_path or ""), "Jupyter Notebook (*.ipynb)"
+        )
+        if not filename:
+            return
+        try:
+            document = json.loads(Path(filename).read_text(encoding="utf-8"))
+            if document.get("nbformat") != 4 or not isinstance(document.get("cells"), list):
+                raise ValueError("Format notebook tidak didukung.")
+            steps = []
+            for cell in document["cells"]:
+                if cell.get("cell_type") != "code":
+                    continue
+                source = cell.get("source", "")
+                code = "".join(source) if isinstance(source, list) else str(source)
+                metadata = (cell.get("metadata") or {}).get("dora", {})
+                title = metadata.get("title", "Bagian notebook")
+                category = metadata.get("category", "Custom")
+                if category not in self.template_groups:
+                    category = "Custom"
+                template = metadata.get("template", "Kode kosong")
+                if template not in self.template_groups[category]:
+                    template = next(iter(self.template_groups[category]))
+                output_parts = []
+                charts = []
+                has_error = bool(metadata.get("has_error"))
+                for output in cell.get("outputs", []):
+                    if output.get("output_type") == "stream":
+                        text = output.get("text", "")
+                        output_parts.append("".join(text) if isinstance(text, list) else str(text))
+                    if output.get("output_type") == "error":
+                        has_error = True
+                        output_parts.extend(output.get("traceback", []))
+                    image = (output.get("data") or {}).get("image/png")
+                    if image:
+                        charts.append(image)
+                steps.append({
+                    "title": title,
+                    "description": metadata.get("description", "Diimpor dari notebook Jupyter."),
+                    "category": category,
+                    "template": template,
+                    "code": code,
+                    "output": "".join(output_parts),
+                    "charts": charts[:8],
+                    "has_error": has_error,
+                    "execution_count": cell.get("execution_count"),
+                })
+        except (OSError, json.JSONDecodeError, TypeError, ValueError) as error:
+            self.library_status.setText(f"Notebook gagal dibuka: {error}")
+            return
+        if not steps:
+            self.library_status.setText("Notebook tidak memiliki bagian kode Python.")
+            return
+        self._stop_kernel()
+        self._steps = steps
+        self._populate_step_list()
+        self.step_list.setCurrentRow(0)
+        self._notebook_path = Path(filename)
+        self.library_status.setText(f"{len(steps)} bagian dimuat dari {Path(filename).name}.")
+
+    def _terminate_process_on_exit(self):
+        self._run_timeout.stop()
+        self._stop_kernel()
+        for process in (self._environment_process, self._package_process):
+            if process is not None and process.state() != QProcess.NotRunning:
+                process.kill()
+                process.waitForFinished(1500)
 
     def _add_step(self):
         index = len(self._steps) + 1
@@ -1304,22 +1768,60 @@ plt.tight_layout()
             "category": "Custom",
             "template": "Kode kosong",
             "code": self.template_groups["Custom"]["Kode kosong"],
+            "output": "",
+            "charts": [],
+            "has_error": False,
+            "execution_count": None,
         }
         self._steps.append(step)
         self._populate_step_list()
         self.step_list.setCurrentRow(len(self._steps) - 1)
 
     def set_dataset(self, dataframe, filename: str = ""):
+        previous_dataframe = self._dataframe
+        previous_project_key = self._project_key
         self._dataframe = dataframe
         self._dataset_name = filename or "Dataset"
         if dataframe is None:
+            self._cancel_environment_jobs()
+            self._stop_kernel()
+            self._project_key = ""
+            self._project_workspace = None
+            self._project_environment = None
             self.dataset_badge.setText("Dataset belum dimuat")
             self.target_combo.blockSignals(True)
             self.target_combo.clear()
             self.target_combo.blockSignals(False)
             self._update_target_controls(self.code_editor.toPlainText())
             self.run_button.setEnabled(False)
+            self.run_all_button.setEnabled(False)
+            self.install_library_button.setEnabled(False)
+            self.cancel_button.setEnabled(False)
+            self._run_animation.stop()
+            self._run_opacity_effect.setOpacity(1.0)
             return
+
+        project_id = getattr(self._main_window, "current_project_id", None)
+        if project_id is not None:
+            project_key = f"project_{project_id}"
+        else:
+            identity = f"{self._dataset_name}|{dataframe.shape}|{list(map(str, dataframe.columns))}"
+            project_key = "dataset_" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16]
+        dataset_changed = previous_dataframe is not dataframe or previous_project_key != project_key
+        if dataset_changed:
+            self._cancel_environment_jobs()
+            self._stop_kernel()
+            self.cancel_button.setEnabled(False)
+            for step in self._steps:
+                step["output"] = ""
+                step["charts"] = []
+                step["has_error"] = False
+                step["execution_count"] = None
+        self._project_key = project_key
+        app_data = QStandardPaths.writableLocation(QStandardPaths.AppLocalDataLocation)
+        app_data_root = Path(app_data) if app_data else Path.home() / ".dora"
+        self._project_workspace = app_data_root / "editor_analysis" / project_key
+        self._project_environment = self._project_workspace / "python-env"
         columns = [str(column) for column in dataframe.columns]
         current_target = self.target_combo.currentText()
         selected_target = current_target if current_target in columns else self._preferred_target(columns)
@@ -1345,13 +1847,52 @@ plt.tight_layout()
             self.code_editor.blockSignals(False)
             self._update_target_controls(step["code"])
         self.dataset_badge.setText(f"{self._dataset_name} · {len(dataframe):,} baris")
-        self.run_button.setEnabled(self._process is None)
+        self.run_button.setEnabled(self._kernel_busy is False and self._package_process is None)
+        self.run_all_button.setEnabled(self._kernel_busy is False and self._package_process is None)
+        self.install_library_button.setEnabled(self._package_process is None)
+        self._refresh_library_status()
+        if 0 <= self._selected_step < len(self._steps):
+            self._render_step_output(self._steps[self._selected_step])
+
+    def _cancel_environment_jobs(self):
+        self._environment_callback = None
+        self._run_animation.stop()
+        self._run_opacity_effect.setOpacity(1.0)
+        for name in ("_environment_process", "_package_process"):
+            process = getattr(self, name)
+            setattr(self, name, None)
+            if process is not None and process.state() != QProcess.NotRunning:
+                process.kill()
+                process.deleteLater()
+
+    def _refresh_library_status(self):
+        if self._project_environment is None:
+            self.library_status.setText("Paket tambahan dipisahkan untuk setiap proyek.")
+            return
+        site_packages = self._environment_site_packages()
+        installed = []
+        if site_packages.exists():
+            for metadata in site_packages.glob("*.dist-info"):
+                package = re.sub(r"-[0-9].*$", "", metadata.name[:-10]).replace("_", "-")
+                if package:
+                    installed.append(package)
+        installed = sorted(set(installed), key=str.casefold)
+        if installed:
+            self.library_status.setText("Library proyek: " + ", ".join(installed[:24]))
+        else:
+            self.library_status.setText("Belum ada library tambahan di lingkungan proyek ini.")
 
     def _apply_responsive_layout(self, width: int):
         compact = width < 1080
         self.root_layout.setContentsMargins(16 if width < 760 else 30, 16, 16 if width < 760 else 28, 18)
         self.workspace.setDirection(QBoxLayout.TopToBottom if compact else QBoxLayout.LeftToRight)
         self.template_toolbar.setDirection(
+            QBoxLayout.TopToBottom if width < 650 else QBoxLayout.LeftToRight
+        )
+        self.notebook_toolbar.setDirection(
+            QBoxLayout.TopToBottom if width < 650 else QBoxLayout.LeftToRight
+        )
+        self.library_row.setDirection(
             QBoxLayout.TopToBottom if width < 650 else QBoxLayout.LeftToRight
         )
         self.steps_card.setMinimumWidth(0 if compact else 240)

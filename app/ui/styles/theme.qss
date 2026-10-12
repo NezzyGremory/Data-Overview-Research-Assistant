@@ -342,6 +342,7 @@ QTableView#datasetPreviewAnalysisTable QHeaderView::section { background: var(--
 #editorAnalysisStepList::item:selected { background: var(--blue-active); color: var(--blue); font-weight: 600; }
 #editorAnalysisTemplateCombo, #editorAnalysisCategoryCombo, #editorAnalysisTargetCombo { background: var(--surface); border: 1px solid var(--border); border-radius: var(--button-radius); color: var(--ink); min-height: 38px; padding: 0 10px; }
 #editorAnalysisTargetCombo { min-width: 190px; }
+#editorAnalysisLibraryInput { background: var(--surface); border: 1px solid var(--border); border-radius: var(--button-radius); color: var(--ink); min-height: 38px; padding: 0 10px; }
 #editorAnalysisFieldLabel { color: var(--body); font-size: 14px; font-weight: 600; }
 QPlainTextEdit#editorAnalysisCodeEditor { background: #172338; border: 1px solid #243954; border-radius: var(--small-radius); color: #e8f1ff; font-family: "Intel One Mono"; font-size: 14px; padding: 14px; selection-background-color: #285b91; }
 #editorAnalysisExecutionNote { background: var(--canvas); border-radius: var(--small-radius); color: var(--muted); font-size: 13px; padding: 9px 11px; }
