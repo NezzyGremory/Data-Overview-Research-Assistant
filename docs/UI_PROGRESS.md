@@ -31,7 +31,7 @@ Gaya dasar yang dibaca dari Figma: kanvas `#F1F7FF`; biru `#006BB8`, `#0071C2`, 
 | Dataset Search | selesai | Judul, deskripsi, panel pencarian, dua kolom kartu hasil, metadata, file, dan tombol dicocokkan ke koordinat node `41:221`. Kontrol pencarian dan aksi download tetap memakai handler lama. Screenshot 1920×1080 dibandingkan dengan Figma; 1366×768 diperiksa untuk susunan responsif. |
 | Overview | selesai | Implementasi frame `144:275`; judul, temuan, pipeline, dan tiga kartu mengikuti frame. Tombol laporan dan detail tetap memakai handler lama. Screenshot 1920x1080 dibandingkan dengan Figma; 1366x768 diperiksa untuk susunan responsif. |
 | Research Landscape | selesai | Tombol `Refresh Landscape`, ringkasan 3 kartu, distribusi metode, dan venue publikasi dicocokkan ke node `54:843`. Tab internal disembunyikan; navigasi sidebar ke Research Gap tetap aktif. Screenshot 1920x1080 dibandingkan dengan frame Figma; 1366x768 diperiksa dan konten bertumpuk/bergulir tanpa tumpang tindih. |
-| About | selesai | Deskripsi aplikasi dan kartu model mengikuti frame `141:373`; aset logo diambil dari node Figma. Teks, menu About aktif, dan ukuran frame dicocokkan. Navigasi sidebar tetap memakai callback lama. Screenshot 1920x1080 dibandingkan dengan Figma; 1366x768 diperiksa agar subtitle membungkus dan kartu bertambah tinggi tanpa bertumpuk. |
+| About | selesai | Deskripsi aplikasi dipertahankan. Atas permintaan terbaru, kartu ML Intelligence di halaman About dihapus. About, Copyright, dan Help kini ada di kiri bawah pada semua halaman; identitas tim di topbar menjadi `Metriks v5.0.0`. Revisi ini tidak mengambil screenshot sesuai instruksi pengguna. |
 | ML Intelligence | dilewati | Tidak ada frame halaman di Figma. |
 | Academic Research | dilewati | Tidak ada frame halaman di Figma. |
 | Papers | dilewati | Tidak ada frame halaman di Figma. |
@@ -47,7 +47,7 @@ Gaya dasar yang dibaca dari Figma: kanvas `#F1F7FF`; biru `#006BB8`, `#0071C2`, 
 | `Datasets` | `Dataset` | Judul halaman `datasets_page` |
 | `Dashboard` (judul halaman internal) | `Overview` | Judul `DashboardPage` bila tampil |
 | `Editor Analysis` | tidak ada | Disembunyikan dari sidebar; kunci `editor_analysis` tetap dipertahankan |
-| `2026 [nama tim] v.` | `2026 UIN HIJAU v5` | Identitas tim dari preferensi yang sudah diberikan pengguna |
+| `2026 UIN HIJAU v5` | `Metriks v5.0.0` | Identitas tim terbaru yang diminta pengguna; tampil sendiri di topbar |
 
 Nama menu utama lainnya sudah sejalan dengan Figma. Navigasi dan backend memakai kunci internal seperti `dataset`, `analysis`, `dashboard`, dan `research`; perubahan label tidak akan mengubah kunci tersebut.
 

@@ -11489,10 +11489,17 @@ class MainWindow(QMainWindow):
     # =========================================================
 
     def _build_sidebar(self):
+        sidebar_container = QWidget()
+        sidebar_container.setObjectName("sidebarContainer")
+        container_layout = QVBoxLayout(sidebar_container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(0)
+        sidebar_container.setFixedWidth(418)
+        self.sidebar_container = sidebar_container
+
         sidebar_scroll = QScrollArea()
         self.sidebar_scroll = sidebar_scroll
         sidebar_scroll.setObjectName("sidebarScroll")
-        sidebar_scroll.setFixedWidth(418)
         sidebar_scroll.setWidgetResizable(True)
         sidebar_scroll.setFrameShape(QFrame.NoFrame)
         sidebar_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -11567,19 +11574,24 @@ class MainWindow(QMainWindow):
 
         footer = QWidget()
         footer.setObjectName("overviewSidebarFooter")
-        footer.setFixedHeight(192)
+        footer.setFixedHeight(176)
         footer_layout = QVBoxLayout(footer)
         footer_layout.setContentsMargins(17, 0, 0, 0)
-        footer_layout.setSpacing(16)
+        footer_layout.setSpacing(9)
+        self.sidebar_footer_layout = footer_layout
 
         self.sidebar_footer_buttons = {}
         for key, label, icon_name, width, callback in (
             ("about", "About", "overview-about.svg", 151, self.open_about),
             ("copyright", "Copyright", "copyright.svg", 201, self.open_copyright),
+            ("help", "Help", "help.svg", 140, self.open_help),
         ):
             button = QPushButton(label)
             button.setObjectName("overviewSidebarLink")
             button.setProperty("kind", key)
+            button.setProperty("labelText", label)
+            button.setProperty("preferredWidth", width)
+            button.setToolTip(label)
             button.setIcon(QIcon(str(_resource_path(Path("assets") / "icons" / icon_name))))
             button.setIconSize(QSize(35 if key == "about" else 37, 35 if key == "about" else 37))
             button.setFixedSize(width, 50)
@@ -11589,43 +11601,12 @@ class MainWindow(QMainWindow):
             footer_layout.addWidget(button)
             self.sidebar_footer_buttons[key] = button
 
-        help_row = QWidget()
-        help_layout = QHBoxLayout(help_row)
-        help_layout.setContentsMargins(0, 0, 0, 0)
-        help_layout.setSpacing(0)
-        help_button = QPushButton("Help")
-        help_button.setObjectName("overviewSidebarLink")
-        help_button.setProperty("kind", "help")
-        help_button.setIcon(QIcon(str(_resource_path(Path("assets") / "icons" / "help.svg"))))
-        help_button.setIconSize(QSize(35, 35))
-        help_button.setFixedSize(140, 50)
-        help_button.setCursor(Qt.PointingHandCursor)
-        apply_card_shadow(help_button)
-        help_button.clicked.connect(self.open_help)
-        help_layout.addWidget(help_button, 0, Qt.AlignTop)
-        help_layout.addSpacing(64)
-
-        team_identity = QWidget()
-        team_identity.setObjectName("overviewTeamIdentity")
-        team_layout = QHBoxLayout(team_identity)
-        team_layout.setContentsMargins(0, 0, 0, 0)
-        team_layout.setSpacing(11)
-        team_icon = QLabel()
-        team_icon.setFixedSize(24, 24)
-        team_icon_path = _resource_path(Path("assets") / "icons" / "copyright.svg")
-        if team_icon_path.exists():
-            team_icon.setPixmap(QPixmap(str(team_icon_path)).scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        team_text = QLabel("2026 UIN HIJAU v5")
-        team_text.setObjectName("overviewTeamText")
-        team_layout.addWidget(team_icon)
-        team_layout.addWidget(team_text)
-        help_layout.addWidget(team_identity, 0, Qt.AlignBottom)
-        footer_layout.addWidget(help_row)
-        layout.addWidget(footer)
         self.sidebar_footer = footer
 
         sidebar_scroll.setWidget(sidebar)
-        return sidebar_scroll
+        container_layout.addWidget(sidebar_scroll, 1)
+        container_layout.addWidget(footer)
+        return sidebar_container
 
     def _add_nav_group(self, parent_layout, height, top_margin, bottom_margin, entries):
         card = QFrame()
@@ -11742,72 +11723,21 @@ class MainWindow(QMainWindow):
         self.page_title.setObjectName("topbarTitle")
         self.page_title.hide()
         layout.addStretch()
-
-        about = QPushButton("About")
-        about.setObjectName("topbarLink")
-        about.setIcon(QIcon(str(_resource_path("assets/icons/about.svg"))))
-        about.setProperty("active", True)
-        about.setFixedSize(136, 50)
-        about.clicked.connect(self.open_about)
-        layout.addWidget(about)
-        self.topbar_links = {"about": about}
-        self.topbar_link_labels = {"about": "About"}
-        for key, label, icon_name in (
-            ("copyright", "Copyright", "copyright.svg"),
-            ("help", "Help", "help.svg"),
-        ):
-            link = QPushButton(label)
-            link.setObjectName("topbarLink")
-            link.setIcon(QIcon(str(_resource_path(Path("assets") / "icons" / icon_name))))
-            link.setFlat(True)
-            link.setProperty("active", False)
-            link.setFixedSize(201 if key == "copyright" else 140, 50)
-            self.topbar_links[key] = link
-            self.topbar_link_labels[key] = label
-            if key == "copyright":
-                link.clicked.connect(self.open_copyright)
-            elif key == "help":
-                link.clicked.connect(self.open_help)
-            layout.addWidget(link)
-        divider = QFrame()
-        divider.setObjectName("topbarDivider")
-        divider.setFixedSize(1, 38)
-        self.topbar_divider = divider
-        divider_container = QWidget()
-        divider_container.setFixedSize(1, 50)
-        divider_layout = QVBoxLayout(divider_container)
-        divider_layout.setContentsMargins(0, 0, 0, 0)
-        divider_layout.setSpacing(0)
-        divider_layout.addSpacing(11)
-        divider_layout.addWidget(divider)
-        divider_layout.addStretch(1)
-        layout.addSpacing(42)
-        layout.addWidget(divider_container)
-        version = QLabel("2026 UIN HIJAU v5")
+        version = QLabel("Metriks v5.0.0")
         version.setObjectName("topbarVersion")
         self.topbar_version = version
         version_container = QWidget()
         self.topbar_version_container = version_container
         version_layout = QHBoxLayout(version_container)
         version_layout.setContentsMargins(0, 0, 0, 0)
-        version_layout.setSpacing(12)
-        version_icon = QLabel()
-        version_icon.setObjectName("topbarVersionIcon")
-        version_icon.setFixedSize(24, 24)
-        copyright_path = _resource_path(Path("assets") / "icons" / "copyright.svg")
-        if copyright_path.exists():
-            pixmap = QPixmap(str(copyright_path))
-            if not pixmap.isNull():
-                version_icon.setPixmap(pixmap.scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        version_layout.addWidget(version_icon)
+        version_layout.setSpacing(0)
         version_layout.addWidget(version)
-        layout.addSpacing(26)
         layout.addWidget(version_container)
         return topbar
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        sidebar = getattr(self, "sidebar_scroll", None)
+        sidebar = getattr(self, "sidebar_container", None)
         if sidebar is None:
             return
         sidebar_width = min(418, max(76, round(event.size().width() * 0.23)))
@@ -11829,20 +11759,18 @@ class MainWindow(QMainWindow):
         page_key = getattr(self, "_current_page_key", "dashboard")
         overview_mode = page_key == "dashboard"
         about_mode = page_key == "about"
-        footer_mode = overview_mode or about_mode
-        blank_topbar_mode = footer_mode
         sidebar_width = (
             418 if about_mode and window_width >= 1366
             else min(418, max(76, round(window_width * 0.23)))
         )
-        if self.sidebar_scroll.width() != sidebar_width:
-            self.sidebar_scroll.setFixedWidth(sidebar_width)
+        if self.sidebar_container.width() != sidebar_width:
+            self.sidebar_container.setFixedWidth(sidebar_width)
         compact = sidebar_width < 288
         self.sidebar_layout.setContentsMargins(
             8 if compact else 11,
             20 if compact else 70,
             8 if compact else 14,
-            16 if compact else (44 if footer_mode else 24),
+            16 if compact else 44,
         )
         self.sidebar_logo.setFixedSize(48 if compact else 82, 48 if compact else 82)
         for group_index, (group, group_layout) in enumerate(zip(self.sidebar_group_cards, self.sidebar_group_layouts)):
@@ -11879,18 +11807,22 @@ class MainWindow(QMainWindow):
             12 if compact_topbar else 127,
             0,
         )
-        for key, link in self.topbar_links.items():
-            link.setText("" if compact_topbar else self.topbar_link_labels[key])
-            link.setToolTip(self.topbar_link_labels[key])
-            link.setIconSize(QSize(20 if compact_topbar else 35, 20 if compact_topbar else 35))
-            link.setVisible(not blank_topbar_mode)
-        self.topbar_divider.setVisible(not compact_topbar and not blank_topbar_mode)
-        self.topbar_version_container.setVisible(not compact_topbar and not blank_topbar_mode)
-        self.sidebar_footer.setVisible(footer_mode)
+        self.topbar_version_container.setVisible(True)
+        self.sidebar_footer.setVisible(True)
         for key, button in self.sidebar_footer_buttons.items():
-            button.setProperty("active", about_mode and key == "about")
+            button.setProperty("compact", compact)
+            button.setText("" if compact else button.property("labelText"))
+            button.setFixedSize(
+                44 if compact else button.property("preferredWidth"),
+                44 if compact else 50,
+            )
+            button.setIconSize(QSize(22, 22) if compact else QSize(35, 35))
+            button.setProperty("active", page_key == key)
             button.style().unpolish(button)
             button.style().polish(button)
+        self.sidebar_footer_layout.setContentsMargins(4 if compact else 17, 0, 0, 0)
+        self.sidebar_footer_layout.setSpacing(6 if compact else 9)
+        self.sidebar_footer.setFixedHeight(152 if compact else 176)
         self.overview_topbar_frame.setVisible(overview_mode)
         self.topbar.setProperty("overviewMode", overview_mode)
         self.topbar.style().unpolish(self.topbar)
@@ -11910,16 +11842,7 @@ class MainWindow(QMainWindow):
         self._current_page_key = key
         self.page_title.setText(self._page_titles[key])
         self.set_active_button("dashboard" if key == "about" else key)
-        self._set_topbar_active(key)
         self._sync_page_chrome(self.width(), self.height())
-
-    def _set_topbar_active(self, page_key):
-        active_link = page_key if page_key in ("about", "copyright", "help") else "about"
-        for key, link in self.topbar_links.items():
-            link.setProperty("active", key == active_link)
-            link.style().unpolish(link)
-            link.style().polish(link)
-            link.update()
 
     def open_dashboard(self):
         self._show_page("dashboard")

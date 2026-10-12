@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QProgressBar,
     QScrollArea,
     QVBoxLayout,
     QWidget,
@@ -27,7 +26,7 @@ def _asset_path(relative_path: str) -> Path:
 
 
 class AboutPage(QWidget):
-    """Application description and the ML recommendation preview."""
+    """Application description page."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -154,15 +153,6 @@ class AboutPage(QWidget):
         self.application_layout.addWidget(description_panel, 1)
 
         self.content.addWidget(self.application_card, 0, Qt.AlignLeft)
-        self.content.addSpacing(45)
-
-        model_row = QHBoxLayout()
-        model_row.setContentsMargins(0, 0, 0, 0)
-        model_row.setSpacing(0)
-        model_row.addStretch(1)
-        self.model_card = self._build_model_card()
-        model_row.addWidget(self.model_card, 0, Qt.AlignRight)
-        self.content.addLayout(model_row)
         self.content.addStretch(1)
 
         self._apply_responsive_width(self.width())
@@ -186,110 +176,6 @@ class AboutPage(QWidget):
         text.setObjectName("aboutFigmaBadgeText")
         layout.addWidget(text)
         return badge
-
-    def _build_model_card(self) -> QFrame:
-        card = QFrame()
-        card.setObjectName("aboutModelCard")
-        card.setFixedSize(465, 258)
-        apply_card_shadow(card)
-
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(16, 16, 20, 14)
-        layout.setSpacing(0)
-
-        heading = QHBoxLayout()
-        heading.setContentsMargins(0, 0, 0, 0)
-        heading.setSpacing(9)
-        icon_wrap = QFrame()
-        icon_wrap.setObjectName("aboutModelIconWrap")
-        icon_wrap.setFixedSize(32, 32)
-        icon_layout = QHBoxLayout(icon_wrap)
-        icon_layout.setContentsMargins(4, 4, 4, 4)
-        icon = QLabel()
-        icon.setFixedSize(24, 24)
-        icon.setPixmap(
-            QIcon(str(_asset_path("assets/icons/ml-intelligence.svg"))).pixmap(
-                QSize(24, 24)
-            )
-        )
-        icon_layout.addWidget(icon)
-        heading.addWidget(icon_wrap)
-        title = QLabel("ML Intellegence")
-        title.setObjectName("aboutModelTitle")
-        heading.addWidget(title)
-        heading.addStretch(1)
-        layout.addLayout(heading)
-        layout.addSpacing(20)
-
-        badges = QHBoxLayout()
-        badges.setContentsMargins(0, 0, 0, 0)
-        badges.setSpacing(9)
-        for label, object_name, width in (
-            ("Binary Clasification", "aboutModelTypeBadge", 145),
-            ("80% Confidence", "aboutModelConfidenceBadge", 125),
-            ("Target: Survived", "aboutModelTargetBadge", 125),
-        ):
-            badge = QLabel(label)
-            badge.setObjectName(object_name)
-            badge.setAlignment(Qt.AlignCenter)
-            badge.setFixedSize(width, 23)
-            badges.addWidget(badge)
-        layout.addLayout(badges)
-        layout.addSpacing(17)
-
-        caption = QLabel("TOP RECOMMENDED MODELS")
-        caption.setObjectName("aboutModelCaption")
-        caption.setFixedHeight(18)
-        layout.addWidget(caption)
-        layout.addSpacing(10)
-
-        for name, value, bar_value in (
-            ("Random Forest", "82.8%", 90),
-            ("Gradient Boosting", "82.1%", 84),
-            ("Logistic Regression", "80.7%", 78),
-        ):
-            row_widget = QWidget()
-            row_widget.setObjectName("aboutModelRow")
-            row_widget.setFixedHeight(31)
-            row = QHBoxLayout(row_widget)
-            row.setContentsMargins(3, 0, 7, 0)
-            row.setSpacing(0)
-            model_name = QLabel(name)
-            model_name.setObjectName("aboutModelName")
-            model_name.setFixedWidth(179)
-            bar = QProgressBar()
-            bar.setObjectName("aboutModelProgress")
-            bar.setRange(0, 100)
-            bar.setValue(bar_value)
-            bar.setTextVisible(False)
-            bar.setFixedSize(188, 8)
-            score = QLabel(value)
-            score.setObjectName("aboutModelScore")
-            score.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            score.setFixedWidth(38)
-            row.addWidget(model_name)
-            row.addWidget(bar)
-            row.addSpacing(14)
-            row.addWidget(score)
-            layout.addWidget(row_widget)
-
-        details = QHBoxLayout()
-        details.setContentsMargins(3, 0, 0, 0)
-        details.setSpacing(2)
-        details_text = QLabel("View details")
-        details_text.setObjectName("aboutModelDetails")
-        details.addWidget(details_text)
-        arrow = QLabel()
-        arrow.setFixedSize(10, 10)
-        arrow.setPixmap(
-            QIcon(str(_asset_path("assets/icons/arrow-right.svg"))).pixmap(
-                QSize(10, 10)
-            )
-        )
-        details.addWidget(arrow)
-        details.addStretch(1)
-        layout.addLayout(details)
-        return card
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
