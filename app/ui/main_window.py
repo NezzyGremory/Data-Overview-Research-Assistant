@@ -9338,6 +9338,16 @@ class PapersToolPage(QWidget):
         self.sinta_batch_status.setWordWrap(True)
         sinta_status_layout.addWidget(self.sinta_batch_status)
 
+        self.sinta_scope_note = QLabel(
+            "Pemeriksaan saat ini hanya mencocokkan jurnal dengan direktori SINTA. "
+            "Peringkat dan status akreditasi dapat berubah, jadi hasil ini adalah "
+            "snapshot yang perlu diperiksa kembali. Akreditasi atau indeks lain "
+            "belum diperiksa."
+        )
+        self.sinta_scope_note.setObjectName("cardDescription")
+        self.sinta_scope_note.setWordWrap(True)
+        sinta_status_layout.addWidget(self.sinta_scope_note)
+
         self.sinta_batch_progress = QProgressBar()
         self.sinta_batch_progress.setTextVisible(False)
         self.sinta_batch_progress.setMaximumHeight(7)
@@ -9403,7 +9413,7 @@ class PapersToolPage(QWidget):
             self._show_selected_paper
         )
         self.paper_table.cellDoubleClicked.connect(
-            self._open_selected_source
+            self._open_paper_source_for_row
         )
 
         table_layout.addWidget(self.paper_table, 1)
@@ -9844,27 +9854,27 @@ class PapersToolPage(QWidget):
         return self.filtered_papers[row]
 
     def _open_selected_source(self):
-        paper = self._selected_paper()
-        if not paper:
-            return
-        url = paper.get("url")
-        doi = paper.get("doi")
-        target_url = url or (f"https://doi.org/{str(doi).strip().removeprefix('doi:')}" if doi else "")
-        if target_url:
-            QDesktopServices.openUrl(QUrl(target_url))
-        paper = self._selected_paper()
+        self._open_paper_source(self._selected_paper())
 
-        if not paper:
+    def _open_paper_source_for_row(self, row, _column=0):
+        if row < 0 or row >= len(self.filtered_papers):
             return
 
-        url = paper.get("url")
+        self._open_paper_source(self.filtered_papers[row])
 
-        if not url:
-            doi = paper.get("doi")
-            if doi:
-                url = f"https://doi.org/{doi}"
+    def _open_paper_source(self, paper):
+        if not paper:
+            return
 
-        if not url:
+        target_url = str(paper.get("url") or "").strip()
+        doi = str(paper.get("doi") or "").strip()
+
+        if not target_url and doi:
+            if doi[:4].lower() == "doi:":
+                doi = doi[4:].strip()
+            target_url = f"https://doi.org/{doi}"
+
+        if not target_url:
             QMessageBox.information(
                 self,
                 "Source Unavailable",
@@ -9873,9 +9883,13 @@ class PapersToolPage(QWidget):
             return
 
         try:
-            QDesktopServices.openUrl(
-                QUrl(str(url))
-            )
+            opened = QDesktopServices.openUrl(QUrl(target_url))
+            if not opened:
+                QMessageBox.warning(
+                    self,
+                    "Open Source Failed",
+                    "Windows tidak dapat membuka tautan sumber artikel ini.",
+                )
         except Exception as exc:
             QMessageBox.warning(
                 self,
