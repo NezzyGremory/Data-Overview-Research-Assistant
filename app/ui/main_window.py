@@ -5881,6 +5881,10 @@ class ResearchPage(QWidget):
         self._sinta_thread: QThread | None = None
         self._sinta_worker: SintaLookupWorker | None = None
         self._sinta_lookup_cache = {}
+        self._sinta_table_refresh_timer = QTimer(self)
+        self._sinta_table_refresh_timer.setSingleShot(True)
+        self._sinta_table_refresh_timer.setInterval(140)
+        self._sinta_table_refresh_timer.timeout.connect(self._render_filtered_papers)
 
         self._build_ui()
 
@@ -6596,7 +6600,7 @@ class ResearchPage(QWidget):
         screening_heading = QLabel("Verifikasi Akreditasi Jurnal (SINTA)")
         screening_heading.setObjectName("sectionTitle")
         screening_note = QLabel(
-            "Peringkat diberikan pada jurnal. Gemini dapat membantu mencari profil kandidat; status tetap merujuk pada data resmi SINTA."
+            "Pemeriksaan mencari jurnal dari ISSN atau nama, lalu memeriksa masa akreditasi untuk tahun terbit. Jika profil resmi mencantumkan DOI artikel yang sama, DOI itu dicocokkan langsung."
         )
         screening_note.setObjectName("cardDescription")
         screening_note.setWordWrap(True)
@@ -7892,7 +7896,7 @@ class ResearchPage(QWidget):
         if lookup_status == "PERIOD_UNVERIFIED":
             rank = str(screening.get("rank") or "")
             if rank in {f"S{value}" for value in range(1, 7)}:
-                return f"SINTA {rank[1:]}"
+                return f"SINTA {rank[1:]}*"
             return "Perlu Verifikasi Tahun"
         if lookup_status == "NO_MATCH":
             return "Jurnal Belum Cocok"
@@ -7953,7 +7957,7 @@ class ResearchPage(QWidget):
             "NO_MATCH": "Hasil ditemukan, tetapi metadata belum cocok persis",
             "NO_METADATA": "Data ISSN dan nama jurnal tidak tersedia",
             "RANK_UNAVAILABLE": "Jurnal cocok, tetapi peringkat tidak terbaca dari sumber",
-            "FAILED": "Belum dapat terhubung ke direktori; coba lagi",
+            "FAILED": "Gagal diperiksa; dapat dicoba ulang",
             "AMBIGUOUS": "Kandidat jurnal perlu ditinjau",
             "PERIOD_UNVERIFIED": "Periode SK belum terverifikasi",
             "MANUALLY_CONFIRMED": "Dikonfirmasi manual",
@@ -8432,10 +8436,15 @@ class ResearchPage(QWidget):
             f"{current} dari {total} artikel | Memeriksa {journal} | "
             f"cocok {self._sinta_batch_found}, perlu ditinjau {self._sinta_batch_manual}"
         )
-        self._render_filtered_papers()
+        refresh_timer = getattr(self, "_sinta_table_refresh_timer", None)
+        if refresh_timer is None:
+            self._render_filtered_papers()
+        elif not refresh_timer.isActive():
+            refresh_timer.start()
 
     @Slot(int)
     def _finish_sinta_batch(self, total):
+        self._sinta_table_refresh_timer.stop()
         missing_metadata = sum(
             self._sinta_screening(paper).get("lookup_status") == "NO_METADATA"
             for paper in self._all_papers
@@ -8949,7 +8958,7 @@ class PapersToolPage(QWidget):
         self._sinta_batch_was_running = False
         self._sinta_last_progress_value = -1
         self._sinta_sync_timer = QTimer(self)
-        self._sinta_sync_timer.setInterval(300)
+        self._sinta_sync_timer.setInterval(500)
         self._sinta_sync_timer.timeout.connect(self._sync_sinta_batch_state)
         self._build_ui()
 
@@ -9054,7 +9063,8 @@ class PapersToolPage(QWidget):
         sinta_status_layout.addWidget(self.sinta_batch_status)
 
         self.sinta_scope_note = QLabel(
-            "Pemeriksaan saat ini hanya mencocokkan jurnal dengan direktori SINTA. "
+            "Daftar artikel berasal dari Academic Research. SINTA memeriksa akreditasi jurnal dan tahun berlakunya; "
+            "DOI artikel dicocokkan langsung bila tercantum pada profil resmi. "
             "Peringkat dan status akreditasi dapat berubah, jadi hasil ini adalah "
             "snapshot yang perlu diperiksa kembali. Akreditasi atau indeks lain "
             "belum diperiksa."
@@ -10949,7 +10959,7 @@ class CopyrightPage(QWidget):
         card_layout.addWidget(card_title)
 
         copyright_text = QLabel(
-            "© 2026 UIN HIJAU v5.\n"
+            "© 2026 Metriks Studio.\n"
             "Teks sementara untuk pratinjau tampilan."
         )
         copyright_text.setObjectName("aboutBody")
@@ -11552,10 +11562,11 @@ class MainWindow(QMainWindow):
         self._add_nav_section(layout, "WORKSPACE")
         layout.itemAt(layout.count() - 1).widget().setFixedHeight(32)
         layout.addSpacing(2)
-        self._add_nav_group(layout, 263, 15, 8, (
+        self._add_nav_group(layout, 311, 15, 8, (
             ("dataset_search", "dataset-search.svg", "Dataset Search"),
             ("dataset", "dataset.svg", "Dataset"),
             ("analysis", "analysis.svg", "Analysis"),
+            ("editor_analysis", "editor-analysis.svg", "Editor Analysis"),
             ("ml", "ml-intelligence.svg", "ML Intelligence"),
             ("dashboard", "overview.svg", "Overview"),
         ))
@@ -11574,17 +11585,17 @@ class MainWindow(QMainWindow):
 
         footer = QWidget()
         footer.setObjectName("overviewSidebarFooter")
-        footer.setFixedHeight(176)
+        footer.setFixedHeight(136)
         footer_layout = QVBoxLayout(footer)
-        footer_layout.setContentsMargins(17, 0, 0, 0)
-        footer_layout.setSpacing(9)
+        footer_layout.setContentsMargins(12, 0, 0, 0)
+        footer_layout.setSpacing(6)
         self.sidebar_footer_layout = footer_layout
 
         self.sidebar_footer_buttons = {}
         for key, label, icon_name, width, callback in (
-            ("about", "About", "overview-about.svg", 151, self.open_about),
-            ("copyright", "Copyright", "copyright.svg", 201, self.open_copyright),
-            ("help", "Help", "help.svg", 140, self.open_help),
+            ("about", "About", "overview-about.svg", 116, self.open_about),
+            ("copyright", "Copyright", "copyright.svg", 146, self.open_copyright),
+            ("help", "Help", "help.svg", 104, self.open_help),
         ):
             button = QPushButton(label)
             button.setObjectName("overviewSidebarLink")
@@ -11593,8 +11604,8 @@ class MainWindow(QMainWindow):
             button.setProperty("preferredWidth", width)
             button.setToolTip(label)
             button.setIcon(QIcon(str(_resource_path(Path("assets") / "icons" / icon_name))))
-            button.setIconSize(QSize(35 if key == "about" else 37, 35 if key == "about" else 37))
-            button.setFixedSize(width, 50)
+            button.setIconSize(QSize(24, 24))
+            button.setFixedSize(width, 40)
             button.setCursor(Qt.PointingHandCursor)
             apply_card_shadow(button)
             button.clicked.connect(callback)
@@ -11654,6 +11665,7 @@ class MainWindow(QMainWindow):
                     "dataset_search": (24, 24),
                     "dataset": (30, 30),
                     "analysis": (24, 24),
+                    "editor_analysis": (24, 24),
                     "ml": (24, 24),
                     "dashboard": (26, 26),
                     "research": (30, 24),
@@ -11723,7 +11735,7 @@ class MainWindow(QMainWindow):
         self.page_title.setObjectName("topbarTitle")
         self.page_title.hide()
         layout.addStretch()
-        version = QLabel("Metriks v5.0.0")
+        version = QLabel("Metriks Studio")
         version.setObjectName("topbarVersion")
         self.topbar_version = version
         version_container = QWidget()
@@ -11813,16 +11825,16 @@ class MainWindow(QMainWindow):
             button.setProperty("compact", compact)
             button.setText("" if compact else button.property("labelText"))
             button.setFixedSize(
-                44 if compact else button.property("preferredWidth"),
-                44 if compact else 50,
+                40 if compact else button.property("preferredWidth"),
+                40,
             )
-            button.setIconSize(QSize(22, 22) if compact else QSize(35, 35))
+            button.setIconSize(QSize(20, 20) if compact else QSize(24, 24))
             button.setProperty("active", page_key == key)
             button.style().unpolish(button)
             button.style().polish(button)
-        self.sidebar_footer_layout.setContentsMargins(4 if compact else 17, 0, 0, 0)
-        self.sidebar_footer_layout.setSpacing(6 if compact else 9)
-        self.sidebar_footer.setFixedHeight(152 if compact else 176)
+        self.sidebar_footer_layout.setContentsMargins(4 if compact else 12, 0, 0, 0)
+        self.sidebar_footer_layout.setSpacing(4 if compact else 6)
+        self.sidebar_footer.setFixedHeight(132 if compact else 136)
         self.overview_topbar_frame.setVisible(overview_mode)
         self.topbar.setProperty("overviewMode", overview_mode)
         self.topbar.style().unpolish(self.topbar)

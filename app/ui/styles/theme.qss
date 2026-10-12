@@ -709,17 +709,17 @@ QWidget#overviewSidebarFooter { background: transparent; border: none; }
 QPushButton#overviewSidebarLink {
     background: rgba(255, 255, 255, 0.45);
     border: none;
-    border-radius: 15px;
-    color: #777777;
-    font-size: 25px;
+    border-radius: 12px;
+    color: #303030;
+    font-size: 17px;
     font-weight: 600;
-    padding: 0 15px;
+    padding: 0 10px;
     text-align: left;
 }
 QPushButton#overviewSidebarLink[compact="true"] { padding: 0; border-radius: 12px; }
 QPushButton#overviewSidebarLink:hover { background: #eaf3ff; color: var(--blue); }
 QPushButton#overviewSidebarLink:pressed { background: var(--blue-active); }
-QPushButton#overviewSidebarLink[active="true"] { background: #ffffff; color: #757575; }
+QPushButton#overviewSidebarLink[active="true"] { background: #ffffff; color: #303030; }
 QPushButton#overviewSidebarLink[active="true"]:hover { background: #eaf3ff; color: var(--blue); }
 
 /* About frame */
