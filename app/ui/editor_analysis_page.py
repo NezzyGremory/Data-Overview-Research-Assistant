@@ -3,22 +3,30 @@
 from __future__ import annotations
 
 import sys
+import re
 import tempfile
 import textwrap
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QProcess, QProcessEnvironment, QTimer
+from PySide6.QtCore import (
+    QEasingCurve,
+    QProcess,
+    QProcessEnvironment,
+    QPropertyAnimation,
+    QTimer,
+    Qt,
+)
 from PySide6.QtGui import QImage, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
     QBoxLayout,
     QComboBox,
     QFrame,
+    QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
     QListWidget,
     QListWidgetItem,
-    QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -33,6 +41,8 @@ from app.ui.style_utils import apply_card_shadow
 
 class EditorAnalysisPage(QWidget):
     """Guided notebook-style editor with editable templates and local run output."""
+
+    TARGET_ASSIGNMENT = re.compile(r"(?m)^target_column\s*=.*$")
 
     MODEL_METHODS = {
         "Klasifikasi": [
@@ -525,16 +535,35 @@ print(f"Rata-rata: {scores.mean():.3f} ± {scores.std():.3f}")
                 name: self._build_model_template(category, import_line, estimator)
                 for name, import_line, estimator in methods
             }
-        return groups
+        return {
+            category: {
+                name: self._remove_template_comments(source)
+                for name, source in templates.items()
+            }
+            for category, templates in groups.items()
+        }
+
+    @staticmethod
+    def _remove_template_comments(source: str) -> str:
+        clean_lines = [line for line in source.splitlines() if not line.lstrip().startswith("#")]
+        return "\n".join(clean_lines).strip() + "\n"
 
     @staticmethod
     def _build_model_template(category: str, import_line: str, estimator: str) -> str:
-        shared = f'''# Template metode: {category}. Sesuaikan target dan kolom sebelum menjalankan.
-import numpy as np
+        shared = f'''import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 {import_line}
 '''
+        dense_encoder = any(
+            model_name in estimator
+            for model_name in (
+                "GaussianNB(",
+                "LinearDiscriminantAnalysis(",
+                "HistGradientBoosting",
+                "CatBoost",
+            )
+        )
         if category == "Klasifikasi":
             return shared + f'''from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
@@ -544,19 +573,52 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, ConfusionMatrixDisplay, accuracy_score, f1_score
 
 target_column = "target"
+if target_column not in df.columns:
+    raise ValueError(f"Kolom target '{{target_column}}' tidak ditemukan. Pilih kolom target dari daftar.")
 data = df.dropna(subset=[target_column]).copy()
+if len(data) < 5:
+    raise ValueError("Diperlukan sedikitnya 5 baris dengan target yang terisi untuk klasifikasi.")
 X = data.drop(columns=[target_column])
+if X.shape[1] == 0:
+    raise ValueError("Dataset harus memiliki sedikitnya 1 kolom fitur selain target.")
+X = X.replace([np.inf, -np.inf], np.nan)
 y = LabelEncoder().fit_transform(data[target_column].astype(str))
+if len(np.unique(y)) < 2:
+    raise ValueError("Klasifikasi memerlukan sedikitnya 2 kelas pada kolom target.")
 numeric = X.select_dtypes(include="number").columns
-categorical = X.select_dtypes(include=["str", "category", "bool"]).columns
-prepare = ColumnTransformer([
-    ("numeric", Pipeline([("impute", SimpleImputer(strategy="median")), ("scale", StandardScaler())]), numeric),
-    ("category", Pipeline([("impute", SimpleImputer(strategy="most_frequent")), ("encode", OneHotEncoder(handle_unknown="ignore"))]), categorical),
-])
+categorical = X.select_dtypes(exclude="number").columns
+transformers = []
+if len(numeric):
+    numeric_pipeline = Pipeline([
+        ("impute", SimpleImputer(strategy="median", keep_empty_features=True)),
+        ("scale", StandardScaler()),
+    ])
+    transformers.append(("numeric", numeric_pipeline, numeric))
+if len(categorical):
+    categorical_pipeline = Pipeline([
+        ("impute", SimpleImputer(strategy="most_frequent", keep_empty_features=True)),
+        ("encode", OneHotEncoder(
+            handle_unknown="ignore",
+            sparse_output={not dense_encoder},
+        )),
+    ])
+    transformers.append(("category", categorical_pipeline, categorical))
+prepare = ColumnTransformer(transformers)
 model = Pipeline([("prepare", prepare), ("model", {estimator})])
-counts = np.bincount(y)
-stratify = y if len(counts) > 1 and counts.min() >= 2 else None
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=stratify)
+test_rows = max(1, int(np.ceil(len(y) * 0.2)))
+class_counts = pd.Series(y).value_counts()
+stratify = None
+if (
+    class_counts.min() >= 2
+    and test_rows >= len(class_counts)
+    and len(y) - test_rows >= len(class_counts)
+):
+    stratify = y
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42, stratify=stratify
+)
+if hasattr(model.named_steps["model"], "n_neighbors"):
+    model.set_params(model__n_neighbors=min(model.named_steps["model"].n_neighbors, len(X_train)))
 model.fit(X_train, y_train)
 y_pred = model.predict(X_test)
 print(f"Accuracy: {{accuracy_score(y_test, y_pred):.3f}}")
@@ -575,17 +637,43 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 target_column = "target"
-data = df.dropna(subset=[target_column]).copy()
+if target_column not in df.columns:
+    raise ValueError(f"Kolom target '{{target_column}}' tidak ditemukan. Pilih kolom target dari daftar.")
+data = df.copy()
+data[target_column] = pd.to_numeric(data[target_column], errors="coerce")
+data = data.dropna(subset=[target_column]).copy()
+if len(data) < 3:
+    raise ValueError("Diperlukan sedikitnya 3 baris numerik dengan target yang terisi untuk regresi.")
 X = data.drop(columns=[target_column])
+if X.shape[1] == 0:
+    raise ValueError("Dataset harus memiliki sedikitnya 1 kolom fitur selain target.")
+X = X.replace([np.inf, -np.inf], np.nan)
 y = data[target_column]
 numeric = X.select_dtypes(include="number").columns
-categorical = X.select_dtypes(include=["str", "category", "bool"]).columns
-prepare = ColumnTransformer([
-    ("numeric", Pipeline([("impute", SimpleImputer(strategy="median")), ("scale", StandardScaler())]), numeric),
-    ("category", Pipeline([("impute", SimpleImputer(strategy="most_frequent")), ("encode", OneHotEncoder(handle_unknown="ignore"))]), categorical),
-])
+categorical = X.select_dtypes(exclude="number").columns
+transformers = []
+if len(numeric):
+    numeric_pipeline = Pipeline([
+        ("impute", SimpleImputer(strategy="median", keep_empty_features=True)),
+        ("scale", StandardScaler()),
+    ])
+    transformers.append(("numeric", numeric_pipeline, numeric))
+if len(categorical):
+    categorical_pipeline = Pipeline([
+        ("impute", SimpleImputer(strategy="most_frequent", keep_empty_features=True)),
+        ("encode", OneHotEncoder(
+            handle_unknown="ignore",
+            sparse_output={not dense_encoder},
+        )),
+    ])
+    transformers.append(("category", categorical_pipeline, categorical))
+prepare = ColumnTransformer(transformers)
 model = Pipeline([("prepare", prepare), ("model", {estimator})])
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42
+)
+if hasattr(model.named_steps["model"], "n_neighbors"):
+    model.set_params(model__n_neighbors=min(model.named_steps["model"].n_neighbors, len(X_train)))
 model.fit(X_train, y_train)
 y_pred = model.predict(X_test)
 rmse = mean_squared_error(y_test, y_pred) ** 0.5
@@ -608,16 +696,29 @@ from sklearn.metrics import silhouette_score
 
 X = df.select_dtypes(include="number").replace([np.inf, -np.inf], np.nan)
 X = X.dropna(axis=1, how="all")
-X_scaled = StandardScaler().fit_transform(SimpleImputer(strategy="median").fit_transform(X))
-model = {estimator}
-labels = model.fit_predict(X_scaled)
-print("Jumlah baris per cluster:")
-print(pd.Series(labels).value_counts().sort_index())
-if len(set(labels)) > 1 and len(set(labels)) < len(labels):
-    print(f"Silhouette score: {{silhouette_score(X_scaled, labels):.3f}}")
-coordinates = PCA(n_components=2).fit_transform(X_scaled)
-plt.figure(figsize=(8, 5))
-plt.scatter(coordinates[:, 0], coordinates[:, 1], c=labels, cmap="tab10", alpha=0.7)
+labels = np.array([])
+coordinates = np.empty((0, 2))
+if len(X) < 2 or X.shape[1] == 0:
+    print("Clustering memerlukan sedikitnya 2 baris dan 1 kolom numerik.")
+else:
+    X_scaled = StandardScaler().fit_transform(SimpleImputer(strategy="median", keep_empty_features=True).fit_transform(X))
+    model = {estimator}
+    if hasattr(model, "n_clusters") and model.n_clusters is not None:
+        model.set_params(n_clusters=min(model.n_clusters, len(X_scaled)))
+    if model.__class__.__name__ == "GaussianMixture":
+        model.set_params(n_components=min(model.n_components, len(X_scaled)))
+    labels = model.fit_predict(X_scaled)
+    print("Jumlah baris per cluster:")
+    print(pd.Series(labels).value_counts().sort_index())
+    if len(set(labels)) > 1 and len(set(labels)) < len(labels):
+        print(f"Silhouette score: {{silhouette_score(X_scaled, labels):.3f}}")
+    components = min(2, X_scaled.shape[0], X_scaled.shape[1])
+    coordinates = PCA(n_components=components).fit_transform(X_scaled)
+    if components == 1:
+        coordinates = np.column_stack([coordinates[:, 0], np.zeros(len(coordinates))])
+if len(labels):
+    plt.figure(figsize=(8, 5))
+    plt.scatter(coordinates[:, 0], coordinates[:, 1], c=labels, cmap="tab10", alpha=0.7)
 plt.title("Clustering · {estimator.split('(')[0]}")
 plt.xlabel("PCA 1")
 plt.ylabel("PCA 2")
@@ -629,16 +730,27 @@ from sklearn.decomposition import PCA
 
 X = df.select_dtypes(include="number").replace([np.inf, -np.inf], np.nan)
 X = X.dropna(axis=1, how="all")
-X_scaled = StandardScaler().fit_transform(SimpleImputer(strategy="median").fit_transform(X))
-model = {estimator}
-labels = model.fit_predict(X_scaled)
-print("Jumlah baris normal/anomali:")
-print(pd.Series(labels).value_counts().sort_index())
-anomaly_count = int((labels == -1).sum())
-print(f"Anomali: {{anomaly_count:,}} dari {{len(labels):,}} baris ({{anomaly_count / max(len(labels), 1):.1%}})")
-coordinates = PCA(n_components=2).fit_transform(X_scaled)
-plt.figure(figsize=(8, 5))
-plt.scatter(coordinates[:, 0], coordinates[:, 1], c=labels, cmap="coolwarm", alpha=0.7)
+labels = np.array([])
+coordinates = np.empty((0, 2))
+if len(X) < 2 or X.shape[1] == 0:
+    print("Deteksi anomali memerlukan sedikitnya 2 baris dan 1 kolom numerik.")
+else:
+    X_scaled = StandardScaler().fit_transform(SimpleImputer(strategy="median", keep_empty_features=True).fit_transform(X))
+    model = {estimator}
+    if hasattr(model, "n_neighbors"):
+        model.set_params(n_neighbors=min(model.n_neighbors, len(X_scaled) - 1))
+    labels = model.fit_predict(X_scaled)
+    print("Jumlah baris normal/anomali:")
+    print(pd.Series(labels).value_counts().sort_index())
+    anomaly_count = int((labels == -1).sum())
+    print(f"Anomali: {{anomaly_count:,}} dari {{len(labels):,}} baris ({{anomaly_count / max(len(labels), 1):.1%}})")
+    components = min(2, X_scaled.shape[0], X_scaled.shape[1])
+    coordinates = PCA(n_components=components).fit_transform(X_scaled)
+    if components == 1:
+        coordinates = np.column_stack([coordinates[:, 0], np.zeros(len(coordinates))])
+if len(labels):
+    plt.figure(figsize=(8, 5))
+    plt.scatter(coordinates[:, 0], coordinates[:, 1], c=labels, cmap="coolwarm", alpha=0.7)
 plt.title("Anomaly Detection · {estimator.split('(')[0]}")
 plt.xlabel("PCA 1")
 plt.ylabel("PCA 2")
@@ -725,6 +837,18 @@ plt.tight_layout()
         editor_heading.addWidget(self.reset_button)
         layout.addLayout(editor_heading)
 
+        self.target_row = QHBoxLayout()
+        self.target_label = QLabel("Kolom target")
+        self.target_label.setObjectName("editorAnalysisFieldLabel")
+        self.target_row.addWidget(self.target_label)
+        self.target_combo = QComboBox()
+        self.target_combo.setObjectName("editorAnalysisTargetCombo")
+        self.target_combo.setMinimumWidth(190)
+        self.target_combo.currentTextChanged.connect(self._target_changed)
+        self.target_row.addWidget(self.target_combo)
+        self.target_row.addStretch(1)
+        layout.addLayout(self.target_row)
+
         self.code_editor = QPlainTextEdit()
         self.code_editor.setObjectName("editorAnalysisCodeEditor")
         self.code_editor.setPlaceholderText("Pilih tahapan untuk memuat template kode.")
@@ -771,6 +895,15 @@ plt.tight_layout()
         )
         self.execution_note.setObjectName("editorAnalysisExecutionNote")
         self.execution_note.setWordWrap(True)
+        self._run_opacity_effect = QGraphicsOpacityEffect(self.execution_note)
+        self._run_opacity_effect.setOpacity(1.0)
+        self.execution_note.setGraphicsEffect(self._run_opacity_effect)
+        self._run_animation = QPropertyAnimation(self._run_opacity_effect, b"opacity", self)
+        self._run_animation.setDuration(850)
+        self._run_animation.setStartValue(0.45)
+        self._run_animation.setEndValue(1.0)
+        self._run_animation.setEasingCurve(QEasingCurve.InOutSine)
+        self._run_animation.setLoopCount(-1)
         execution_row.addWidget(self.execution_note, 1)
         self.run_button = QPushButton("Jalankan kode")
         self.run_button.setObjectName("primaryButton")
@@ -846,8 +979,10 @@ plt.tight_layout()
         self.step_description.setText(self.CATEGORY_DESCRIPTIONS.get(step["category"], step["description"]))
         self.template_combo.blockSignals(False)
         self.code_editor.blockSignals(True)
+        step["code"] = self._bind_target_column(step["code"])
         self.code_editor.setPlainText(step["code"])
         self.code_editor.blockSignals(False)
+        self._update_target_controls(step["code"])
 
     def _category_changed(self, category: str):
         if not 0 <= self._selected_step < len(self._steps):
@@ -859,10 +994,11 @@ plt.tight_layout()
         if not selected_template:
             return
         step["template"] = selected_template
-        step["code"] = self.template_groups[category][selected_template]
+        step["code"] = self._bind_target_column(self.template_groups[category][selected_template])
         self.step_title.setText(selected_template)
         self.step_description.setText(self.CATEGORY_DESCRIPTIONS.get(category, ""))
         self.code_editor.setPlainText(step["code"])
+        self._update_target_controls(step["code"])
 
     def _apply_template(self, template_name: str):
         if not 0 <= self._selected_step < len(self._steps):
@@ -871,18 +1007,57 @@ plt.tight_layout()
         category = self.template_category_combo.currentText()
         step["template"] = template_name
         step["category"] = category
-        step["code"] = self.template_groups[category][template_name]
+        step["code"] = self._bind_target_column(self.template_groups[category][template_name])
         self.step_title.setText(template_name)
         self.step_description.setText(self.CATEGORY_DESCRIPTIONS.get(category, ""))
         self.code_editor.blockSignals(True)
         self.code_editor.setPlainText(step["code"])
         self.code_editor.blockSignals(False)
+        self._update_target_controls(step["code"])
 
     def _reset_code(self):
         if not 0 <= self._selected_step < len(self._steps):
             return
         step = self._steps[self._selected_step]
-        self.code_editor.setPlainText(self.template_groups[step["category"]][step["template"]])
+        step["code"] = self._bind_target_column(
+            self.template_groups[step["category"]][step["template"]]
+        )
+        self.code_editor.setPlainText(step["code"])
+        self._update_target_controls(step["code"])
+
+    def _bind_target_column(self, source: str) -> str:
+        target = self.target_combo.currentText() if hasattr(self, "target_combo") else ""
+        if target and self.TARGET_ASSIGNMENT.search(source):
+            return self.TARGET_ASSIGNMENT.sub(f"target_column = {target!r}", source)
+        return source
+
+    def _update_target_controls(self, source: str):
+        visible = bool(self.TARGET_ASSIGNMENT.search(source))
+        self.target_label.setVisible(visible)
+        self.target_combo.setVisible(visible)
+        self.target_combo.setEnabled(self._dataframe is not None and self.target_combo.count() > 0)
+
+    def _target_changed(self, target: str):
+        if not target or not 0 <= self._selected_step < len(self._steps):
+            return
+        source = self.code_editor.toPlainText()
+        if not self.TARGET_ASSIGNMENT.search(source):
+            return
+        source = self.TARGET_ASSIGNMENT.sub(f"target_column = {target!r}", source)
+        self.code_editor.blockSignals(True)
+        self.code_editor.setPlainText(source)
+        self.code_editor.blockSignals(False)
+        self._steps[self._selected_step]["code"] = source
+
+    def _preferred_target(self, columns: list[str]) -> str:
+        by_normalized = {column.casefold(): column for column in columns}
+        for candidate in (
+            "target", "label", "class", "survived", "outcome", "diagnosis",
+            "churn", "y", "price", "saleprice", "medv", "score", "value", "income",
+        ):
+            if candidate in by_normalized:
+                return by_normalized[candidate]
+        return columns[-1] if columns else ""
 
     def _copy_code(self):
         QApplication.clipboard().setText(self.code_editor.toPlainText())
@@ -909,6 +1084,7 @@ plt.tight_layout()
             chart_path = Path(sys.argv[3])
             chart_path.mkdir(parents=True, exist_ok=True)
             df = pd.read_pickle(dataset_path)
+            df.columns = df.columns.map(str)
 
             def display(value):
                 if hasattr(value, "to_string"):
@@ -955,16 +1131,20 @@ plt.tight_layout()
             )
             return
 
-        answer = QMessageBox.warning(
-            self,
-            "Jalankan kode Python?",
-            "Kode yang diedit akan berjalan di komputer ini dan tidak diisolasi dari file atau jaringan. "
-            "Jalankan hanya kode yang kamu percaya. Kode menerima salinan dataset aktif.",
-            QMessageBox.Yes | QMessageBox.Cancel,
-            QMessageBox.Cancel,
-        )
-        if answer != QMessageBox.Yes:
-            return
+        source = self.code_editor.toPlainText()
+        if self.TARGET_ASSIGNMENT.search(source):
+            selected_target = self.target_combo.currentText()
+            available_columns = {str(column) for column in self._dataframe.columns}
+            if not selected_target or selected_target not in available_columns:
+                self.execution_note.setText("Pilih kolom target yang tersedia pada dataset.")
+                self._append_output("Analisis belum dijalankan: kolom target belum dipilih atau tidak tersedia.\n")
+                self.output_tabs.setCurrentIndex(0)
+                return
+            source = self.TARGET_ASSIGNMENT.sub(f"target_column = {selected_target!r}", source)
+            self.code_editor.blockSignals(True)
+            self.code_editor.setPlainText(source)
+            self.code_editor.blockSignals(False)
+            self._save_current_code()
 
         try:
             self._run_tempdir = tempfile.TemporaryDirectory(prefix="dora_editor_")
@@ -975,7 +1155,7 @@ plt.tight_layout()
             chart_path = run_dir / "charts"
             chart_path.mkdir()
             self._dataframe.to_pickle(dataset_path)
-            code_path.write_text(self.code_editor.toPlainText(), encoding="utf-8")
+            code_path.write_text(source, encoding="utf-8")
             runner_path.write_text(
                 self._build_runner_script(code_path, chart_path), encoding="utf-8"
             )
@@ -991,6 +1171,7 @@ plt.tight_layout()
         self.output_tabs.setTabText(1, "Grafik")
         self.output_tabs.setCurrentIndex(0)
         self.execution_note.setText("Analisis sedang dijalankan…")
+        self._run_animation.start()
         self.run_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
 
@@ -1061,6 +1242,8 @@ plt.tight_layout()
 
     def _finish_execution(self, exit_code: int):
         self._run_timeout.stop()
+        self._run_animation.stop()
+        self._run_opacity_effect.setOpacity(1.0)
         self._load_graphs()
         self.run_button.setEnabled(self._dataframe is not None)
         self.cancel_button.setEnabled(False)
@@ -1131,8 +1314,36 @@ plt.tight_layout()
         self._dataset_name = filename or "Dataset"
         if dataframe is None:
             self.dataset_badge.setText("Dataset belum dimuat")
+            self.target_combo.blockSignals(True)
+            self.target_combo.clear()
+            self.target_combo.blockSignals(False)
+            self._update_target_controls(self.code_editor.toPlainText())
             self.run_button.setEnabled(False)
             return
+        columns = [str(column) for column in dataframe.columns]
+        current_target = self.target_combo.currentText()
+        selected_target = current_target if current_target in columns else self._preferred_target(columns)
+        self.target_combo.blockSignals(True)
+        self.target_combo.clear()
+        self.target_combo.addItems(columns)
+        if selected_target:
+            self.target_combo.setCurrentText(selected_target)
+        self.target_combo.blockSignals(False)
+        for step in self._steps:
+            existing = re.search(r"(?m)^target_column\s*=\s*(['\"])(.*?)\1\s*$", step["code"])
+            if self.TARGET_ASSIGNMENT.search(step["code"]):
+                existing_target = existing.group(2) if existing else ""
+                if existing_target not in columns:
+                    step["code"] = self.TARGET_ASSIGNMENT.sub(
+                        f"target_column = {selected_target!r}", step["code"]
+                    )
+        if 0 <= self._selected_step < len(self._steps):
+            step = self._steps[self._selected_step]
+            step["code"] = self._bind_target_column(step["code"])
+            self.code_editor.blockSignals(True)
+            self.code_editor.setPlainText(step["code"])
+            self.code_editor.blockSignals(False)
+            self._update_target_controls(step["code"])
         self.dataset_badge.setText(f"{self._dataset_name} · {len(dataframe):,} baris")
         self.run_button.setEnabled(self._process is None)
 
