@@ -1083,6 +1083,8 @@ class MiniBarChart(QFrame):
 
 
 from app.ui.overview_page import DashboardPage
+from app.ui.about_page import AboutPage
+
 class SwitchCheckBox(QCheckBox):
     """Checkbox painted as a pill switch while keeping normal Qt behavior."""
 
@@ -10908,127 +10910,6 @@ class ResearchInsightsPage(QWidget):
             self.gap_page.ensure_explanation()
 
 
-class AboutPage(QWidget):
-    """Application information, authorship, licensing, and privacy notes."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        container = QWidget()
-        content = QVBoxLayout(container)
-        content.setContentsMargins(28, 24, 28, 28)
-        content.setSpacing(16)
-        scroll.setWidget(container)
-        root.addWidget(scroll)
-
-        heading = QLabel("About")
-        heading.setObjectName("aboutPageTitle")
-        content.addWidget(heading)
-
-        subtitle = QLabel(
-            "Informasi singkat tentang aplikasi, pengembang, dan lisensinya."
-        )
-        subtitle.setObjectName("aboutPageSubtitle")
-        subtitle.setWordWrap(True)
-        content.addWidget(subtitle)
-
-        hero = QFrame()
-        hero.setObjectName("aboutHero")
-        hero_layout = QHBoxLayout(hero)
-        hero_layout.setContentsMargins(24, 22, 24, 22)
-        hero_layout.setSpacing(18)
-
-        logo = QLabel()
-        logo.setObjectName("aboutLogo")
-        logo.setFixedSize(76, 76)
-        logo.setAlignment(Qt.AlignCenter)
-        logo_path = _resource_path("assets/logo.jpg")
-        if logo_path.exists():
-            pixmap = QPixmap(str(logo_path))
-            if not pixmap.isNull():
-                logo.setPixmap(pixmap.scaled(76, 76, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        else:
-            logo.setText("DR")
-        hero_layout.addWidget(logo, 0, Qt.AlignVCenter)
-
-        identity = QVBoxLayout()
-        identity.setSpacing(5)
-        app_name = QLabel("Dataset Research")
-        app_name.setObjectName("aboutHeroTitle")
-        identity.addWidget(app_name)
-        app_description = QLabel(
-            "Analisis dataset dan dukungan riset dalam satu aplikasi desktop."
-        )
-        app_description.setObjectName("aboutBody")
-        app_description.setWordWrap(True)
-        identity.addWidget(app_description)
-        version_label = QLabel("Versi 4.0.0")
-        version_label.setObjectName("aboutVersion")
-        identity.addWidget(version_label)
-        hero_layout.addLayout(identity, 1)
-        content.addWidget(hero)
-
-        cards = QGridLayout()
-        cards.setHorizontalSpacing(14)
-        cards.setVerticalSpacing(14)
-        content.addLayout(cards)
-        self._about_cards_layout = cards
-        self._about_cards = []
-
-        def add_card(row, column, title, body):
-            card = QFrame()
-            card.setObjectName("aboutInfoCard")
-            card_layout = QVBoxLayout(card)
-            card_layout.setContentsMargins(18, 16, 18, 18)
-            card_layout.setSpacing(8)
-            card_title = QLabel(title)
-            card_title.setObjectName("aboutCardTitle")
-            card_layout.addWidget(card_title)
-            card_body = QLabel(body)
-            card_body.setObjectName("aboutBody")
-            card_body.setWordWrap(True)
-            card_layout.addWidget(card_body)
-            card_layout.addStretch()
-            cards.addWidget(card, row, column)
-            self._about_cards.append(card)
-
-        add_card(0, 0, "Pengembang", "Abdul Muhis\nSains Data, UIN K.H. Abdurrahman Wahid Pekalongan")
-        add_card(
-            0, 1, "Copyright",
-            "© 2026 UIN HIJAU v5.\n"
-            "Teks sementara untuk pratinjau tampilan.",
-        )
-        add_card(
-            1, 0, "Data dan privasi",
-            "Telemetri penggunaan hanya memuat event, versi aplikasi, status, dan durasi. "
-            "File dataset, path, hasil analisis, dan API key tidak masuk ke telemetri. "
-            "Fitur Gemini mengirim permintaan ke layanan Google saat digunakan.",
-        )
-        add_card(
-            1, 1, "Ruang lingkup aplikasi",
-            "Profil dan kualitas dataset, evaluasi machine learning, pencarian paper, "
-            "research landscape dan gap, serta laporan penelitian.",
-        )
-        content.addStretch()
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        cards = getattr(self, "_about_cards_layout", None)
-        if cards is None:
-            return
-        columns = 2 if event.size().width() >= 1000 else 1
-        for card in self._about_cards:
-            cards.removeWidget(card)
-        for index, card in enumerate(self._about_cards):
-            cards.addWidget(card, index // columns, index % columns)
-
-
 class CopyrightPage(QWidget):
     """Preview-only copyright details for the team named in the top bar."""
 
@@ -11703,6 +11584,7 @@ class MainWindow(QMainWindow):
             button.setIconSize(QSize(35 if key == "about" else 37, 35 if key == "about" else 37))
             button.setFixedSize(width, 50)
             button.setCursor(Qt.PointingHandCursor)
+            apply_card_shadow(button)
             button.clicked.connect(callback)
             footer_layout.addWidget(button)
             self.sidebar_footer_buttons[key] = button
@@ -11718,6 +11600,7 @@ class MainWindow(QMainWindow):
         help_button.setIconSize(QSize(35, 35))
         help_button.setFixedSize(140, 50)
         help_button.setCursor(Qt.PointingHandCursor)
+        apply_card_shadow(help_button)
         help_button.clicked.connect(self.open_help)
         help_layout.addWidget(help_button, 0, Qt.AlignTop)
         help_layout.addSpacing(64)
@@ -11943,25 +11826,43 @@ class MainWindow(QMainWindow):
         return super().eventFilter(watched, event)
 
     def _sync_page_chrome(self, window_width, window_height):
-        compact = self.sidebar_scroll.width() < 288
-        overview_mode = getattr(self, "_current_page_key", "dashboard") == "dashboard"
+        page_key = getattr(self, "_current_page_key", "dashboard")
+        overview_mode = page_key == "dashboard"
+        about_mode = page_key == "about"
+        footer_mode = overview_mode or about_mode
+        blank_topbar_mode = footer_mode
+        sidebar_width = (
+            418 if about_mode and window_width >= 1366
+            else min(418, max(76, round(window_width * 0.23)))
+        )
+        if self.sidebar_scroll.width() != sidebar_width:
+            self.sidebar_scroll.setFixedWidth(sidebar_width)
+        compact = sidebar_width < 288
         self.sidebar_layout.setContentsMargins(
             8 if compact else 11,
             20 if compact else 70,
             8 if compact else 14,
-            16 if compact else (44 if overview_mode else 24),
+            16 if compact else (44 if footer_mode else 24),
         )
         self.sidebar_logo.setFixedSize(48 if compact else 82, 48 if compact else 82)
         for group_index, (group, group_layout) in enumerate(zip(self.sidebar_group_cards, self.sidebar_group_layouts)):
             group_layout.setContentsMargins(
-            (4 if compact else 41),
+            (4 if compact else (35 if about_mode else 41)),
             (10 if compact else (15 if group_index == 0 else 6)),
-            (4 if compact else 9),
+            (4 if compact else (15 if about_mode else 9)),
             (10 if compact else (8 if group_index == 0 else 17)),
             )
             group.setProperty("compact", compact)
             group.style().unpolish(group)
             group.style().polish(group)
+        for button in getattr(self, "nav_buttons", {}).values():
+            row = button.layout()
+            if row is not None:
+                row.setContentsMargins(11 if about_mode else 5, 0, 0, 0)
+        sidebar = self.sidebar_scroll.widget()
+        sidebar.setProperty("figmaAbout", about_mode)
+        sidebar.style().unpolish(sidebar)
+        sidebar.style().polish(sidebar)
         self.brand_text_container.setVisible(not compact)
         for label in self.nav_text_widgets:
             label.setVisible(not compact)
@@ -11970,7 +11871,7 @@ class MainWindow(QMainWindow):
 
         compact_topbar = window_width < 850
         self.topbar.setFixedHeight(
-            146 if overview_mode else 78 if window_height < 620 else 124
+            146 if overview_mode else 124 if about_mode else 78 if window_height < 620 else 124
         )
         self.topbar_layout.setContentsMargins(
             12 if compact_topbar else 34,
@@ -11982,10 +11883,14 @@ class MainWindow(QMainWindow):
             link.setText("" if compact_topbar else self.topbar_link_labels[key])
             link.setToolTip(self.topbar_link_labels[key])
             link.setIconSize(QSize(20 if compact_topbar else 35, 20 if compact_topbar else 35))
-            link.setVisible(not overview_mode)
-        self.topbar_divider.setVisible(not compact_topbar and not overview_mode)
-        self.topbar_version_container.setVisible(not compact_topbar and not overview_mode)
-        self.sidebar_footer.setVisible(overview_mode)
+            link.setVisible(not blank_topbar_mode)
+        self.topbar_divider.setVisible(not compact_topbar and not blank_topbar_mode)
+        self.topbar_version_container.setVisible(not compact_topbar and not blank_topbar_mode)
+        self.sidebar_footer.setVisible(footer_mode)
+        for key, button in self.sidebar_footer_buttons.items():
+            button.setProperty("active", about_mode and key == "about")
+            button.style().unpolish(button)
+            button.style().polish(button)
         self.overview_topbar_frame.setVisible(overview_mode)
         self.topbar.setProperty("overviewMode", overview_mode)
         self.topbar.style().unpolish(self.topbar)
@@ -12004,7 +11909,7 @@ class MainWindow(QMainWindow):
         self.page_stack.setCurrentWidget(page)
         self._current_page_key = key
         self.page_title.setText(self._page_titles[key])
-        self.set_active_button(key)
+        self.set_active_button("dashboard" if key == "about" else key)
         self._set_topbar_active(key)
         self._sync_page_chrome(self.width(), self.height())
 

@@ -12,8 +12,8 @@ Sumber desain: DORA, Page 1 (`oLQhZyWW2vIPM9FmqvYewD`). Ukuran frame utama: **19
 | Analysis | `31:406` | 1920 × 1080 | `AnalysisPage` | selesai |
 | Dataset Search | `41:221` | 1920 × 1080 | `DatasetSearchPage` | selesai |
 | Research Landscape | `54:843` | 1920x1080 | `ResearchLandscapeToolPage` di `ResearchInsightsPage` | selesai |
-| Overview, versi terbaru | `144:275` | 1920 frame | `DashboardPage` | selesai |
-| About | `141:373` | 1920 × 1080 | `AboutPage` | belum |
+| Overview, versi terbaru | `144:275` | 1920 x 1080 | `DashboardPage` | selesai |
+| About | `141:373` | 1920 x 1080 | `AboutPage` | selesai |
 | Overview lama/duplikat, tidak dipakai | `104:192` | 1920 × 1080 | duplikat `DashboardPage` | dilewati — versi lama |
 
 Komponen lepas pada canvas: `Drop duplicates` (`24:95`, 172 × 38 px), `Full missing values` (`31:390`, 204 × 38 px), `Remove column` (`31:395`, 182 × 38 px), dan ikon informasi (`144:520`, 16 × 16 px). Tiga chip cleaning termasuk bagian Dataset terisi.
@@ -31,7 +31,7 @@ Gaya dasar yang dibaca dari Figma: kanvas `#F1F7FF`; biru `#006BB8`, `#0071C2`, 
 | Dataset Search | selesai | Judul, deskripsi, panel pencarian, dua kolom kartu hasil, metadata, file, dan tombol dicocokkan ke koordinat node `41:221`. Kontrol pencarian dan aksi download tetap memakai handler lama. Screenshot 1920×1080 dibandingkan dengan Figma; 1366×768 diperiksa untuk susunan responsif. |
 | Overview | selesai | Implementasi frame `144:275`; judul, temuan, pipeline, dan tiga kartu mengikuti frame. Tombol laporan dan detail tetap memakai handler lama. Screenshot 1920x1080 dibandingkan dengan Figma; 1366x768 diperiksa untuk susunan responsif. |
 | Research Landscape | selesai | Tombol `Refresh Landscape`, ringkasan 3 kartu, distribusi metode, dan venue publikasi dicocokkan ke node `54:843`. Tab internal disembunyikan; navigasi sidebar ke Research Gap tetap aktif. Screenshot 1920x1080 dibandingkan dengan frame Figma; 1366x768 diperiksa dan konten bertumpuk/bergulir tanpa tumpang tindih. |
-| About | belum | Ada frame Figma. |
+| About | selesai | Deskripsi aplikasi dan kartu model mengikuti frame `141:373`; aset logo diambil dari node Figma. Teks, menu About aktif, dan ukuran frame dicocokkan. Navigasi sidebar tetap memakai callback lama. Screenshot 1920x1080 dibandingkan dengan Figma; 1366x768 diperiksa agar subtitle membungkus dan kartu bertambah tinggi tanpa bertumpuk. |
 | ML Intelligence | dilewati | Tidak ada frame halaman di Figma. |
 | Academic Research | dilewati | Tidak ada frame halaman di Figma. |
 | Papers | dilewati | Tidak ada frame halaman di Figma. |
@@ -62,5 +62,6 @@ Nama menu utama lainnya sudah sejalan dengan Figma. Navigasi dan backend memakai
 - Bukti Dataset Search: `screenshots/app-dataset-search-final.png` dan uji responsif `screenshots/app-dataset-search-1366x768.png`.
 - Bukti Research Landscape: `screenshots/app-landscape-final.png` dan uji responsif `screenshots/app-landscape-1366x768.png`.
 - Bukti Overview: `screenshots/app-overview-final.png` dan `screenshots/app-overview-1366x768.png`.
+- Bukti About: `screenshots/app-about-final.png` dan `screenshots/app-about-1366x768.png`.
 - Pada 1366×768, kartu di halaman Dataset kosong ditumpuk agar tidak terpotong horizontal; pada 1920×1080 susunannya mengikuti frame.
 - Logika backend, worker, koneksi signal/slot, data runtime, dan database tidak boleh diubah.

@@ -34,6 +34,8 @@
 /* @overview-green: #098e00 */
 /* @overview-blue-soft: #e8f1ff */
 /* @overview-report-muted: #c9e0ff */
+/* @about-card-bg: rgba(255, 255, 255, 0.5) */
+/* @about-chip-bg: rgba(201, 224, 255, 0.5) */
 
 QMainWindow,
 #appRoot,
@@ -705,7 +707,7 @@ QProgressBar#overviewModelProgress {
 QProgressBar#overviewModelProgress::chunk { background: var(--blue); border: none; border-radius: 4px; }
 QWidget#overviewSidebarFooter { background: transparent; border: none; }
 QPushButton#overviewSidebarLink {
-    background: rgba(255, 255, 255, 0.76);
+    background: rgba(255, 255, 255, 0.45);
     border: none;
     border-radius: 15px;
     color: #777777;
@@ -716,6 +718,80 @@ QPushButton#overviewSidebarLink {
 }
 QPushButton#overviewSidebarLink:hover { background: #eaf3ff; color: var(--blue); }
 QPushButton#overviewSidebarLink:pressed { background: var(--blue-active); }
+QPushButton#overviewSidebarLink[active="true"] { background: #ffffff; color: #757575; }
+QPushButton#overviewSidebarLink[active="true"]:hover { background: #eaf3ff; color: var(--blue); }
 QLabel#overviewTeamText { color: #8e8c8c; font-size: 14px; }
+
+/* About frame */
+QScrollArea#aboutFigmaScroll,
+QScrollArea#aboutFigmaScroll::viewport,
+QWidget#aboutFigmaCanvas { background: var(--canvas); border: none; }
+QLabel#aboutFigmaTitle {
+    color: #000000;
+    font-family: "Plus Jakarta Sans";
+    font-size: 32px;
+    font-weight: 700;
+}
+QLabel#aboutFigmaSubtitle { color: #564e4e; font-size: 21px; font-weight: 500; }
+QFrame#aboutApplicationCard,
+QFrame#aboutModelCard {
+    background: var(--about-card-bg);
+    border: 1px solid #c7c6c6;
+    border-radius: 15px;
+}
+QLabel#aboutBrandMark { background: transparent; border: none; }
+QLabel#aboutBrandTitle {
+    color: #0071c2;
+    font-family: "Plus Jakarta Sans";
+    font-size: 45px;
+    font-weight: 800;
+}
+QLabel#aboutBrandSubtitle {
+    color: #8e8c8c;
+    font-family: "Plus Jakarta Sans";
+    font-size: 20px;
+    font-weight: 700;
+}
+QLabel#aboutApplicationDescriptionTitle {
+    color: #0062a8;
+    font-family: "Plus Jakarta Sans";
+    font-size: 20px;
+    font-weight: 700;
+}
+QLabel#aboutApplicationDescription { color: #564e4e; font-size: 21px; font-weight: 500; }
+QFrame#aboutFigmaBadge { background: var(--about-chip-bg); border: none; border-radius: 10px; }
+QLabel#aboutFigmaBadgeText { color: #0062a8; font-size: 14px; font-weight: 600; }
+QFrame#aboutModelIconWrap { background: var(--blue-active); border: none; border-radius: 16px; }
+QLabel#aboutModelTitle {
+    color: #000000;
+    font-family: "Plus Jakarta Sans";
+    font-size: 24px;
+    font-weight: 700;
+}
+QLabel#aboutModelTypeBadge,
+QLabel#aboutModelConfidenceBadge,
+QLabel#aboutModelTargetBadge { border: none; border-radius: 12px; font-size: 14px; font-weight: 600; padding: 0; }
+QLabel#aboutModelTypeBadge { background: #c9e0ff; color: #006bb8; }
+QLabel#aboutModelConfidenceBadge { background: rgba(148, 255, 165, 0.5); color: #098e00; }
+QLabel#aboutModelTargetBadge { background: rgba(199, 198, 198, 0.3); color: #564e4e; }
+QLabel#aboutModelCaption { color: #564e4e; font-size: 12px; font-weight: 600; }
+QLabel#aboutModelName { color: #564e4e; font-size: 19px; }
+QProgressBar#aboutModelProgress {
+    background: #e3efff;
+    border: none;
+    border-radius: 4px;
+    max-height: 8px;
+    min-height: 8px;
+}
+QProgressBar#aboutModelProgress::chunk {
+    background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0, stop: 0 #bcd9ff, stop: 1 #006bb8);
+    border: none;
+    border-radius: 4px;
+}
+QLabel#aboutModelScore { color: #000000; font-size: 12px; font-weight: 600; }
+QLabel#aboutModelDetails { color: #0062a8; font-size: 10px; font-weight: 700; }
+QWidget#sidebar[figmaAbout="true"] QLabel#brandSubtitle { color: #8e8c8c; font-size: 20px; font-weight: 700; }
+QWidget#sidebar[figmaAbout="true"] QLabel#sectionLabel { color: #8e8c8c; font-size: 16px; }
+QWidget#sidebar[figmaAbout="true"] QLabel#navText { color: #222222; font-size: 23px; font-weight: 600; }
 
 /* Notebook-style plot area uses the same font and palette as the UI. */
