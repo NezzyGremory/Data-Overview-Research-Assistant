@@ -83,22 +83,24 @@ QLabel#cardDescription { font-size: 16px; }
 #brandAccent { color: var(--blue); }
 #brandTitle {
     font-family: "Plus Jakarta Sans";
-    font-size: 34px;
+    font-size: 45px;
     font-weight: 800;
 }
-#brandSubtitle { color: var(--body); font-size: 14px; }
+#brandSubtitle { color: var(--body); font-size: 18px; font-weight: 600; }
 #sectionLabel {
     color: var(--muted);
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 700;
     letter-spacing: 1px;
-    padding: 8px 10px 4px;
+    padding: 3px 0 4px 50px;
 }
+#sidebarMenuCard { background: var(--surface); border: none; border-radius: var(--card-radius); }
+#sidebarMenuCard[compact="true"] { border-radius: 0; }
 #navButton {
     background: transparent;
     border: 1px solid transparent;
     border-radius: var(--button-radius);
-    min-height: 50px;
+    min-height: 43px;
     padding: 0 12px;
     text-align: left;
 }
@@ -131,10 +133,10 @@ QLabel#cardDescription { font-size: 16px; }
     border-radius: var(--pill-radius);
     color: var(--body);
     min-height: 50px;
-    padding: 0 18px;
-    font-size: 18px;
+    padding: 0 10px;
+    font-size: 25px;
 }
-#topbarLink::icon { width: 20px; height: 20px; }
+#topbarLink::icon { width: 35px; height: 35px; }
 #topbarLink:hover { background: var(--canvas); }
 #topbarLink:pressed { background: var(--blue-active); }
 #topbarLink[active="true"] {
@@ -142,10 +144,14 @@ QLabel#cardDescription { font-size: 16px; }
     color: var(--blue);
 }
 #topbarDivider { background: var(--border-solid); }
-#topbarVersion { color: var(--muted); font-size: 14px; }
+#topbarVersion { color: var(--muted); font-size: 15px; }
+#topbarVersionIcon { background: transparent; }
 QScrollArea { background: var(--canvas); border: none; }
 QAbstractScrollArea { background: var(--canvas); }
 QAbstractScrollArea::viewport { background: var(--canvas); }
+QScrollArea#datasetPreviewScroll,
+QScrollArea#datasetPreviewScroll::viewport,
+QWidget#datasetPreviewContainer { background: var(--canvas); border: none; }
 
 /* Help page */
 #helpPageTitle { color: var(--heading); font-size: 24px; font-weight: 700; }
@@ -205,6 +211,12 @@ QPushButton#primaryButton:hover,
 QPushButton#analyzeButton:hover,
 QPushButton#runButton:hover,
 QPushButton#uploadButton:hover { background: var(--blue-hover); border-color: var(--blue-hover); }
+QPushButton#datasetPreviewUploadButton { background: var(--blue); border: 1px solid var(--blue); border-radius: var(--small-radius); color: var(--surface); min-height: 61px; padding: 0; }
+QPushButton#datasetPreviewUploadButton:hover { background: var(--blue-hover); border-color: var(--blue-hover); }
+QPushButton#datasetPreviewUploadButton:pressed { background: var(--blue); }
+QPushButton#datasetPreviewUploadButton:disabled { background: var(--border-solid); border-color: var(--border-solid); }
+#datasetPreviewUploadIcon { background: transparent; border: none; }
+#datasetPreviewUploadText { color: var(--surface); font-size: 18px; font-weight: 600; }
 QPushButton#primaryButton:pressed,
 QPushButton#analyzeButton:pressed,
 QPushButton#runButton:pressed,
@@ -287,40 +299,60 @@ QScrollBar::handle:vertical { background: var(--border-solid); border-radius: 5p
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 
 /* Dataset: upload */
-#uploadDropzone { background: var(--surface); border: 1px dashed var(--blue-bright); border-radius: var(--small-radius); }
+#uploadPage QLabel#pageSubtitle,
+#datasetPreviewHeader QLabel#pageSubtitle { font-size: 23px; }
+#uploadPageSectionTitle { color: var(--heading); font-family: "Inter"; font-size: 25px; font-weight: 700; }
+#uploadDropzone { background: var(--surface); border: 2px dashed var(--blue-bright); border-radius: var(--small-radius); }
 #uploadDropIcon { background: transparent; border: none; }
 #uploadSearchIcon { background: var(--blue-active); border-radius: 14px; }
 #uploadStepBadge { background: var(--blue-active); border-radius: 20px; color: var(--blue); font-size: 16px; font-weight: 700; }
-#uploadDropTitle { color: var(--heading); font-size: 22px; font-weight: 700; }
-#uploadDropDescription, #uploadStepDetail, #uploadTipsText { color: var(--body); font-size: 14px; }
-#uploadBrowseLink { background: transparent; border: none; color: var(--blue-bright); padding: 0; font-weight: 600; }
+#uploadDropTitle { color: var(--heading); font-size: 25px; font-weight: 700; }
+#uploadDropDescription, #uploadDropSizeLimit { color: var(--body); font-size: 23px; }
+#uploadStepDetail { color: var(--body); font-size: 16px; }
+#uploadTipsText { color: var(--body); font-size: 16px; }
+#uploadBrowseLink { background: transparent; border: none; color: var(--blue-bright); font-size: 23px; padding: 0; font-weight: 600; }
 #uploadBrowseLink:hover { color: var(--blue); text-decoration: underline; }
 #uploadStep, #uploadSearchCard, #uploadTipsCard { background: var(--surface); border: 1px solid var(--border); border-radius: var(--small-radius); }
-#uploadStepTitle { color: var(--heading); font-size: 17px; font-weight: 700; }
-#uploadSearchCard #cardTitle, #uploadTipsCard #cardTitle { color: var(--heading); font-size: 18px; font-weight: 700; }
+#uploadSearchCard, #uploadTipsCard { border-radius: var(--card-radius); }
+#uploadStepTitle { color: var(--heading); font-size: 20px; font-weight: 700; }
+#uploadSearchCard #cardTitle, #uploadTipsCard #cardTitle { color: var(--heading); font-family: "Inter"; font-size: 20px; font-weight: 600; }
+#uploadSearchCard #cardDescription { font-size: 16px; }
+#uploadSearchButton { text-align: left; padding-left: 13px; }
 
 /* Dataset: loaded */
-#datasetPreviewHeader, #datasetPreviewFooter { background: transparent; border: none; }
-#datasetPreviewLoadedBadge { background: #d8f8dd; border-radius: var(--small-radius); color: var(--success); font-size: 13px; font-weight: 700; padding: 8px 12px; }
-#datasetPreviewFileName { color: var(--heading); font-size: 17px; font-weight: 700; }
-#datasetPreviewFileDetails, #datasetPreviewFooterText { color: var(--muted); font-size: 15px; }
-#datasetPreviewFileIcon { background: var(--blue-active); border: 1px solid var(--blue-bright); border-radius: var(--small-radius); color: var(--blue); font-size: 16px; font-weight: 700; }
-#datasetPreviewMetricTitle { color: var(--body); font-size: 12px; font-weight: 700; letter-spacing: 0.6px; }
-#datasetPreviewMetricValue { color: var(--heading); font-size: 28px; font-weight: 700; }
-#datasetPreviewTabs { background: var(--surface); border: 1px solid var(--border); border-radius: var(--small-radius); min-height: 54px; }
-QPushButton#datasetPreviewTab { background: transparent; border: none; border-bottom: 2px solid transparent; border-radius: 0; color: var(--body); font-size: 15px; min-height: 52px; padding: 0 2px; }
+#datasetPreviewHeader { background: transparent; border: none; }
+#datasetPreviewFooter { background: var(--surface); border: none; border-radius: var(--card-radius); }
+#datasetPreviewLoadedBadge { background: var(--quality-good); border-radius: var(--pill-radius); color: var(--success); font-size: 12px; font-weight: 700; padding: 6px 10px; }
+#datasetPreviewFileIdentity { background: var(--surface); border: 2px dashed var(--blue-bright); border-radius: 0; }
+#datasetPreviewFileName { color: var(--heading); font-size: 20px; font-weight: 700; }
+#datasetPreviewFileDetails { color: var(--body); font-size: 17px; }
+#datasetPreviewFooterText { color: var(--muted); font-size: 16px; font-weight: 600; }
+#datasetPreviewFileIcon { background: var(--blue-active); border: none; border-radius: var(--pill-radius); color: var(--blue); font-size: 16px; font-weight: 700; }
+#datasetPreviewFileCard QPushButton#secondaryButton { border-radius: var(--small-radius); }
+#datasetPreviewFooter QPushButton#primaryButton { border-radius: var(--small-radius); }
+#datasetPreviewMetricTitle { color: var(--body); font-size: 14px; font-weight: 700; }
+#datasetPreviewMetricValue { color: var(--heading); font-size: 36px; font-weight: 700; }
+#datasetPreviewMetricDescription { color: #8e8c8c; font-size: 18px; }
+#datasetPreviewTabs { background: transparent; border: none; border-radius: 0; min-height: 54px; }
+#datasetPreviewTabsScroll, #datasetPreviewTabsScroll QWidget { background: transparent; border: none; }
+QPushButton#datasetPreviewTab { background: transparent; border: none; border-bottom: 3px solid transparent; border-radius: 0; color: var(--muted); font-size: 20px; min-height: 54px; padding: 0 16px; }
 QPushButton#datasetPreviewTab:hover { color: var(--blue); }
-QPushButton#datasetPreviewTab[active="true"] { border-bottom: 2px solid var(--blue-bright); color: var(--blue); font-weight: 600; }
+QPushButton#datasetPreviewTab[active="true"] { border-bottom: 3px solid var(--blue-bright); color: var(--blue); font-weight: 600; }
 #datasetPreviewTableCard, #datasetPreviewColumnsCard { background: var(--surface); }
-#datasetPreviewSectionTitle { color: var(--heading); font-family: "Plus Jakarta Sans"; font-size: 18px; font-weight: 700; }
-#datasetPreviewCount { color: var(--muted); font-size: 13px; }
-QTableView#datasetPreviewTable { background: var(--surface); border: 1px solid var(--border-solid); color: var(--ink); font-size: 14px; gridline-color: #e3e8ef; }
-QTableView#datasetPreviewTable QHeaderView::section { background: var(--canvas); border-bottom: 1px solid var(--border-solid); color: var(--body); font-size: 13px; padding: 10px 12px; }
+#datasetPreviewSectionTitle { color: var(--heading); font-family: "Plus Jakarta Sans"; font-size: 20px; font-weight: 700; }
+#datasetPreviewCount { color: var(--muted); font-size: 16px; }
+QTableView#datasetPreviewTable { background: var(--surface); border: none; color: var(--body); font-size: 15px; gridline-color: #e3e8ef; }
+QTableView#datasetPreviewTable::item { padding-left: 28px; padding-right: 0; border-bottom: 1px solid #e3e8ef; }
+QTableView#datasetPreviewTable QHeaderView::section { background: #e3efff; border: none; color: var(--body); font-size: 14px; font-weight: 700; padding-left: 24px; padding-right: 0; }
 #datasetPreviewColumnHeader { color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: 0.5px; }
-#datasetPreviewColumnRow { background: transparent; border-bottom: 1px solid #e3e8ef; }
-#datasetPreviewColumnName { color: var(--ink); font-size: 13px; }
-#datasetPreviewTypeBadge { background: var(--blue-active); border-radius: var(--pill-radius); color: var(--blue); font-size: 11px; font-weight: 600; padding: 5px 8px; }
-#datasetPreviewMissingValue { color: var(--body); font-size: 12px; }
+#datasetPreviewColumnRow { background: transparent; border: none; border-bottom: 1px solid #d5d5d5; }
+#datasetPreviewColumnName { color: var(--body); font-size: 14px; font-weight: 600; }
+#datasetPreviewTypeBadge { background: #e5e5e5; border-radius: var(--pill-radius); color: #757575; font-size: 12px; font-weight: 600; padding: 2px 4px; }
+#datasetPreviewTypeBadge[columnType="target"] { background: #d8f8dd; color: #098e00; }
+#datasetPreviewTypeBadge[columnType="categorical"] { background: #fff7cc; color: #8e6f00; }
+#datasetPreviewTypeBadge[columnType="numeric"] { background: #e2efff; color: #0071c2; }
+#datasetPreviewMissingValue { color: var(--muted); font-size: 14px; }
+#datasetPreviewMissingValue[hasMissing="true"] { color: var(--danger); }
 #datasetPreviewColumnsScroll, #datasetPreviewColumnsScroll QWidget#datasetPreviewColumnsContent { background: var(--surface); border: none; }
 #datasetPreviewContentStack, #datasetPreviewBody, #datasetPreviewAnalysisPage { background: transparent; border: none; }
 #datasetPreviewAnalysisCard { background: var(--surface); border: 1px solid var(--border); border-radius: var(--card-radius); }

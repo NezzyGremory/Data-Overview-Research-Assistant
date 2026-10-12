@@ -18,7 +18,7 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 
 from PySide6.QtCore import Qt, QUrl, QObject, QThread, QTimer, Signal, Slot, QMarginsF, QSize, QPoint, QRectF
-from PySide6.QtGui import QIcon, QPixmap, QDesktopServices, QTextDocument, QFont, QFontDatabase, QColor, QPalette, QPageSize, QPageLayout, QPainter
+from PySide6.QtGui import QIcon, QPixmap, QDesktopServices, QTextDocument, QFont, QFontDatabase, QColor, QPalette, QPageSize, QPageLayout, QPainter, QRegion
 from PySide6.QtPrintSupport import QPrinter
 from PySide6.QtWidgets import (
     QApplication,
@@ -1770,31 +1770,63 @@ class UploadPage(QWidget):
         container.setObjectName("uploadContainer")
         self.main_window._apply_canvas_background(container)
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(36, 30, 24, 36)
-        layout.setSpacing(32)
+        self.upload_root_layout = layout
+        layout.setContentsMargins(36, 20, 25, 36)
+        layout.setSpacing(7)
 
-        header = QHBoxLayout()
+        header_container = QWidget()
+        self.upload_header_container = header_container
+        header_container.setFixedHeight(81)
+        header = QHBoxLayout(header_container)
         self.header_layout = header
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(0)
         title_block = QVBoxLayout()
+        self.upload_title_block = title_block
+        title_block.setContentsMargins(0, 0, 0, 0)
         title_block.setSpacing(4)
         title = QLabel("Dataset")
         title.setObjectName("pageTitle")
+        title.setFixedHeight(42)
+        title.setContentsMargins(0, 1, 0, 0)
         subtitle = QLabel("Upload, preview and clean your CSV before analysis.")
         subtitle.setObjectName("pageSubtitle")
+        subtitle.setFixedHeight(35)
+        subtitle.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        subtitle.setContentsMargins(0, -7, 0, 0)
         subtitle.setWordWrap(True)
         title_block.addWidget(title)
         title_block.addWidget(subtitle)
         header.addLayout(title_block, 1)
 
         self.upload_button = QPushButton("Upload Dataset")
-        self.upload_button.setIcon(QIcon(str(_resource_path("assets/icons/upload.svg"))))
-        self.upload_button.setIconSize(QSize(22, 22))
-        self.upload_button.setObjectName("primaryButton")
-        self.upload_button.setMinimumHeight(62)
-        self.upload_button.setMinimumWidth(254)
+        self.upload_button.setText("")
+        self.upload_button.setAccessibleName("Upload Dataset")
+        self.upload_button.setObjectName("datasetPreviewUploadButton")
+        self.upload_button.setFixedSize(253, 61)
+        upload_button_layout = QHBoxLayout(self.upload_button)
+        upload_button_layout.setContentsMargins(19, 0, 14, 0)
+        upload_button_layout.setSpacing(16)
+        upload_icon = QLabel()
+        upload_icon.setObjectName("datasetPreviewUploadIcon")
+        upload_icon.setFixedSize(32, 24)
+        upload_pixmap = QPixmap(str(_resource_path("assets/icons/upload.svg")))
+        if not upload_pixmap.isNull():
+            upload_icon.setPixmap(upload_pixmap.scaled(32, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        upload_button_layout.addWidget(upload_icon)
+        upload_text = QLabel("Upload Dataset")
+        upload_text.setObjectName("datasetPreviewUploadText")
+        upload_button_layout.addWidget(upload_text)
+        upload_button_layout.addStretch(1)
         self.upload_button.clicked.connect(self.select_dataset)
-        header.addWidget(self.upload_button, 0, Qt.AlignTop)
-        layout.addLayout(header)
+        upload_button_container = QWidget()
+        upload_button_container.setFixedSize(253, 71)
+        upload_button_layout_outer = QVBoxLayout(upload_button_container)
+        upload_button_layout_outer.setContentsMargins(0, 2, 0, 0)
+        upload_button_layout_outer.setSpacing(0)
+        upload_button_layout_outer.addWidget(self.upload_button, 0, Qt.AlignTop)
+        header.addWidget(upload_button_container, 0, Qt.AlignTop)
+        layout.addWidget(header_container)
 
         content_row = QHBoxLayout()
         self.content_row = content_row
@@ -1802,33 +1834,38 @@ class UploadPage(QWidget):
         upload_card = QFrame()
         self.upload_card = upload_card
         upload_card.setObjectName("uploadCard")
-        upload_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        upload_card.setFixedHeight(781)
+        upload_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         apply_card_shadow(upload_card)
         upload_layout = QVBoxLayout(upload_card)
-        upload_layout.setContentsMargins(18, 18, 28, 28)
+        upload_layout.setContentsMargins(17, 18, 24, 28)
         upload_layout.setSpacing(40)
 
         upload_title = QLabel("Upload a dataset")
         upload_title.setObjectName("sectionTitle")
-        upload_title.setContentsMargins(18, 20, 0, 0)
+        upload_title.setObjectName("uploadPageSectionTitle")
+        upload_title.setContentsMargins(18, 10, 0, 0)
         upload_title.setFixedHeight(44)
         upload_layout.addWidget(upload_title)
 
         dropzone = QFrame()
+        self.upload_dropzone = dropzone
         dropzone.setObjectName("uploadDropzone")
-        dropzone.setFixedHeight(326)
+        dropzone.setMaximumWidth(895)
+        dropzone.setFixedHeight(325)
         drop_layout = QVBoxLayout(dropzone)
-        drop_layout.setContentsMargins(16, 18, 16, 18)
-        drop_layout.setSpacing(10)
+        drop_layout.setContentsMargins(17, 19, 15, 17)
+        drop_layout.setSpacing(0)
         drop_layout.addStretch(1)
         icon_label = QLabel()
         icon_label.setObjectName("uploadDropIcon")
         icon_label.setAlignment(Qt.AlignCenter)
-        icon_label.setFixedSize(68, 68)
+        icon_label.setFixedSize(70, 70)
         upload_pixmap = QPixmap(str(_resource_path("assets/icons/file-arrow-up.svg")))
         if not upload_pixmap.isNull():
-            icon_label.setPixmap(upload_pixmap.scaled(60, 60, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            icon_label.setPixmap(upload_pixmap.scaled(70, 70, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         drop_layout.addWidget(icon_label, 0, Qt.AlignHCenter)
+        drop_layout.addSpacing(14)
 
         drop_title = QLabel("Drag & drop your file CSV file here")
         drop_title.setObjectName("uploadDropTitle")
@@ -1838,7 +1875,9 @@ class UploadPage(QWidget):
 
         description_row = QGridLayout()
         self.drop_description_layout = description_row
-        description_row.setSpacing(5)
+        description_row.setContentsMargins(0, 0, 0, 0)
+        description_row.setAlignment(Qt.AlignHCenter)
+        description_row.setSpacing(2)
         prefix = QLabel("or")
         prefix.setObjectName("uploadDropDescription")
         prefix.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -1856,9 +1895,11 @@ class UploadPage(QWidget):
         description_row.addWidget(suffix, 0, 2, Qt.AlignLeft | Qt.AlignVCenter)
         drop_layout.addLayout(description_row)
         drop_layout.addStretch(1)
+        drop_layout.setStretch(0, 5)
+        drop_layout.setStretch(drop_layout.count() - 1, 9)
         dropzone_wrap = QWidget()
         dropzone_wrap_layout = QHBoxLayout(dropzone_wrap)
-        dropzone_wrap_layout.setContentsMargins(18, 0, 0, 0)
+        dropzone_wrap_layout.setContentsMargins(5, 0, 0, 0)
         dropzone_wrap_layout.setSpacing(0)
         dropzone_wrap_layout.addWidget(dropzone)
         dropzone_wrap.setFixedHeight(326)
@@ -1869,8 +1910,11 @@ class UploadPage(QWidget):
         self.steps_layout = steps_row
         self.upload_steps = []
         steps_row.setContentsMargins(0, 0, 0, 0)
-        steps_row.setHorizontalSpacing(5)
+        steps_row.setContentsMargins(0, 1, 0, 0)
+        steps_row.setHorizontalSpacing(4)
         steps_row.setVerticalSpacing(5)
+        for column, stretch in enumerate((197, 230, 253, 234)):
+            steps_row.setColumnStretch(column, stretch)
         for number, heading, detail in (
             ("1", "Upload CSV", "Choose your file"),
             ("2", "Preview", "Check the first rows"),
@@ -1882,12 +1926,13 @@ class UploadPage(QWidget):
             step.setMinimumHeight(65)
             step.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
             step_layout = QHBoxLayout(step)
-            step_layout.setContentsMargins(9, 8, 8, 8)
-            step_layout.setSpacing(9)
+            step_layout.setContentsMargins(9, 6, 3, 9)
+            step_layout.setSpacing(15)
             badge = QLabel(number)
             badge.setObjectName("uploadStepBadge")
             badge.setAlignment(Qt.AlignCenter)
-            badge.setFixedSize(40, 40)
+            badge.setFixedSize(40, 38)
+            badge.setMask(QRegion(0, 0, 40, 38, QRegion.Ellipse))
             text_layout = QVBoxLayout()
             text_layout.setSpacing(2)
             step_title = QLabel(heading)
@@ -1902,18 +1947,21 @@ class UploadPage(QWidget):
             self.upload_steps.append(step)
             steps_row.addWidget(step, 0, len(self.upload_steps) - 1)
         upload_layout.addWidget(steps_wrap)
+        upload_layout.addSpacing(2)
         upload_layout.addStretch(1)
         content_row.addWidget(upload_card, 215)
 
         side_column = QVBoxLayout()
-        side_column.setSpacing(22)
+        self.upload_side_column = side_column
+        side_column.setSpacing(21)
         search_card = QFrame()
+        self.upload_search_card = search_card
         search_card.setObjectName("uploadSearchCard")
-        search_card.setMinimumHeight(244)
+        search_card.setFixedHeight(245)
         apply_card_shadow(search_card)
         search_layout = QVBoxLayout(search_card)
         search_layout.setContentsMargins(22, 20, 22, 22)
-        search_layout.setSpacing(10)
+        search_layout.setSpacing(0)
         search_icon = QLabel()
         search_icon.setObjectName("uploadSearchIcon")
         search_icon.setAlignment(Qt.AlignCenter)
@@ -1922,32 +1970,40 @@ class UploadPage(QWidget):
         if not search_pixmap.isNull():
             search_icon.setPixmap(search_pixmap.scaled(28, 28, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         search_layout.addWidget(search_icon, 0, Qt.AlignLeft)
+        search_layout.addSpacing(9)
         search_title = QLabel("No dataset yet?")
         search_title.setObjectName("cardTitle")
+        search_title.setFixedSize(152, 24)
         search_layout.addWidget(search_title)
+        search_layout.addSpacing(7)
         search_description = QLabel(
-            "Find public dataset from Kaggle and Hugging Face, then send them straight to DORA"
+            "Find public dataset form Kaggle and Hugging Face, then send them straight to DORA"
         )
         search_description.setObjectName("cardDescription")
         search_description.setWordWrap(True)
+        search_description.setFixedSize(392, 38)
         search_layout.addWidget(search_description)
+        search_layout.addSpacing(17)
         search_button = QPushButton("Open Dataset Search")
         search_button.setObjectName("uploadSearchButton")
-        search_button.setMinimumHeight(62)
-        search_button.setMinimumWidth(254)
+        search_button.setFixedSize(253, 63)
         search_button.clicked.connect(self.main_window.open_dataset_search_page)
         search_layout.addWidget(search_button, 0, Qt.AlignLeft)
         side_column.addWidget(search_card)
 
         tips_card = QFrame()
+        self.upload_tips_card = tips_card
         tips_card.setObjectName("uploadTipsCard")
+        tips_card.setFixedHeight(515)
         apply_card_shadow(tips_card)
         tips_layout = QVBoxLayout(tips_card)
         tips_layout.setContentsMargins(22, 20, 22, 22)
-        tips_layout.setSpacing(12)
+        tips_layout.setSpacing(0)
         tips_title = QLabel("Tips for a good upload")
         tips_title.setObjectName("cardTitle")
+        tips_title.setFixedSize(217, 24)
         tips_layout.addWidget(tips_title)
+        tips_layout.addSpacing(24)
         tips = QLabel(
             "1. First row contains column names\n"
             "2. One table per file, comma separated\n"
@@ -1956,6 +2012,7 @@ class UploadPage(QWidget):
         )
         tips.setObjectName("uploadTipsText")
         tips.setWordWrap(True)
+        tips.setFixedSize(355, 76)
         tips_layout.addWidget(tips)
         tips_layout.addStretch(1)
         side_column.addWidget(tips_card, 1)
@@ -1973,8 +2030,9 @@ class UploadPage(QWidget):
         self.header_layout.setDirection(
             QBoxLayout.TopToBottom if width < 700 else QBoxLayout.LeftToRight
         )
+        self.upload_header_container.setFixedHeight(152 if width < 700 else 81)
         self.content_row.setDirection(
-            QBoxLayout.TopToBottom if width < 990 else QBoxLayout.LeftToRight
+            QBoxLayout.TopToBottom if width < 1450 else QBoxLayout.LeftToRight
         )
 
         description_columns = 1 if width < 480 else 3
@@ -11859,13 +11917,14 @@ class MainWindow(QMainWindow):
         sidebar.setObjectName("sidebar")
         layout = QVBoxLayout(sidebar)
         self.sidebar_layout = layout
-        layout.setContentsMargins(28, 78, 28, 24)
-        layout.setSpacing(4)
+        layout.setContentsMargins(11, 70, 15, 24)
+        layout.setSpacing(0)
 
         brand = QHBoxLayout()
-        brand.setSpacing(14)
-        brand.setContentsMargins(13, 0, 0, 0)
+        brand.setSpacing(18)
+        brand.setContentsMargins(22, 0, 0, 0)
         logo = QLabel("D")
+        self.sidebar_logo = logo
         logo.setObjectName("brandLogo")
         logo.setFixedSize(82, 82)
         logo.setAlignment(Qt.AlignCenter)
@@ -11885,35 +11944,58 @@ class MainWindow(QMainWindow):
         subtitle = QLabel("Data Overview & Research Assistant")
         subtitle.setObjectName("brandSubtitle")
         subtitle.setWordWrap(True)
-        brand_text_container.setMaximumWidth(210)
+        brand_text_container.setMaximumWidth(276)
         brand_text.addWidget(title)
         brand_text.addWidget(subtitle)
         brand.addWidget(logo)
         brand.addWidget(brand_text_container, 1)
         layout.addLayout(brand)
-        layout.addSpacing(72)
+        layout.addSpacing(45)
 
         self.nav_buttons = {}
         self.nav_text_widgets = []
         self.sidebar_section_labels = []
+        self.sidebar_group_cards = []
+        self.sidebar_group_layouts = []
         self._add_nav_section(layout, "WORKSPACE")
-        self._add_nav_button(layout, "dataset_search", "dataset-search.svg", "Dataset Search")
-        self._add_nav_button(layout, "dataset", "dataset.svg", "Dataset")
-        self._add_nav_button(layout, "analysis", "analysis.svg", "Analysis")
-        self._add_nav_button(layout, "editor_analysis", "file-text.svg", "Editor Analysis")
-        self._add_nav_button(layout, "ml", "ml-intelligence.svg", "ML Intelligence")
-        self._add_nav_button(layout, "dashboard", "overview.svg", "Overview")
-        layout.addSpacing(24)
+        layout.itemAt(layout.count() - 1).widget().setFixedHeight(32)
+        self._add_nav_group(layout, 263, 12, 11, (
+            ("dataset_search", "dataset-search.svg", "Dataset Search"),
+            ("dataset", "dataset.svg", "Dataset"),
+            ("analysis", "analysis.svg", "Analysis"),
+            ("ml", "ml-intelligence.svg", "ML Intelligence"),
+            ("dashboard", "overview.svg", "Overview"),
+        ))
+        layout.addSpacing(12)
         self._add_nav_section(layout, "RESEARCH TOOLS")
-        self._add_nav_button(layout, "research", "academic-research.svg", "Academic Research")
-        self._add_nav_button(layout, "papers", "papers.svg", "Papers")
-        self._add_nav_button(layout, "landscape", "research-landscape.svg", "Research Landscape")
-        self._add_nav_button(layout, "gap", "research-gap.svg", "Research Gap")
-        self._add_nav_button(layout, "report", "research-report.svg", "Research Report")
+        layout.itemAt(layout.count() - 1).widget().setFixedHeight(32)
+        layout.addSpacing(15)
+        self._add_nav_group(layout, 238, 6, 17, (
+            ("research", "academic-research.svg", "Academic Research"),
+            ("papers", "papers.svg", "Papers"),
+            ("landscape", "research-landscape.svg", "Research Landscape"),
+            ("gap", "research-gap.svg", "Research Gap"),
+            ("report", "research-report.svg", "Research Report"),
+        ))
         layout.addStretch()
 
         sidebar_scroll.setWidget(sidebar)
         return sidebar_scroll
+
+    def _add_nav_group(self, parent_layout, height, top_margin, bottom_margin, entries):
+        card = QFrame()
+        card.setObjectName("sidebarMenuCard")
+        card.setFixedHeight(height)
+        group_layout = QVBoxLayout(card)
+        group_layout.setContentsMargins(35, top_margin, 15, bottom_margin)
+        group_layout.setSpacing(0)
+        self.sidebar_group_cards.append(card)
+        self.sidebar_group_layouts.append(group_layout)
+        for key, icon, text in entries:
+            button = self._add_nav_button(group_layout, key, icon, text)
+            button.setFixedHeight(48 if height >= 260 else 43)
+        apply_card_shadow(card)
+        parent_layout.addWidget(card)
 
     def _add_nav_section(self, layout, title):
         label = QLabel(title)
@@ -11973,6 +12055,7 @@ class MainWindow(QMainWindow):
 
         if key in callbacks:
             button.clicked.connect(callbacks[key])
+        return button
 
     # =========================================================
     # TOPBAR
@@ -11984,7 +12067,8 @@ class MainWindow(QMainWindow):
         topbar.setFixedHeight(124)
 
         layout = QHBoxLayout(topbar)
-        layout.setContentsMargins(34, 0, 42, 0)
+        layout.setContentsMargins(34, 0, 130, 0)
+        layout.setSpacing(13)
         self.topbar_layout = layout
         self.page_title = QLabel("Dashboard")
         self.page_title.setObjectName("topbarTitle")
@@ -11994,7 +12078,8 @@ class MainWindow(QMainWindow):
         about = QPushButton("About")
         about.setObjectName("topbarLink")
         about.setIcon(QIcon(str(_resource_path("assets/icons/about.svg"))))
-        about.setProperty("active", False)
+        about.setProperty("active", True)
+        about.setFixedSize(136, 50)
         about.clicked.connect(self.open_about)
         layout.addWidget(about)
         self.topbar_links = {"about": about}
@@ -12008,6 +12093,7 @@ class MainWindow(QMainWindow):
             link.setIcon(QIcon(str(_resource_path(Path("assets") / "icons" / icon_name))))
             link.setFlat(True)
             link.setProperty("active", False)
+            link.setFixedSize(201 if key == "copyright" else 140, 50)
             self.topbar_links[key] = link
             self.topbar_link_labels[key] = label
             if key == "copyright":
@@ -12019,13 +12105,28 @@ class MainWindow(QMainWindow):
         divider.setObjectName("topbarDivider")
         divider.setFixedSize(1, 34)
         self.topbar_divider = divider
-        layout.addSpacing(10)
+        layout.addSpacing(56)
         layout.addWidget(divider)
         version = QLabel("2026 UIN HIJAU v5")
         version.setObjectName("topbarVersion")
         self.topbar_version = version
+        version_container = QWidget()
+        self.topbar_version_container = version_container
+        version_layout = QHBoxLayout(version_container)
+        version_layout.setContentsMargins(0, 0, 0, 0)
+        version_layout.setSpacing(11)
+        version_icon = QLabel()
+        version_icon.setObjectName("topbarVersionIcon")
+        version_icon.setFixedSize(24, 24)
+        copyright_path = _resource_path(Path("assets") / "icons" / "copyright.svg")
+        if copyright_path.exists():
+            pixmap = QPixmap(str(copyright_path))
+            if not pixmap.isNull():
+                version_icon.setPixmap(pixmap.scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        version_layout.addWidget(version_icon)
+        version_layout.addWidget(version)
         layout.addSpacing(18)
-        layout.addWidget(version)
+        layout.addWidget(version_container)
         return topbar
 
     def resizeEvent(self, event):
@@ -12038,11 +12139,22 @@ class MainWindow(QMainWindow):
         compact = sidebar_width < 288
         sidebar.setFixedWidth(sidebar_width)
         self.sidebar_layout.setContentsMargins(
-            8 if compact else 28,
-            20 if compact else 78,
-            8 if compact else 28,
+            8 if compact else 10,
+            20 if compact else 70,
+            8 if compact else 15,
             16 if compact else 24,
         )
+        self.sidebar_logo.setFixedSize(48 if compact else 82, 48 if compact else 82)
+        for group_index, (group, group_layout) in enumerate(zip(self.sidebar_group_cards, self.sidebar_group_layouts)):
+            group_layout.setContentsMargins(
+                (4 if compact else 35),
+                (10 if compact else (12 if group_index == 0 else 6)),
+                (4 if compact else 15),
+                (10 if compact else (11 if group_index == 0 else 17)),
+            )
+            group.setProperty("compact", compact)
+            group.style().unpolish(group)
+            group.style().polish(group)
         self.brand_text_container.setVisible(not compact)
         for label in self.nav_text_widgets:
             label.setVisible(not compact)
@@ -12054,15 +12166,15 @@ class MainWindow(QMainWindow):
         self.topbar_layout.setContentsMargins(
             12 if compact_topbar else 34,
             0,
-            12 if compact_topbar else 42,
+            12 if compact_topbar else 130,
             0,
         )
         for key, link in self.topbar_links.items():
             link.setText("" if compact_topbar else self.topbar_link_labels[key])
             link.setToolTip(self.topbar_link_labels[key])
-            link.setIconSize(QSize(20 if compact_topbar else 22, 20 if compact_topbar else 22))
+            link.setIconSize(QSize(20 if compact_topbar else 35, 20 if compact_topbar else 35))
         self.topbar_divider.setVisible(not compact_topbar)
-        self.topbar_version.setVisible(not compact_topbar)
+        self.topbar_version_container.setVisible(not compact_topbar)
 
     # =========================================================
     # NAVIGATION
@@ -12076,7 +12188,7 @@ class MainWindow(QMainWindow):
         self._set_topbar_active(key)
 
     def _set_topbar_active(self, page_key):
-        active_link = page_key if page_key in ("about", "copyright", "help") else None
+        active_link = page_key if page_key in ("about", "copyright", "help") else "about"
         for key, link in self.topbar_links.items():
             link.setProperty("active", key == active_link)
             link.style().unpolish(link)
