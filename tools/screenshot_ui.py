@@ -161,6 +161,46 @@ def main() -> int:
         )
         window.open_analysis_page()
     elif args.page == "overview":
+        overview_dataframe = _preview_dataframe()
+        rng = np.random.default_rng(2026)
+        overview_dataframe["Name"] = [f"Passenger {index:04d}" for index in range(len(overview_dataframe))]
+        overview_dataframe["Ticket"] = [f"TKT-{index:07d}" for index in range(len(overview_dataframe))]
+        overview_dataframe["Cabin"] = [f"C{index:03d}" for index in range(len(overview_dataframe))]
+        overview_dataframe.loc[:6, "Cabin"] = _preview_dataframe().loc[:6, "Cabin"]
+        overview_dataframe.loc[7:689, "Cabin"] = pd.NA
+        overview_dataframe["Age"] = rng.integers(18, 66, len(overview_dataframe)).astype(float)
+        overview_dataframe.loc[7:182, "Age"] = pd.NA
+        overview_dataframe.loc[6, "Age"] = pd.NA
+        overview_dataframe.loc[10, "Fare"] = 512.3
+        window.current_dataset = overview_dataframe
+        window.current_file_path = None
+        window.analysis_result = _analysis_preview_result(window, overview_dataframe)
+        window.dashboard._filename = "Titanic-dataset.csv"
+        window.dashboard._preview_file_size = "60.3 KB"
+        window.dashboard._preview_readiness_label = "Readiness 55/100"
+        window.ml_page.last_task_result = {
+            "primary_task": {
+                "label": "Binary Clasification",
+                "task": "binary classification",
+                "confidence": 80,
+                "target": "Survived",
+            }
+        }
+        window.ml_page.last_method_result = {
+            "recommendations": [
+                {"method": "Random Forest", "score": 82.83, "score_type": "accuracy"},
+                {"method": "Gradient Boosting", "score": 82.1, "score_type": "accuracy"},
+                {"method": "Logistic Regression", "score": 80.7, "score_type": "accuracy"},
+            ]
+        }
+        overview_research = {
+            "papers": [{"year": 2026} for _ in range(83)],
+            "gaps": {"summary": {"gap_count": 4}},
+        }
+        window.research_page.research_result = overview_research
+        window.dashboard.update_dataset(overview_dataframe, "Titanic-dataset.csv")
+        window.dashboard.update_research_result(overview_research)
+        window.dashboard.update_workflow_state(True, True, True, True)
         window.open_dashboard()
     elif args.page == "landscape":
         window.research_page.research_result = {
@@ -218,6 +258,20 @@ def main() -> int:
     output.parent.mkdir(parents=True, exist_ok=True)
 
     def capture() -> None:
+        if args.debug_layout and args.page == "overview":
+            for name, widget in (
+                ("topbar", window.topbar),
+                ("overview_topbar_frame", window.overview_topbar_frame),
+                ("overview_header", window.dashboard.findChild(QWidget, "overviewHeader")),
+                ("overview_key_findings", window.dashboard.key_findings),
+                ("overview_pipeline", window.dashboard.pipeline_card),
+                ("overview_dataset_card", window.dashboard.summary_cards[0]),
+            ):
+                point = widget.mapTo(window, widget.rect().topLeft())
+                print(
+                    f"{name}: ({point.x()}, {point.y()}, {widget.width()}, "
+                    f"{widget.height()}) visible={widget.isVisible()}"
+                )
         if args.debug_layout and args.page == "dataset-empty":
             page = window.upload_page
             for index in range(page.upload_root_layout.count()):
@@ -361,6 +415,7 @@ def main() -> int:
         print(f"Screenshot saved: {output}")
         if dialog is not None:
             dialog.close()
+        window._session_data_cleaned = True
         window.close()
         QTimer.singleShot(350, app.quit)
 

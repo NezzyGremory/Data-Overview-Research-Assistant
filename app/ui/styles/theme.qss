@@ -28,6 +28,12 @@
 /* @small-radius: 8px */
 /* @pill-radius: 20px */
 /* @dialog-radius: 25px */
+/* @overview-key-bg: rgba(201, 224, 255, 0.5) */
+/* @overview-stage-bg: rgba(148, 255, 165, 0.5) */
+/* @overview-stage-border: rgba(2, 97, 18, 0.4) */
+/* @overview-green: #098e00 */
+/* @overview-blue-soft: #e8f1ff */
+/* @overview-report-muted: #c9e0ff */
 
 QMainWindow,
 #appRoot,
@@ -537,5 +543,179 @@ QDialog#uploadDatasetDialog[compact="true"] QPushButton#uploadDialogCancel {
     font-size: 14px;
     min-height: 52px;
 }
+
+/* Overview frame */
+QFrame#topbar[overviewMode="true"] { border-bottom: none; }
+QFrame#overviewTopbarFrame { background: #ffffff; border: 1px solid #006bb8; }
+QScrollArea#overviewScroll,
+QScrollArea#overviewScroll::viewport,
+QWidget#overviewCanvas { background: var(--canvas); border: none; }
+QLabel#overviewTitle {
+    color: #000000;
+    font-family: "Plus Jakarta Sans";
+    font-size: 32px;
+    font-weight: 800;
+}
+QLabel#overviewSubtitle { color: #564e4e; font-size: 21px; }
+QPushButton#overviewReportButton {
+    background: var(--blue);
+    border: 1px solid var(--blue);
+    border-radius: 12px;
+    color: #ffffff;
+    font-size: 22px;
+    font-weight: 700;
+    padding: 0 14px;
+    text-align: center;
+}
+QPushButton#overviewReportButton:hover { background: var(--blue-hover); border-color: var(--blue-hover); }
+QPushButton#overviewReportButton:pressed { background: #005a9c; border-color: #005a9c; }
+QPushButton#overviewReportButton:disabled { background: #a8c8e0; border-color: #a8c8e0; color: #ffffff; }
+QFrame#overviewKeyFindings {
+    background: var(--overview-key-bg);
+    border: 1px solid rgba(0, 107, 184, 0.3);
+    border-radius: 15px;
+}
+QLabel#overviewKeyFindingsText { color: #564e4e; font-size: 18px; }
+QLabel#overviewInfoIcon { background: transparent; }
+QFrame#overviewPipelineCard,
+QFrame#overviewDatasetCard,
+QFrame#overviewQualityCard,
+QFrame#overviewMLCard {
+    background: rgba(255, 255, 255, 0.5);
+    border: 1px solid #c7c6c6;
+    border-radius: 15px;
+}
+QLabel#overviewPipelineTitle {
+    color: #000000;
+    font-family: "Plus Jakarta Sans";
+    font-size: 24px;
+    font-weight: 700;
+}
+QLabel#overviewPipelineCount { color: #564e4e; font-size: 18px; }
+QProgressBar#overviewPipelineProgress {
+    background: #dcecff;
+    border: none;
+    border-radius: 5px;
+    max-height: 10px;
+    min-height: 10px;
+}
+QProgressBar#overviewPipelineProgress::chunk {
+    background: var(--blue);
+    border: none;
+    border-radius: 5px;
+}
+QFrame#overviewPipelineStage {
+    background: #f7fbff;
+    border: 1px solid #c7c6c6;
+    border-radius: 15px;
+}
+QFrame#overviewPipelineStage[state="complete"] {
+    background: var(--overview-stage-bg);
+    border-color: var(--overview-stage-border);
+}
+QLabel#overviewStageNumber {
+    background: #ffffff;
+    border: none;
+    border-radius: 15px;
+    color: #564e4e;
+    font-size: 17px;
+    font-weight: 700;
+}
+QLabel#overviewStageTitle { color: #564e4e; font-size: 20px; font-weight: 600; }
+QLabel#overviewStageStatus { color: #757575; font-size: 20px; }
+QFrame#overviewPipelineStage[state="complete"] QLabel#overviewStageStatus { color: var(--overview-green); }
+QLabel#overviewStageStatus[complete="true"] { color: var(--overview-green); }
+QFrame#overviewPipelineStage[kind="report"] { background: var(--overview-report-muted); }
+QFrame#overviewPipelineStage[kind="report"] QLabel#overviewStageStatus,
+QLabel#overviewStageStatus[complete="true"][kind="report"] { color: var(--blue); }
+QLabel#overviewCardTitle {
+    color: #000000;
+    font-family: "Plus Jakarta Sans";
+    font-size: 24px;
+    font-weight: 700;
+}
+QLabel#overviewCardIcon { background: #e3efff; border: none; border-radius: 16px; }
+QLabel#overviewDatasetName { color: #111111; font-size: 18px; font-weight: 700; }
+QLabel#overviewLoadedBadge {
+    background: #bdffc8;
+    border: none;
+    border-radius: 12px;
+    color: #008000;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 3px 10px;
+}
+QFrame#overviewDatasetMetric { background: var(--overview-blue-soft); border: none; border-radius: 8px; }
+QLabel#overviewMetricTitle { color: #5f5f5f; font-size: 11px; font-weight: 700; }
+QLabel#overviewMetricValue { color: #111111; font-size: 17px; font-weight: 700; }
+QLabel#overviewSmallHeading { color: #5f5f5f; font-size: 12px; font-weight: 700; }
+QWidget#overviewColumnTypeBar { background: #e3efff; border: none; border-radius: 4px; }
+QFrame#overviewColumnTypeSegment[kind="id"] { background: #969696; border: none; }
+QFrame#overviewColumnTypeSegment[kind="target"] { background: #14be5c; border: none; }
+QFrame#overviewColumnTypeSegment[kind="numeric"] { background: #0878c8; border: none; }
+QFrame#overviewColumnTypeSegment[kind="categorical"] { background: #e0b300; border: none; }
+QFrame#overviewColumnTypeSegment[kind="text"] { background: #c3c3c3; border: none; }
+QLabel#overviewColumnLegend { color: #5f5f5f; font-size: 10px; }
+QLabel#overviewColumnLegend[kind="target"] { color: #008000; }
+QLabel#overviewColumnLegend[kind="numeric"] { color: #006bb8; }
+QLabel#overviewColumnLegend[kind="categorical"] { color: #8e6f00; }
+QPushButton#overviewDetailsButton {
+    background: transparent;
+    border: none;
+    color: var(--blue);
+    font-size: 12px;
+    font-weight: 700;
+    padding: 0;
+    text-align: left;
+}
+QPushButton#overviewDetailsButton:hover { color: var(--blue-hover); text-decoration: underline; }
+QPushButton#overviewDetailsButton:pressed { color: #005a9c; }
+QLabel#overviewReadinessBadge {
+    background: #ffe171;
+    border: none;
+    border-radius: 12px;
+    color: #806600;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 3px 9px;
+}
+QLabel#overviewQualityLine { color: #564e4e; font-size: 18px; }
+QLabel#overviewMostMissing { color: #564e4e; font-size: 14px; }
+QLabel#overviewMLTaskBadge,
+QLabel#overviewConfidenceBadge,
+QLabel#overviewTargetBadge {
+    border: none;
+    border-radius: 12px;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 3px 8px;
+}
+QLabel#overviewMLTaskBadge { background: #cde8ff; color: #006bb8; }
+QLabel#overviewConfidenceBadge { background: #bdffc8; color: #008000; }
+QLabel#overviewTargetBadge { background: #e6e6e6; color: #564e4e; }
+QLabel#overviewModelName { color: #564e4e; font-size: 17px; }
+QLabel#overviewModelValue { color: #111111; font-size: 12px; font-weight: 600; }
+QProgressBar#overviewModelProgress {
+    background: #e3efff;
+    border: none;
+    border-radius: 4px;
+    max-height: 8px;
+    min-height: 8px;
+}
+QProgressBar#overviewModelProgress::chunk { background: var(--blue); border: none; border-radius: 4px; }
+QWidget#overviewSidebarFooter { background: transparent; border: none; }
+QPushButton#overviewSidebarLink {
+    background: rgba(255, 255, 255, 0.76);
+    border: none;
+    border-radius: 15px;
+    color: #777777;
+    font-size: 25px;
+    font-weight: 600;
+    padding: 0 15px;
+    text-align: left;
+}
+QPushButton#overviewSidebarLink:hover { background: #eaf3ff; color: var(--blue); }
+QPushButton#overviewSidebarLink:pressed { background: var(--blue-active); }
+QLabel#overviewTeamText { color: #8e8c8c; font-size: 14px; }
 
 /* Notebook-style plot area uses the same font and palette as the UI. */

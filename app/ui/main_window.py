@@ -17,7 +17,7 @@ import httpx
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 
-from PySide6.QtCore import Qt, QUrl, QObject, QThread, QTimer, Signal, Slot, QMarginsF, QSize, QPoint, QRect, QRectF
+from PySide6.QtCore import Qt, QUrl, QObject, QThread, QTimer, Signal, Slot, QMarginsF, QSize, QPoint, QRect, QRectF, QEvent
 from PySide6.QtGui import QIcon, QPixmap, QDesktopServices, QTextDocument, QFont, QFontDatabase, QColor, QPalette, QPageSize, QPageLayout, QPainter, QRegion
 from PySide6.QtPrintSupport import QPrinter
 from PySide6.QtWidgets import (
@@ -1082,419 +1082,7 @@ class MiniBarChart(QFrame):
         painter.end()
 
 
-class DashboardPage(QWidget):
-
-    def __init__(self, main_window):
-        super().__init__()
-        self.main_window = main_window
-        self._build_ui()
-        self.update_research_result({})
-
-    def _build_ui(self):
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(0)
-
-        scroll = QScrollArea()
-        scroll.setObjectName("dashboardScroll")
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
-        container = QWidget()
-        container.setObjectName("dashboardCanvas")
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(30, 24, 30, 28)
-        layout.setSpacing(18)
-
-        # ACTIVE DATASET ---------------------------------------
-        hero = QFrame()
-        hero.setObjectName("dashboardHero")
-        hero.setMinimumHeight(186)
-
-        hero_layout = QHBoxLayout(hero)
-        self.hero_layout = hero_layout
-        hero_layout.setContentsMargins(30, 22, 30, 22)
-        hero_layout.setSpacing(24)
-
-        hero_text = QVBoxLayout()
-        hero_text.setSpacing(7)
-        hero_topline = QHBoxLayout()
-        hero_topline.setSpacing(10)
-        hero_eyebrow = QLabel("ACTIVE DATASET")
-        hero_eyebrow.setObjectName("heroEyebrow")
-        hero_topline.addWidget(hero_eyebrow)
-
-        self.dataset_status_badge = QLabel("NO DATASET")
-        self.dataset_status_badge.setObjectName("datasetStatusBadge")
-        hero_topline.addWidget(self.dataset_status_badge, 0, Qt.AlignVCenter)
-        hero_topline.addStretch()
-        hero_text.addLayout(hero_topline)
-
-        self.dataset_name_label = QLabel("No dataset loaded")
-        self.dataset_name_label.setObjectName("datasetName")
-        self.dataset_name_label.setWordWrap(True)
-        hero_text.addWidget(self.dataset_name_label)
-
-        self.dataset_description_label = QLabel(
-            "Upload a dataset to begin your research workflow."
-        )
-        self.dataset_description_label.setObjectName("datasetDescription")
-        self.dataset_description_label.setWordWrap(True)
-        hero_text.addWidget(self.dataset_description_label)
-
-        hero_buttons = QHBoxLayout()
-        hero_buttons.setSpacing(10)
-        self.analysis_button = QPushButton("Run analysis")
-        self.analysis_button.setObjectName("heroPrimaryButton")
-        self.analysis_button.setFixedHeight(38)
-        self.analysis_button.setCursor(Qt.PointingHandCursor)
-        self.analysis_button.clicked.connect(self.main_window.open_analysis_page)
-        self.analysis_button.setEnabled(False)
-        hero_buttons.addWidget(self.analysis_button)
-
-        self.upload_button = QPushButton("Upload new dataset")
-        self.upload_button.setObjectName("heroSecondaryButton")
-        self.upload_button.setFixedHeight(38)
-        self.upload_button.setCursor(Qt.PointingHandCursor)
-        self.upload_button.clicked.connect(self.main_window.open_upload_page)
-        hero_buttons.addWidget(self.upload_button)
-        hero_buttons.addStretch()
-        hero_text.addLayout(hero_buttons)
-        hero_text.addStretch(1)
-        hero_layout.addLayout(hero_text, 1)
-
-        hero_stats = QHBoxLayout()
-        hero_stats.setSpacing(12)
-        self.rows_card = StatCard("ROWS", "—", "Records")
-        self.columns_card = StatCard("FEATURES", "—", "Columns")
-        self.rows_card.setObjectName("heroMetricCard")
-        self.columns_card.setObjectName("heroMetricCard")
-        hero_stats.addWidget(self.rows_card)
-        hero_stats.addWidget(self.columns_card)
-        self.hero_stats_layout = hero_stats
-        hero_layout.addLayout(hero_stats)
-        layout.addWidget(hero)
-
-        # WORKFLOW ---------------------------------------------
-        pipeline_header = QHBoxLayout()
-        self.pipeline_header_layout = pipeline_header
-        pipeline_title = QLabel("Research progress")
-        pipeline_title.setObjectName("sectionTitle")
-        self.pipeline_description = QLabel("Follow the steps in your research workflow")
-        self.pipeline_description.setObjectName("sectionDescription")
-        self.pipeline_description.setWordWrap(True)
-        pipeline_header.addWidget(pipeline_title)
-        pipeline_header.addSpacing(8)
-        pipeline_header.addWidget(self.pipeline_description)
-        pipeline_header.addStretch()
-        layout.addLayout(pipeline_header)
-
-        pipeline_card = QFrame()
-        pipeline_card.setObjectName("pipelineCard")
-        pipeline_layout = QHBoxLayout(pipeline_card)
-        pipeline_layout.setContentsMargins(18, 14, 18, 12)
-        pipeline_layout.setSpacing(0)
-        self.pipeline_layout = pipeline_layout
-        self.pipeline_stages = []
-        self.workflow_connectors = []
-        for index, title in enumerate(("Dataset", "Analysis", "ML Intelligence", "Academic Research")):
-            stage = PipelineStage(index + 1, title, "WAITING")
-            self.pipeline_stages.append(stage)
-            pipeline_layout.addWidget(stage, 1)
-            if index < 3:
-                connector = QFrame()
-                connector.setObjectName("workflowConnector")
-                connector.setFrameShape(QFrame.HLine)
-                connector.setFixedHeight(2)
-                connector.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-                self.workflow_connectors.append(connector)
-                pipeline_layout.addWidget(connector, 1)
-        layout.addWidget(pipeline_card)
-
-        # QUICK ACTIONS -----------------------------------------
-        quick_header = QHBoxLayout()
-        quick_title = QLabel("Get started")
-        quick_title.setObjectName("sectionTitle")
-        quick_header.addWidget(quick_title)
-        quick_header.addStretch()
-        layout.addLayout(quick_header)
-
-        self.actions_layout = QGridLayout()
-        self.actions_layout.setHorizontalSpacing(14)
-        self.actions_layout.setVerticalSpacing(14)
-        self.quick_action_cards = [
-            QuickActionCard(chr(0x2191), "Upload dataset", "Import a dataset and start a new project.", self.main_window.open_upload_page),
-            QuickActionCard(chr(0x25c7), "Analyze dataset", "Review statistics, missing values, and outliers.", self.main_window.open_analysis_page),
-            QuickActionCard(chr(0x2726), "ML Intelligence", "Explore suitable machine learning methods.", self.main_window.open_ml_page),
-            QuickActionCard(chr(0x25ce), "Academic Research", "Find related papers and research opportunities.", self.main_window.open_research_page),
-        ]
-        layout.addLayout(self.actions_layout)
-        # RESEARCH SNAPSHOT -------------------------------------
-        snapshot_header = QHBoxLayout()
-        self.snapshot_header_layout = snapshot_header
-        snapshot_title = QLabel("Research overview")
-        snapshot_title.setObjectName("sectionTitle")
-        snapshot_desc = QLabel("A quick view of your academic research results")
-        snapshot_desc.setObjectName("sectionDescription")
-        snapshot_desc.setWordWrap(True)
-        snapshot_header.addWidget(snapshot_title)
-        snapshot_header.addSpacing(8)
-        snapshot_header.addWidget(snapshot_desc)
-        snapshot_header.addStretch()
-        layout.addLayout(snapshot_header)
-
-        self.chart_layout = QGridLayout()
-        self.chart_layout.setHorizontalSpacing(12)
-        self.chart_layout.setVerticalSpacing(12)
-        self.publication_chart = MiniLineChart(
-            "Publication Trend",
-            "Papers by publication year",
-        )
-        self.source_chart = MiniBarChart(
-            "Paper Sources",
-            "Paper candidates returned before deduplication",
-        )
-        self.metric_chart = MiniBarChart(
-            "Research metrics",
-            "Relative scale of key outputs",
-        )
-        self.research_charts = [
-            self.publication_chart,
-            self.source_chart,
-            self.metric_chart,
-        ]
-        layout.addLayout(self.chart_layout)
-
-        layout.addStretch()
-        scroll.setWidget(container)
-        outer.addWidget(scroll)
-        self._apply_responsive_layout(self.width())
-
-    @staticmethod
-    def _reflow_grid(grid, widgets, columns):
-        for column in range(grid.columnCount()):
-            grid.setColumnStretch(column, 0)
-
-        for widget in widgets:
-            grid.removeWidget(widget)
-
-        for index, widget in enumerate(widgets):
-            grid.addWidget(widget, index // columns, index % columns)
-
-        for column in range(columns):
-            grid.setColumnStretch(column, 1)
-
-    def _apply_responsive_layout(self, width):
-        compact = width < 760
-        margins = 16 if compact else 22 if width < 980 else 30
-        self.layout().setContentsMargins(margins, 16, margins, 20)
-
-        stacked = width < 760
-        self.hero_layout.setDirection(
-            QBoxLayout.TopToBottom if stacked else QBoxLayout.LeftToRight
-        )
-        self.hero_stats_layout.setDirection(
-            QBoxLayout.TopToBottom if stacked else QBoxLayout.LeftToRight
-        )
-        self.pipeline_layout.setDirection(
-            QBoxLayout.TopToBottom if stacked else QBoxLayout.LeftToRight
-        )
-        self.pipeline_header_layout.setDirection(
-            QBoxLayout.TopToBottom if stacked else QBoxLayout.LeftToRight
-        )
-        self.snapshot_header_layout.setDirection(
-            QBoxLayout.TopToBottom if stacked else QBoxLayout.LeftToRight
-        )
-        for connector in self.workflow_connectors:
-            connector.setVisible(not stacked)
-
-        action_columns = 4 if width >= 1100 else 2 if width >= 660 else 1
-        chart_columns = 3 if width >= 1080 else 2 if width >= 700 else 1
-        self._reflow_grid(self.actions_layout, self.quick_action_cards, action_columns)
-        self._reflow_grid(self.chart_layout, self.research_charts, chart_columns)
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self._apply_responsive_layout(event.size().width())
-
-    def update_dataset(self, dataframe, filename):
-        if dataframe is None:
-            return
-
-        self.dataset_name_label.setText(filename)
-        self.dataset_description_label.setText(
-            "Dataset loaded and ready. Run an analysis to view statistics and data quality insights."
-        )
-        self.dataset_status_badge.setText("DATASET LOADED")
-        self.dataset_status_badge.setProperty("state", "success")
-        style = self.dataset_status_badge.style()
-        style.unpolish(self.dataset_status_badge)
-        style.polish(self.dataset_status_badge)
-        self.dataset_status_badge.update()
-        self.analysis_button.setEnabled(True)
-
-        self.rows_card.set_value(f"{len(dataframe):,}")
-        self.columns_card.set_value(f"{len(dataframe.columns):,}")
-
-        if len(self.pipeline_stages) >= 1:
-            self.pipeline_stages[0].set_status("READY", "success")
-        if len(self.pipeline_stages) >= 2:
-            self.pipeline_stages[1].set_status("NEXT", "active")
-        for stage in self.pipeline_stages[2:4]:
-            stage.set_status("WAITING", "waiting")
-        self._sync_workflow_connectors()
-
-        self.update_research_result({})
-
-    def update_workflow_state(self, has_dataset, analysis_done, ml_done, research_done):
-        """Reflect the saved local workflow state in the dashboard pipeline."""
-        states = [
-            ("READY", "success") if has_dataset else ("UPLOAD", "active"),
-            ("READY", "success") if analysis_done else ("NEXT", "active" if has_dataset else "waiting"),
-            ("READY", "success") if ml_done else ("WAITING", "waiting"),
-            ("READY", "success") if research_done else ("WAITING", "waiting"),
-        ]
-        for stage, (status, state) in zip(self.pipeline_stages[:4], states):
-            stage.set_status(status, state)
-        self.analysis_button.setEnabled(bool(has_dataset))
-        if research_done:
-            self.pipeline_description.setText("All main research steps have saved results")
-        elif ml_done:
-            self.pipeline_description.setText("ML results are ready; continue with academic research")
-        elif analysis_done:
-            self.pipeline_description.setText("Analysis is saved; continue with ML Intelligence")
-        elif has_dataset:
-            self.pipeline_description.setText("Dataset is ready; continue with analysis")
-        else:
-            self.pipeline_description.setText("Upload a dataset to begin your research workflow")
-        self._sync_workflow_connectors()
-
-    def _sync_workflow_connectors(self):
-        for index, connector in enumerate(self.workflow_connectors):
-            complete = self.pipeline_stages[index].property("state") == "success"
-            connector.setProperty("state", "complete" if complete else "pending")
-            connector.style().unpolish(connector)
-            connector.style().polish(connector)
-
-    def update_research_result(self, result):
-        result = result if isinstance(result, dict) else {}
-        papers = result.get("papers", [])
-        if not isinstance(papers, list):
-            papers = []
-
-        # Publication years.
-        year_counts = {}
-        for paper in papers:
-            if not isinstance(paper, dict):
-                continue
-            year = paper.get("year")
-            try:
-                year = int(year)
-            except (TypeError, ValueError):
-                continue
-            if 1900 <= year <= 2100:
-                year_counts[year] = year_counts.get(year, 0) + 1
-        years = sorted(year_counts)
-        if years:
-            self.publication_chart.set_data(
-                years,
-                [year_counts[y] for y in years],
-            )
-        else:
-            self.publication_chart.clear_data()
-
-        # Display every supported provider, including zero-result and unavailable
-        # providers, so this chart reports participation rather than only sources
-        # that happened to survive deduplication.
-        search_info = result.get("search", {})
-        search_info = search_info if isinstance(search_info, dict) else {}
-        academic_search = (result.get("pipeline") or {}).get("academic_search", {})
-        academic_search = academic_search if isinstance(academic_search, dict) else {}
-        source_counts = search_info.get("source_counts") or search_info.get("sources") or academic_search.get("sources") or {}
-        source_counts = source_counts if isinstance(source_counts, dict) else {}
-        provider_status = academic_search.get("provider_status", {})
-        provider_status = provider_status if isinstance(provider_status, dict) else {}
-        providers = ("OpenAlex", "Crossref", "Semantic Scholar", "Europe PMC", "OpenAIRE", "Scopus")
-        provider_labels = []
-        provider_values = []
-        status_text = {
-            "NOT_CONFIGURED": "not configured",
-            "DISABLED": "disabled",
-            "ERROR": "error",
-            "RATE_LIMITED": "rate limited",
-        }
-        for provider in providers:
-            try:
-                count = int(source_counts.get(provider, 0) or 0)
-            except (TypeError, ValueError):
-                count = 0
-            state = str(provider_status.get(provider, ""))
-            if state in status_text:
-                label = f"{provider} · {status_text[state]}"
-            elif state == "ENABLED" and count == 0:
-                label = f"{provider} · 0 results"
-            elif state == "ENABLED":
-                label = f"{provider} · {count}"
-            elif not state:
-                # Legacy saved results do not contain provider status; avoid
-                # presenting missing metadata as a provider failure.
-                label = f"{provider} · {count}" if count else f"{provider} · no data"
-            else:
-                label = f"{provider} · {state.lower().replace('_', ' ')}"
-            provider_labels.append(label)
-            provider_values.append(count)
-        if any(provider_status.values()) or source_counts:
-            self.source_chart._subtitle = "Provider participation · candidates before deduplication"
-            self.source_chart.set_data(provider_labels, provider_values)
-        else:
-            self.source_chart._subtitle = "Provider participation and returned candidates"
-            self.source_chart.clear_data()
-
-        # Key metrics as a compact bar chart.
-        summary = result.get("summary", {}) if isinstance(result.get("summary", {}), dict) else {}
-        gaps = result.get("gaps", {}) if isinstance(result.get("gaps", {}), dict) else {}
-        gap_summary = gaps.get("summary", {}) if isinstance(gaps.get("summary", {}), dict) else {}
-        keyword_result = result.get("keywords", {}) if isinstance(result.get("keywords", {}), dict) else {}
-        keywords = keyword_result.get("keywords", [])
-        if isinstance(keywords, str):
-            keywords = [keywords]
-        keyword_count = len(keywords) if isinstance(keywords, list) else 0
-        paper_count = len(papers)
-        gap_count = gap_summary.get("gap_count", 0) or 0
-        relevance = summary.get("top_relevance_score") or 0
-        metrics = [paper_count, keyword_count, gap_count, float(relevance)]
-        labels = ["Papers", "Keywords", "Gaps", "Top Score"]
-        self.metric_chart.set_data(labels, metrics if any(metrics) else [])
-
-        if papers:
-            self.pipeline_stages[3].set_status("READY", "success")
-            self.pipeline_description.setText("Academic research results are ready")
-            self._sync_workflow_connectors()
-
-    def reset_dataset(self):
-        self.dataset_name_label.setText("No dataset loaded")
-        self.dataset_description_label.setText(
-            "Upload a dataset to begin your research workflow."
-        )
-        self.dataset_status_badge.setText("NO DATASET")
-        self.dataset_status_badge.setProperty("state", "waiting")
-        style = self.dataset_status_badge.style()
-        style.unpolish(self.dataset_status_badge)
-        style.polish(self.dataset_status_badge)
-        self.dataset_status_badge.update()
-        self.analysis_button.setEnabled(False)
-        self.rows_card.set_value("—")
-        self.columns_card.set_value("—")
-        self.pipeline_description.setText("Upload a dataset to begin your research workflow")
-        for index, stage in enumerate(self.pipeline_stages):
-            if index == 0:
-                stage.set_status("UPLOAD", "active")
-            else:
-                stage.set_status("WAITING", "waiting")
-        self._sync_workflow_connectors()
-        self.update_research_result({})
-
+from app.ui.overview_page import DashboardPage
 class SwitchCheckBox(QCheckBox):
     """Checkbox painted as a pill switch while keeping normal Qt behavior."""
 
@@ -12096,6 +11684,63 @@ class MainWindow(QMainWindow):
         ))
         layout.addStretch()
 
+        footer = QWidget()
+        footer.setObjectName("overviewSidebarFooter")
+        footer.setFixedHeight(192)
+        footer_layout = QVBoxLayout(footer)
+        footer_layout.setContentsMargins(17, 0, 0, 0)
+        footer_layout.setSpacing(16)
+
+        self.sidebar_footer_buttons = {}
+        for key, label, icon_name, width, callback in (
+            ("about", "About", "overview-about.svg", 151, self.open_about),
+            ("copyright", "Copyright", "copyright.svg", 201, self.open_copyright),
+        ):
+            button = QPushButton(label)
+            button.setObjectName("overviewSidebarLink")
+            button.setProperty("kind", key)
+            button.setIcon(QIcon(str(_resource_path(Path("assets") / "icons" / icon_name))))
+            button.setIconSize(QSize(35 if key == "about" else 37, 35 if key == "about" else 37))
+            button.setFixedSize(width, 50)
+            button.setCursor(Qt.PointingHandCursor)
+            button.clicked.connect(callback)
+            footer_layout.addWidget(button)
+            self.sidebar_footer_buttons[key] = button
+
+        help_row = QWidget()
+        help_layout = QHBoxLayout(help_row)
+        help_layout.setContentsMargins(0, 0, 0, 0)
+        help_layout.setSpacing(0)
+        help_button = QPushButton("Help")
+        help_button.setObjectName("overviewSidebarLink")
+        help_button.setProperty("kind", "help")
+        help_button.setIcon(QIcon(str(_resource_path(Path("assets") / "icons" / "help.svg"))))
+        help_button.setIconSize(QSize(35, 35))
+        help_button.setFixedSize(140, 50)
+        help_button.setCursor(Qt.PointingHandCursor)
+        help_button.clicked.connect(self.open_help)
+        help_layout.addWidget(help_button, 0, Qt.AlignTop)
+        help_layout.addSpacing(64)
+
+        team_identity = QWidget()
+        team_identity.setObjectName("overviewTeamIdentity")
+        team_layout = QHBoxLayout(team_identity)
+        team_layout.setContentsMargins(0, 0, 0, 0)
+        team_layout.setSpacing(11)
+        team_icon = QLabel()
+        team_icon.setFixedSize(24, 24)
+        team_icon_path = _resource_path(Path("assets") / "icons" / "copyright.svg")
+        if team_icon_path.exists():
+            team_icon.setPixmap(QPixmap(str(team_icon_path)).scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        team_text = QLabel("2026 UIN HIJAU v5")
+        team_text.setObjectName("overviewTeamText")
+        team_layout.addWidget(team_icon)
+        team_layout.addWidget(team_text)
+        help_layout.addWidget(team_identity, 0, Qt.AlignBottom)
+        footer_layout.addWidget(help_row)
+        layout.addWidget(footer)
+        self.sidebar_footer = footer
+
         sidebar_scroll.setWidget(sidebar)
         return sidebar_scroll
 
@@ -12200,6 +11845,11 @@ class MainWindow(QMainWindow):
         topbar = QFrame()
         topbar.setObjectName("topbar")
         topbar.setFixedHeight(124)
+        overview_frame = QFrame(topbar)
+        overview_frame.setObjectName("overviewTopbarFrame")
+        overview_frame.hide()
+        self.overview_topbar_frame = overview_frame
+        topbar.installEventFilter(self)
 
         layout = QHBoxLayout(topbar)
         layout.setContentsMargins(34, 4, 127, 0)
@@ -12277,15 +11927,29 @@ class MainWindow(QMainWindow):
         sidebar = getattr(self, "sidebar_scroll", None)
         if sidebar is None:
             return
-
         sidebar_width = min(418, max(76, round(event.size().width() * 0.23)))
-        compact = sidebar_width < 288
         sidebar.setFixedWidth(sidebar_width)
+        self._sync_page_chrome(event.size().width(), event.size().height())
+
+    def eventFilter(self, watched, event):
+        if (
+            watched is getattr(self, "topbar", None)
+            and event.type() == QEvent.Resize
+            and getattr(self, "_current_page_key", "dashboard") == "dashboard"
+        ):
+            self.overview_topbar_frame.setGeometry(
+                36, 16, max(0, watched.width() - 25), 130
+            )
+        return super().eventFilter(watched, event)
+
+    def _sync_page_chrome(self, window_width, window_height):
+        compact = self.sidebar_scroll.width() < 288
+        overview_mode = getattr(self, "_current_page_key", "dashboard") == "dashboard"
         self.sidebar_layout.setContentsMargins(
             8 if compact else 11,
             20 if compact else 70,
             8 if compact else 14,
-            16 if compact else 24,
+            16 if compact else (44 if overview_mode else 24),
         )
         self.sidebar_logo.setFixedSize(48 if compact else 82, 48 if compact else 82)
         for group_index, (group, group_layout) in enumerate(zip(self.sidebar_group_cards, self.sidebar_group_layouts)):
@@ -12304,8 +11968,10 @@ class MainWindow(QMainWindow):
         for label in self.sidebar_section_labels:
             label.setVisible(not compact)
 
-        compact_topbar = event.size().width() < 850
-        self.topbar.setFixedHeight(78 if event.size().height() < 620 else 124)
+        compact_topbar = window_width < 850
+        self.topbar.setFixedHeight(
+            146 if overview_mode else 78 if window_height < 620 else 124
+        )
         self.topbar_layout.setContentsMargins(
             12 if compact_topbar else 34,
             0 if compact_topbar else 4,
@@ -12316,8 +11982,18 @@ class MainWindow(QMainWindow):
             link.setText("" if compact_topbar else self.topbar_link_labels[key])
             link.setToolTip(self.topbar_link_labels[key])
             link.setIconSize(QSize(20 if compact_topbar else 35, 20 if compact_topbar else 35))
-        self.topbar_divider.setVisible(not compact_topbar)
-        self.topbar_version_container.setVisible(not compact_topbar)
+            link.setVisible(not overview_mode)
+        self.topbar_divider.setVisible(not compact_topbar and not overview_mode)
+        self.topbar_version_container.setVisible(not compact_topbar and not overview_mode)
+        self.sidebar_footer.setVisible(overview_mode)
+        self.overview_topbar_frame.setVisible(overview_mode)
+        self.topbar.setProperty("overviewMode", overview_mode)
+        self.topbar.style().unpolish(self.topbar)
+        self.topbar.style().polish(self.topbar)
+        if overview_mode:
+            self.overview_topbar_frame.setGeometry(
+                36, 16, max(0, self.topbar.width() - 25), 130
+            )
 
     # =========================================================
     # NAVIGATION
@@ -12326,9 +12002,11 @@ class MainWindow(QMainWindow):
     def _show_page(self, key):
         page = self.pages[key]
         self.page_stack.setCurrentWidget(page)
+        self._current_page_key = key
         self.page_title.setText(self._page_titles[key])
         self.set_active_button(key)
         self._set_topbar_active(key)
+        self._sync_page_chrome(self.width(), self.height())
 
     def _set_topbar_active(self, page_key):
         active_link = page_key if page_key in ("about", "copyright", "help") else "about"
