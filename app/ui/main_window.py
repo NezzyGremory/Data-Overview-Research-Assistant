@@ -76,6 +76,7 @@ from app.ml.intelligence import MLIntelligenceEngine
 from app.research.intelligence import ResearchIntelligenceEngine
 from app.ui.dataset_search_page import DatasetSearchPage
 from app.ui.dataset_preview_page import DatasetPreviewPage
+from app.ui.editor_analysis_page import EditorAnalysisPage
 from app.ui.style_utils import apply_card_shadow
 from app.storage import Database, ProjectRepository, DatasetVersionManager
 from app.reports import ReportGenerator
@@ -11592,6 +11593,7 @@ class MainWindow(QMainWindow):
         datasets_layout.addWidget(self.datasets_tabs)
 
         self.analysis_page = AnalysisPage(self)
+        self.editor_analysis_page = EditorAnalysisPage(self)
         self.ml_page = MLIntelligencePage(self)
         self.research_page = ResearchPage(self)
         self.papers_tool_page = PapersToolPage(self)
@@ -11610,6 +11612,7 @@ class MainWindow(QMainWindow):
             "dataset": self.datasets_page,
             "dataset_search": self.datasets_page,
             "analysis": self.analysis_page,
+            "editor_analysis": self.editor_analysis_page,
             "ml": self.ml_page,
             "research": self.research_page,
             "papers": self.papers_tool_page,
@@ -11634,6 +11637,7 @@ class MainWindow(QMainWindow):
             "dataset": "Datasets",
             "dataset_search": "Dataset Search",
             "analysis": "Dataset Analysis",
+            "editor_analysis": "Editor Analysis",
             "ml": "ML Intelligence",
             "research": "Academic Research",
             "papers": "Papers",
@@ -11720,6 +11724,7 @@ class MainWindow(QMainWindow):
         self._add_nav_button(layout, "dataset_search", "dataset-search.svg", "Dataset Search")
         self._add_nav_button(layout, "dataset", "dataset.svg", "Dataset")
         self._add_nav_button(layout, "analysis", "analysis.svg", "Analysis")
+        self._add_nav_button(layout, "editor_analysis", "file-text.svg", "Editor Analysis")
         self._add_nav_button(layout, "ml", "ml-intelligence.svg", "ML Intelligence")
         self._add_nav_button(layout, "dashboard", "overview.svg", "Overview")
         layout.addSpacing(24)
@@ -11780,6 +11785,7 @@ class MainWindow(QMainWindow):
             "dataset": self.open_datasets_page,
             "dataset_search": self.open_dataset_search_page,
             "analysis": self.open_analysis_page,
+            "editor_analysis": self.open_editor_analysis_page,
             "ml": self.open_ml_page,
             "research": self.open_research_page,
             "papers": self.open_papers_tool,
@@ -11920,6 +11926,13 @@ class MainWindow(QMainWindow):
                 self._current_filename(),
             )
         self._show_page("analysis")
+
+    def open_editor_analysis_page(self):
+        self.editor_analysis_page.set_dataset(
+            self.current_dataset,
+            self._current_filename() if self.current_dataset is not None else "",
+        )
+        self._show_page("editor_analysis")
 
     def open_ml_page(self):
         if self.current_dataset is None:

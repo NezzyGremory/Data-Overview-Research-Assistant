@@ -329,6 +329,22 @@ QTableView#datasetPreviewTable QHeaderView::section { background: var(--canvas);
 QTableView#datasetPreviewAnalysisTable { background: var(--surface); alternate-background-color: var(--canvas); border: 1px solid var(--border-solid); color: var(--ink); font-size: 14px; gridline-color: #e3e8ef; selection-background-color: var(--blue-active); selection-color: var(--ink); }
 QTableView#datasetPreviewAnalysisTable QHeaderView::section { background: var(--canvas); border: none; border-bottom: 1px solid var(--border-solid); color: var(--body); font-size: 13px; font-weight: 600; padding: 10px 12px; }
 
+/* Guided analysis editor */
+#editorAnalysisScroll, #editorAnalysisContent { background: var(--canvas); border: none; }
+#editorAnalysisStepsCard, #editorAnalysisCodeCard { background: var(--surface); border: 1px solid var(--border); border-radius: var(--card-radius); }
+#editorAnalysisSectionTitle { color: var(--heading); font-family: "Plus Jakarta Sans"; font-size: 19px; font-weight: 700; }
+#editorAnalysisMuted { color: var(--muted); font-size: 14px; }
+#editorAnalysisDatasetBadge { background: var(--blue-active); border-radius: var(--pill-radius); color: var(--blue); font-size: 13px; font-weight: 600; padding: 8px 13px; }
+#editorAnalysisInfoBanner { background: #fffde6; border: 1px solid #f2e4a6; border-radius: var(--small-radius); color: var(--body); font-size: 14px; padding: 11px 14px; }
+#editorAnalysisStepList { background: transparent; border: none; outline: none; }
+#editorAnalysisStepList::item { border-radius: var(--small-radius); color: var(--body); min-height: 44px; padding: 8px 10px; }
+#editorAnalysisStepList::item:hover { background: var(--canvas); }
+#editorAnalysisStepList::item:selected { background: var(--blue-active); color: var(--blue); font-weight: 600; }
+#editorAnalysisTemplateCombo { background: var(--surface); border: 1px solid var(--border); border-radius: var(--button-radius); color: var(--ink); min-height: 38px; padding: 0 10px; }
+#editorAnalysisFieldLabel { color: var(--body); font-size: 14px; font-weight: 600; }
+QPlainTextEdit#editorAnalysisCodeEditor { background: #172338; border: 1px solid #243954; border-radius: var(--small-radius); color: #e8f1ff; font-family: "Intel One Mono"; font-size: 14px; padding: 14px; selection-background-color: #285b91; }
+#editorAnalysisExecutionNote { background: var(--canvas); border-radius: var(--small-radius); color: var(--muted); font-size: 13px; padding: 9px 11px; }
+
 /* Dataset search */
 #datasetSearchResults { background: var(--canvas); border: none; }
 #datasetSearchCard { background: var(--surface); border: 1px solid var(--border); border-radius: var(--card-radius); }
