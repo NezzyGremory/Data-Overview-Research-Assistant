@@ -65,3 +65,10 @@ Nama menu utama lainnya sudah sejalan dengan Figma. Navigasi dan backend memakai
 - Bukti About: `screenshots/app-about-final.png` dan `screenshots/app-about-1366x768.png`.
 - Pada 1366×768, kartu di halaman Dataset kosong ditumpuk agar tidak terpotong horizontal; pada 1920×1080 susunannya mengikuti frame.
 - Logika backend, worker, koneksi signal/slot, data runtime, dan database tidak boleh diubah.
+
+## Credits Roll
+
+- Overlay Copyright memakai scrim navy transparan di atas halaman aktif, font Georgia untuk nuansa film, dan data editable dari `app/ui/data/credits.json`; GUI yang dipakai dicatat sebagai PySide6.
+- Implementasi ada di `app/ui/views/credits_overlay.py` dan style khususnya di `app/ui/styles/credits.qss`; aset logo transparan memakai `app/ui/assets/about-brand-mark.png`.
+- Capture awal, tengah, dan akhir: `screenshots/credits-start.png`, `screenshots/credits-middle.png`, dan `screenshots/credits-end.png`; generator ada di `tools/screenshot_credits.py`.
+- Pemeriksaan interaksi mencakup buka berulang, resize, Escape, klik tutup, penyelesaian otomatis, serta pembersihan animasi.

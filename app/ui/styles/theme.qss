@@ -1,5 +1,7 @@
 /* DORA theme tokens. MainWindow resolves placeholders before Qt loads QSS. */
 /* @canvas: #f1f7ff */
+/* @credits-bg: rgba(7, 26, 50, 232) */
+/* @credits-font: "Georgia" */
 /* @surface: #ffffff */
 /* @ink: #222222 */
 /* @heading: #111111 */

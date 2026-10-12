@@ -1,0 +1,49 @@
+/* Credits-only styling. Palette and font family follow app/ui/styles/theme.qss. */
+QWidget#creditsOverlay {
+    background-color: var(--credits-bg);
+}
+QWidget#creditsContent {
+    background: transparent;
+}
+QLabel#creditsLogoName {
+    color: var(--surface);
+    font-family: var(--credits-font);
+    font-size: 46px;
+    font-weight: 700;
+}
+QLabel#creditsTagline {
+    color: var(--blue-active);
+    font-size: 18px;
+}
+QLabel#creditsTeam {
+    color: var(--blue-bright);
+    font-family: var(--credits-font);
+    font-size: 32px;
+    font-weight: 700;
+}
+QLabel#creditsRole {
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 600;
+}
+QLabel#creditsName {
+    color: var(--surface);
+    font-family: var(--credits-font);
+    font-size: 23px;
+    font-weight: 600;
+}
+QLabel#creditsFooter {
+    color: var(--muted);
+    font-size: 14px;
+}
+QPushButton#creditsSkip {
+    color: var(--surface);
+    background: rgba(255, 255, 255, 24);
+    border: 1px solid var(--blue-active);
+    border-radius: 18px;
+    font-size: 14px;
+    padding: 8px 15px;
+}
+QPushButton#creditsSkip:hover {
+    background: var(--blue-hover);
+}

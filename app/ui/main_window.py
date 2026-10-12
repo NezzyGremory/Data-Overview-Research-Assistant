@@ -78,6 +78,7 @@ from app.ui.dataset_search_page import DatasetSearchPage
 from app.ui.dataset_preview_page import DatasetPreviewPage
 from app.ui.editor_analysis_page import EditorAnalysisPage
 from app.ui.style_utils import apply_card_shadow
+from app.ui.views.credits_overlay import show_credits_overlay
 from app.storage import Database, ProjectRepository, DatasetVersionManager
 from app.reports import ReportGenerator
 from app.core.config import get_data_dir
@@ -11955,7 +11956,7 @@ class MainWindow(QMainWindow):
         self._show_page("about")
 
     def open_copyright(self):
-        self._show_page("copyright")
+        show_credits_overlay(self)
 
     def open_help(self):
         self._show_page("help")
