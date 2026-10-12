@@ -9231,10 +9231,15 @@ class PapersToolPage(QWidget):
         self.papers = []
         self.filtered_papers = []
         self._result_signature = None
+        self._sinta_batch_was_running = False
+        self._sinta_sync_timer = QTimer(self)
+        self._sinta_sync_timer.setInterval(300)
+        self._sinta_sync_timer.timeout.connect(self._sync_sinta_batch_state)
         self._build_ui()
 
     def _build_ui(self):
         root = QVBoxLayout(self)
+        self._root_layout = root
         root.setContentsMargins(30, 25, 30, 25)
         root.setSpacing(16)
 
@@ -9272,7 +9277,8 @@ class PapersToolPage(QWidget):
         # TOOLBAR
         # -----------------------------------------------------
 
-        toolbar = QHBoxLayout()
+        toolbar = QBoxLayout(QBoxLayout.LeftToRight)
+        self._paper_toolbar_layout = toolbar
         toolbar.setSpacing(10)
 
         self.search_input = QLineEdit()
@@ -9307,7 +9313,36 @@ class PapersToolPage(QWidget):
         self.refresh_button.clicked.connect(self._refresh_from_research)
         toolbar.addWidget(self.refresh_button)
 
+        self.sinta_batch_button = QPushButton("Periksa jurnal belum dicek")
+        self.sinta_batch_button.setObjectName("primaryButton")
+        self.sinta_batch_button.setMinimumHeight(38)
+        self.sinta_batch_button.setToolTip(
+            "Periksa jurnal pada hasil Academic Research dengan direktori SINTA."
+        )
+        self.sinta_batch_button.clicked.connect(self._run_sinta_batch)
+        toolbar.addWidget(self.sinta_batch_button)
+
         root.addLayout(toolbar)
+
+        sinta_status_panel = QFrame()
+        sinta_status_panel.setObjectName("researchCard")
+        sinta_status_layout = QVBoxLayout(sinta_status_panel)
+        sinta_status_layout.setContentsMargins(14, 10, 14, 10)
+        sinta_status_layout.setSpacing(6)
+
+        self.sinta_batch_status = QLabel(
+            "Filter status SINTA langsung dari daftar. Tombol di atas memeriksa jurnal yang belum dicek."
+        )
+        self.sinta_batch_status.setObjectName("cardDescription")
+        self.sinta_batch_status.setWordWrap(True)
+        sinta_status_layout.addWidget(self.sinta_batch_status)
+
+        self.sinta_batch_progress = QProgressBar()
+        self.sinta_batch_progress.setTextVisible(False)
+        self.sinta_batch_progress.setMaximumHeight(7)
+        self.sinta_batch_progress.setVisible(False)
+        sinta_status_layout.addWidget(self.sinta_batch_progress)
+        root.addWidget(sinta_status_panel)
 
         # -----------------------------------------------------
         # PAPER TABLE
@@ -9322,18 +9357,20 @@ class PapersToolPage(QWidget):
 
         self.paper_table = QTableWidget()
         self.paper_table.setColumnCount(8)
-        self.paper_table.setHorizontalHeaderLabels(
-            [
-                "#",
-                "Judul Artikel",
-                "Tahun",
-                "Jurnal / Venue",
-                "ISSN",
-                "Sumber",
-                "Relevansi",
-                "Status SINTA",
-            ]
-        )
+        self._paper_headers = [
+            "#",
+            "Judul Artikel",
+            "Tahun",
+            "Jurnal / Venue",
+            "ISSN",
+            "Sumber",
+            "Relevansi",
+            "Status SINTA",
+        ]
+        self._paper_compact_headers = [
+            "#", "Artikel", "Thn", "Jurnal", "ISSN", "Sumber", "Skor", "SINTA"
+        ]
+        self.paper_table.setHorizontalHeaderLabels(self._paper_headers)
         self.paper_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.paper_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.paper_table.setSelectionMode(QTableWidget.SingleSelection)
@@ -9424,6 +9461,11 @@ class PapersToolPage(QWidget):
         )
         self.count_label.setText("0 papers")
         self.open_source_button.setEnabled(False)
+        self.sinta_batch_button.setEnabled(False)
+        self.sinta_batch_progress.setVisible(False)
+        self.sinta_batch_status.setText(
+            "Jalankan Academic Research terlebih dahulu untuk memeriksa jurnal di SINTA."
+        )
 
     def update_from_result(self, result):
         if not isinstance(result, dict):
@@ -9458,6 +9500,7 @@ class PapersToolPage(QWidget):
             if isinstance(paper, dict)
         ]
 
+        self.sinta_batch_button.setEnabled(bool(self.papers))
         self._apply_filter()
 
     def _refresh_from_research(self):
@@ -9467,6 +9510,78 @@ class PapersToolPage(QWidget):
             {},
         )
         self.update_from_result(result)
+
+    def _run_sinta_batch(self):
+        research_page = getattr(self.main_window, "research_page", None)
+        if research_page is None or not research_page.research_result:
+            self.sinta_batch_status.setText(
+                "Jalankan Academic Research terlebih dahulu untuk memuat daftar jurnal."
+            )
+            return
+
+        if getattr(research_page, "_sinta_thread", None) is not None:
+            self._sinta_batch_was_running = True
+            self._sinta_sync_timer.start()
+            self._sync_sinta_batch_state()
+            return
+
+        if not getattr(research_page, "_all_papers", []):
+            research_page._render_filtered_papers()
+        if not getattr(research_page, "_all_papers", []):
+            self.sinta_batch_status.setText(
+                "Hasil Academic Research belum memuat artikel yang dapat diperiksa."
+            )
+            return
+
+        self.sinta_batch_status.setText("Menyiapkan pemeriksaan jurnal SINTA...")
+        research_page._check_pending_sinta_batch()
+        if getattr(research_page, "_sinta_thread", None) is None:
+            self.sinta_batch_status.setText(
+                research_page.sinta_lookup_message.text()
+            )
+            self.update_from_result(research_page.research_result)
+            return
+
+        self._sinta_batch_was_running = True
+        self.sinta_batch_button.setEnabled(False)
+        self._sinta_sync_timer.start()
+        self._sync_sinta_batch_state()
+
+    def _sync_sinta_batch_state(self):
+        research_page = getattr(self.main_window, "research_page", None)
+        if research_page is None:
+            self._sinta_sync_timer.stop()
+            return
+
+        thread = getattr(research_page, "_sinta_thread", None)
+        if thread is not None:
+            self._sinta_batch_was_running = True
+            self.sinta_batch_button.setEnabled(False)
+            self.sinta_batch_button.setText("Memeriksa jurnal...")
+            message = getattr(research_page, "sinta_lookup_message", None)
+            if message is not None:
+                self.sinta_batch_status.setText(message.text())
+            progress = getattr(research_page, "sinta_lookup_progress", None)
+            if progress is not None:
+                minimum, maximum = progress.minimum(), progress.maximum()
+                self.sinta_batch_progress.setRange(minimum, maximum)
+                if minimum != maximum:
+                    self.sinta_batch_progress.setValue(progress.value())
+                self.sinta_batch_progress.setVisible(True)
+            return
+
+        if self._sinta_batch_was_running:
+            result = getattr(research_page, "research_result", {})
+            self.update_from_result(result)
+            message = getattr(research_page, "sinta_lookup_message", None)
+            if message is not None and message.text():
+                self.sinta_batch_status.setText(message.text())
+            self._sinta_batch_was_running = False
+
+        self.sinta_batch_button.setText("Periksa jurnal belum dicek")
+        self.sinta_batch_button.setEnabled(bool(self.papers))
+        self.sinta_batch_progress.setVisible(False)
+        self._sinta_sync_timer.stop()
 
     # =====================================================
     # FILTER
@@ -9600,6 +9715,7 @@ class PapersToolPage(QWidget):
 
         if self.filtered_papers:
             self.paper_table.selectRow(0)
+            self._show_selected_paper()
         else:
             self.paper_detail.setPlainText(
                 "Tidak ada paper yang cocok dengan pencarian atau filter saat ini."
@@ -9744,6 +9860,30 @@ class PapersToolPage(QWidget):
                 "Open Source Failed",
                 f"Unable to open the paper source.\n\n{exc}",
             )
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        compact = event.size().width() < 900
+        self._paper_toolbar_layout.setDirection(
+            QBoxLayout.TopToBottom if compact else QBoxLayout.LeftToRight
+        )
+        self.paper_table.setHorizontalHeaderLabels(
+            self._paper_compact_headers if compact else self._paper_headers
+        )
+        for column, full_label in enumerate(self._paper_headers):
+            header_item = self.paper_table.horizontalHeaderItem(column)
+            if header_item is not None:
+                header_item.setToolTip(full_label)
+        compact_widths = (34, 52, 110, 68, 78, 68, 100)
+        standard_widths = (42, 64, 175, 105, 110, 85, 145)
+        for column, width in zip((0, 2, 3, 4, 5, 6, 7), compact_widths if compact else standard_widths):
+            self.paper_table.setColumnWidth(column, width)
+        self._root_layout.setContentsMargins(
+            16 if compact else 30,
+            16 if compact else 25,
+            16 if compact else 30,
+            16 if compact else 25,
+        )
 
 
 class ResearchLandscapeToolPage(QWidget):
