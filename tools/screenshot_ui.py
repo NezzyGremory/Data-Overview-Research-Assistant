@@ -163,6 +163,31 @@ def main() -> int:
     elif args.page == "overview":
         window.open_dashboard()
     elif args.page == "landscape":
+        window.research_page.research_result = {
+            "papers": [],
+            "landscape": {
+                "paper_count": 83,
+                "summary": {
+                    "papers_analyzed": 83,
+                    "latest_publication_year": 2026,
+                    "dominant_method": "Random Forest",
+                },
+                "methods": [
+                    {"name": "Random Forest", "percentage": 13.25},
+                    {"name": "Desicion Tree", "percentage": 10.84},
+                    {"name": "Logistic Regression", "percentage": 10.84},
+                    {"name": "SVM", "percentage": 3.61},
+                    {"name": "Gradient Boosting", "percentage": 2.41},
+                    {"name": "Linear Regression", "percentage": 2.41},
+                ],
+                "top_venues": [
+                    {"name": "Zenodo", "percentage": 8.43},
+                    {"name": "arXiv", "percentage": 6.02},
+                    {"name": "Rosa P", "percentage": 4.82},
+                    {"name": "BCP Business & Management", "percentage": 2.41},
+                ],
+            },
+        }
         window.open_landscape_tool()
     elif args.page == "about":
         window.open_about()

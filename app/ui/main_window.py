@@ -10076,7 +10076,7 @@ class ResearchLandscapeToolPage(QWidget):
         page_content.setObjectName("researchLandscapePageContent")
         root = QVBoxLayout(page_content)
         self.root_layout = root
-        root.setContentsMargins(36, 20, 28, 16)
+        root.setContentsMargins(35, 21, 26, 16)
         root.setSpacing(0)
 
         header_widget = QWidget()
@@ -10084,7 +10084,9 @@ class ResearchLandscapeToolPage(QWidget):
         header = QHBoxLayout(header_widget)
         self.header_layout = header
         header.setContentsMargins(0, 0, 0, 0)
+        header.setAlignment(Qt.AlignTop)
         title_layout = QVBoxLayout()
+        self.title_layout = title_layout
         title = QLabel("Research Landscape")
         title.setObjectName("pageTitle")
         subtitle = QLabel(
@@ -10095,29 +10097,30 @@ class ResearchLandscapeToolPage(QWidget):
         subtitle.setObjectName("pageSubtitle")
         subtitle.setWordWrap(True)
         title_layout.setContentsMargins(0, 9, 0, 0)
-        title_layout.setSpacing(5)
+        title_layout.setSpacing(0)
         title_layout.addWidget(title)
-        title_layout.addWidget(subtitle)
+        subtitle.setParent(header_widget)
         header.addLayout(title_layout, 1)
+        header.setAlignment(title_layout, Qt.AlignTop)
 
-        self.refresh_button = QPushButton("Search")
+        self.refresh_button = QPushButton("Refresh Landscape")
         self.refresh_button.setObjectName("landscapeSearchButton")
-        self.refresh_button.setMinimumSize(151, 66)
+        self.refresh_button.setFixedSize(299, 66)
         self.refresh_button.setCursor(Qt.PointingHandCursor)
-        search_icon = _resource_path("assets/icons/search-white.svg")
-        if search_icon.exists():
-            self.refresh_button.setIcon(QIcon(str(search_icon)))
-            self.refresh_button.setIconSize(QSize(24, 24))
+        refresh_icon = _resource_path("assets/icons/refresh-white.svg")
+        if refresh_icon.exists():
+            self.refresh_button.setIcon(QIcon(str(refresh_icon)))
+            self.refresh_button.setIconSize(QSize(32, 32))
         self.refresh_button.clicked.connect(self.refresh)
         header.addWidget(self.refresh_button, 0, Qt.AlignTop | Qt.AlignRight)
         root.addWidget(header_widget)
-        root.addSpacing(5)
+        root.addSpacing(4)
 
         self.status_label = QLabel("No academic research result available.")
         self.status_label.setObjectName("landscapeStatus")
         self.status_label.setWordWrap(True)
         root.addWidget(self.status_label)
-        root.addSpacing(25)
+        root.addSpacing(22)
 
         self.container = QWidget()
         self.container.setObjectName("researchLandscapeContainer")
@@ -10207,21 +10210,26 @@ class ResearchLandscapeToolPage(QWidget):
         card.setMinimumHeight(154)
         apply_card_shadow(card)
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(22, 20, 22, 18)
-        layout.setSpacing(6)
+        layout.setContentsMargins(24, 22, 22, 18)
+        layout.setSpacing(0)
 
         title_label = QLabel(title.upper())
         title_label.setObjectName("landscapeMetricTitle")
+        title_label.setFixedHeight(20)
         title_label.setWordWrap(True)
         value_label = QLabel(self._pretty(value))
         value_label.setObjectName("landscapeMetricValue")
+        value_label.setFixedHeight(44)
         value_label.setWordWrap(True)
         subtitle_label = QLabel(subtitle)
         subtitle_label.setObjectName("landscapeMetricSubtitle")
+        subtitle_label.setFixedHeight(24)
         subtitle_label.setWordWrap(True)
 
         layout.addWidget(title_label)
+        layout.addSpacing(14)
         layout.addWidget(value_label)
+        layout.addSpacing(5)
         layout.addWidget(subtitle_label)
         return card
 
@@ -10257,7 +10265,7 @@ class ResearchLandscapeToolPage(QWidget):
                 label, amount = item
             elif isinstance(item, dict):
                 label = ResearchLandscapeToolPage._pick(
-                    item, "method", "label", "name", "category", default=""
+                    item, "method", "venue", "label", "name", "category", default=""
                 )
                 amount = ResearchLandscapeToolPage._pick(
                     item, "percentage", "percent", "score", "count", "paper_count", "value"
@@ -10292,28 +10300,31 @@ class ResearchLandscapeToolPage(QWidget):
                 rows.append((label, amount))
         return rows[:10]
 
-    def _add_distribution_card(self, title, rows, show_values=True):
+    def _add_distribution_card(
+        self, title, rows, show_values=True, right_padding=16, value_gap=12
+    ):
         card = QFrame()
         card.setObjectName("landscapeDistributionCard")
-        card.setMinimumHeight(418)
+        card.setFixedHeight(418)
         card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         apply_card_shadow(card)
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(24, 22, 16, 24)
-        layout.setSpacing(19)
+        layout.setContentsMargins(24, 24, right_padding, 24)
+        layout.setSpacing(20)
         heading = QLabel(title)
         heading.setObjectName("landscapeDistributionTitle")
+        heading.setFixedHeight(34)
         layout.addWidget(heading)
 
         if rows:
             maximum = max((amount for _, amount in rows), default=1) or 1
             for label, amount in rows:
                 row = QHBoxLayout()
-                row.setSpacing(12)
+                row.setSpacing(0)
                 name = QLabel(label)
                 name.setObjectName("landscapeMethodLabel")
-                name.setMinimumWidth(100)
-                name.setMaximumWidth(259)
+                name.setFixedWidth(259)
+                name.setWordWrap(True)
 
                 bar = QProgressBar()
                 bar.setObjectName("landscapeMethodBar")
@@ -10323,11 +10334,15 @@ class ResearchLandscapeToolPage(QWidget):
                 bar.setFixedHeight(8)
 
                 row.addWidget(name)
+                row.addSpacing(12)
                 row.addWidget(bar, 1)
                 if show_values:
                     value_label = QLabel(f"{amount:.2f}".rstrip("0").rstrip(".").replace(".", ","))
                     value_label.setObjectName("landscapeMethodValue")
+                    value_label.setFixedSize(54, 23)
+                    value_label.setAttribute(Qt.WA_StyledBackground, True)
                     value_label.setAlignment(Qt.AlignCenter)
+                    row.addSpacing(value_gap)
                     row.addWidget(value_label)
                 layout.addLayout(row)
             layout.addStretch(1)
@@ -10362,6 +10377,12 @@ class ResearchLandscapeToolPage(QWidget):
             default={},
         )
         method_rows = self._method_distribution_rows(methods)
+        venues = self._pick(
+            landscape,
+            "venue_distribution", "publication_venues", "top_venues", "venues",
+            default={},
+        )
+        venue_rows = self._method_distribution_rows(venues)
         dominant_method = self._pick(
             summary,
             "dominant_method", "top_method", "most_common_method",
@@ -10389,9 +10410,9 @@ class ResearchLandscapeToolPage(QWidget):
         cards.addWidget(self._metric_card("Papers", paper_count, "Literature analyzed"))
         cards.addWidget(self._metric_card("Dominan Method", dominant_method, "Most represented method"))
         cards.addWidget(self._metric_card("Latest Publication", latest_year, "Newest publication year"))
-        cards.setStretch(0, 46)
-        cards.setStretch(1, 49)
-        cards.setStretch(2, 50)
+        cards.setStretch(0, 445)
+        cards.setStretch(1, 477)
+        cards.setStretch(2, 489)
         self.content.addWidget(cards_widget)
 
         distribution_widget = QWidget()
@@ -10401,13 +10422,21 @@ class ResearchLandscapeToolPage(QWidget):
         distribution.setContentsMargins(0, 0, 0, 0)
         distribution.setSpacing(18)
         distribution.addWidget(
-            self._add_distribution_card("Method Distribution", method_rows, show_values=True)
+            self._add_distribution_card(
+                "Method Distribution", method_rows, show_values=True
+            )
         )
         distribution.addWidget(
-            self._add_distribution_card("Method Distribution", method_rows, show_values=False)
+            self._add_distribution_card(
+                "Publication Venues",
+                venue_rows,
+                show_values=True,
+                right_padding=30,
+                value_gap=28,
+            )
         )
-        distribution.setStretch(0, 1)
-        distribution.setStretch(1, 1)
+        distribution.setStretch(0, 805)
+        distribution.setStretch(1, 616)
         self._distribution_layout = distribution
         self._distribution_widget = distribution_widget
         self._distribution_area = distribution_widget
@@ -10419,33 +10448,6 @@ class ResearchLandscapeToolPage(QWidget):
     def _apply_responsive_layout(self, width):
         compact = width < 760
         self.title_label.setFixedHeight(self.title_label.sizeHint().height())
-        self.subtitle_label.setMinimumWidth(0)
-        self.subtitle_label.setSizePolicy(
-            QSizePolicy.Ignored, QSizePolicy.Fixed
-        )
-        content_width = max(1, width - (32 if compact else 64))
-        if not compact:
-            content_width = max(
-                1, content_width - self.refresh_button.minimumWidth() - 6
-            )
-        subtitle_height = self.subtitle_label.heightForWidth(content_width)
-        if subtitle_height > 0:
-            self.subtitle_label.setFixedHeight(subtitle_height)
-        if compact:
-            self.header_widget.setMinimumHeight(
-                self.title_label.minimumHeight()
-                + self.subtitle_label.minimumHeight()
-                + self.refresh_button.minimumHeight()
-                + 34
-            )
-        else:
-            self.header_widget.setMinimumHeight(0)
-        self.root_layout.setContentsMargins(
-            16 if compact else 36,
-            16 if compact else 20,
-            16 if compact else 28,
-            12 if compact else 16,
-        )
         header = getattr(self, "header_layout", None)
         if header is not None:
             header.setDirection(
@@ -10454,7 +10456,46 @@ class ResearchLandscapeToolPage(QWidget):
                 else QBoxLayout.LeftToRight
             )
             header.setSpacing(14 if compact else 6)
-            header.setSpacing(14 if compact else 6)
+        self.subtitle_label.setMinimumWidth(0)
+        self.subtitle_label.setSizePolicy(
+            QSizePolicy.Ignored, QSizePolicy.Fixed
+        )
+        content_width = max(
+            1,
+            width - (32 if compact else 163),
+        )
+        self.subtitle_label.setWordWrap(content_width < 1000)
+        subtitle_height = (
+            self.subtitle_label.heightForWidth(content_width)
+            if content_width < 1000
+            else 25
+        )
+        if subtitle_height > 0:
+            self.subtitle_label.setFixedHeight(subtitle_height)
+        if compact:
+            subtitle_y = (
+                self.title_layout.sizeHint().height()
+                + self.header_layout.spacing()
+                + self.refresh_button.height()
+                + self.header_layout.spacing()
+            )
+        else:
+            subtitle_y = 53
+        self.subtitle_label.setGeometry(
+            0,
+            subtitle_y,
+            min(content_width, self.header_widget.width()),
+            max(1, subtitle_height),
+        )
+        self.header_widget.setMinimumHeight(
+            max(self.header_layout.sizeHint().height(), subtitle_y + subtitle_height)
+        )
+        self.root_layout.setContentsMargins(
+            16 if compact else 36,
+            16 if compact else 21,
+            16 if compact else 26,
+            12 if compact else 16,
+        )
         metrics = getattr(self, "_metrics_layout", None)
         if metrics is not None:
             metrics.setDirection(
@@ -11255,12 +11296,20 @@ class ResearchInsightsPage(QWidget):
 
     def __init__(self, landscape_page, gap_page):
         super().__init__()
+        self.setObjectName("researchInsightsPage")
+        self.setAttribute(Qt.WA_StyledBackground, True)
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         self.tabs = QTabWidget()
         self.tabs.setObjectName("researchInsightsTabs")
+        self.tabs.setAttribute(Qt.WA_StyledBackground, True)
         self.tabs.addTab(landscape_page, "Landscape")
         self.tabs.addTab(gap_page, "Research Gap")
+        tab_pages = self.tabs.findChild(QStackedWidget)
+        if tab_pages is not None:
+            tab_pages.setObjectName("researchInsightsTabPages")
+            tab_pages.setAttribute(Qt.WA_StyledBackground, True)
+        self.tabs.tabBar().setVisible(False)
         root.addWidget(self.tabs)
         self.landscape_page = landscape_page
         self.gap_page = gap_page
