@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QStackedWidget,
     QTableView,
     QVBoxLayout,
     QWidget,
@@ -204,6 +205,7 @@ class DatasetPreviewPage(QWidget):
             button.setCheckable(False)
             self.tab_buttons.append(button)
             tabs_layout.addWidget(button, 0, index)
+            button.clicked.connect(lambda checked=False, tab=index: self._select_tab(tab))
         root.addWidget(tabs)
 
         body = QHBoxLayout()
@@ -282,7 +284,30 @@ class DatasetPreviewPage(QWidget):
         columns_layout.addWidget(self.columns_scroll, 1)
         apply_card_shadow(columns_card)
         body.addWidget(columns_card, 4)
-        root.addLayout(body, 1)
+
+        self.content_stack = QStackedWidget()
+        self.content_stack.setObjectName("datasetPreviewContentStack")
+        preview_content = QWidget()
+        preview_content.setObjectName("datasetPreviewBody")
+        preview_content.setLayout(body)
+        self.content_stack.addWidget(preview_content)
+        self.analysis_tables = {}
+        self.analysis_empty_states = {}
+        self.quality_summary = None
+        for title, description in (
+            ("Data Quality", "Ringkasan kelengkapan dan konsistensi dataset."),
+            ("Columns", "Tipe, jumlah nilai unik, dan contoh isi setiap kolom."),
+            ("Missing Values", "Kolom yang memiliki nilai kosong."),
+            ("Outliers", "Perkiraan outlier numerik berdasarkan rentang IQR."),
+            ("Correlation", "Korelasi antar kolom numerik (Pearson)."),
+        ):
+            page, table, empty_state, summary = self._create_analysis_page(title, description)
+            self.content_stack.addWidget(page)
+            self.analysis_tables[title] = table
+            self.analysis_empty_states[title] = empty_state
+            if title == "Data Quality":
+                self.quality_summary = summary
+        root.addWidget(self.content_stack, 1)
 
         footer = QFrame()
         footer.setObjectName("datasetPreviewFooter")
@@ -304,6 +329,56 @@ class DatasetPreviewPage(QWidget):
         outer.addWidget(self.page_scroll)
         self._layout_columns = 0
         self._apply_responsive_layout(self.width())
+
+    def _select_tab(self, index: int):
+        self.content_stack.setCurrentIndex(index)
+        for tab_index, button in enumerate(self.tab_buttons):
+            button.setProperty("active", tab_index == index)
+            button.style().unpolish(button)
+            button.style().polish(button)
+
+    def _create_analysis_page(self, title: str, description: str):
+        page = QWidget()
+        page.setObjectName("datasetPreviewAnalysisPage")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+        card = QFrame()
+        card.setObjectName("datasetPreviewAnalysisCard")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(18, 14, 18, 16)
+        card_layout.setSpacing(8)
+        heading = QLabel(title)
+        heading.setObjectName("datasetPreviewSectionTitle")
+        card_layout.addWidget(heading)
+        description_label = QLabel(description)
+        description_label.setObjectName("datasetPreviewAnalysisDescription")
+        description_label.setWordWrap(True)
+        card_layout.addWidget(description_label)
+        summary = QLabel("") if title == "Data Quality" else None
+        if summary is not None:
+            summary.setObjectName("datasetPreviewAnalysisSummary")
+            summary.setWordWrap(True)
+            card_layout.addWidget(summary)
+        table = DatasetTableView()
+        table.setObjectName("datasetPreviewAnalysisTable")
+        table.setAlternatingRowColors(True)
+        table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        table.setSelectionMode(QAbstractItemView.SingleSelection)
+        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        table.setWordWrap(False)
+        table.verticalHeader().setVisible(False)
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        table.horizontalHeader().setStretchLastSection(True)
+        card_layout.addWidget(table, 1)
+        empty_state = QLabel("Muat dataset untuk melihat informasi ini.")
+        empty_state.setObjectName("emptyState")
+        empty_state.setAlignment(Qt.AlignCenter)
+        empty_state.setMinimumHeight(120)
+        card_layout.addWidget(empty_state, 1)
+        layout.addWidget(card, 1)
+        apply_card_shadow(card)
+        return page, table, empty_state, summary
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -453,6 +528,100 @@ class DatasetPreviewPage(QWidget):
             self.columns_content_layout.addWidget(row)
         self.columns_content_layout.addStretch(1)
 
+    def _set_analysis_table(self, title: str, dataframe: pd.DataFrame):
+        table = self.analysis_tables[title]
+        table.setModel(DataFrameTableModel(dataframe, table))
+        has_data = not dataframe.empty and len(dataframe.columns) > 0
+        table.setVisible(has_data)
+        self.analysis_empty_states[title].setVisible(not has_data)
+        if not has_data:
+            messages = {
+                "Missing Values": "Tidak ada nilai kosong pada dataset ini.",
+                "Outliers": "Tidak ada kolom numerik yang cukup untuk menghitung outlier.",
+                "Correlation": "Diperlukan minimal dua kolom numerik untuk melihat korelasi.",
+            }
+            self.analysis_empty_states[title].setText(
+                messages.get(title, "Muat dataset untuk melihat informasi ini.")
+            )
+
+    def _update_analysis_views(self, dataframe: pd.DataFrame | None, duplicate_count: int = 0):
+        if dataframe is None:
+            for title in self.analysis_tables:
+                self._set_analysis_table(title, pd.DataFrame())
+            self.quality_summary.setText("")
+            return
+
+        row_count = len(dataframe.index)
+        column_count = len(dataframe.columns)
+        missing_by_column = dataframe.isna().sum()
+        missing_percent = missing_by_column.div(max(row_count, 1)).mul(100)
+        numeric = dataframe.select_dtypes(include="number")
+
+        quality_rows = [
+            ("Rows", f"{row_count:,}"),
+            ("Columns", f"{column_count:,}"),
+            ("Missing cells", f"{int(missing_by_column.sum()):,}"),
+            ("Complete rows", f"{int((~dataframe.isna().any(axis=1)).sum()):,}"),
+            ("Duplicate rows", f"{duplicate_count:,}"),
+            ("Columns with missing values", f"{int((missing_by_column > 0).sum()):,}"),
+        ]
+        quality_table = pd.DataFrame(quality_rows, columns=["Measure", "Value"])
+        self.quality_summary.setText(
+            f"{row_count:,} baris · {column_count:,} kolom · "
+            f"{int(missing_by_column.sum()):,} sel kosong · "
+            f"{duplicate_count:,} baris duplikat"
+        )
+
+        column_rows = []
+        missing_rows = []
+        for column in dataframe.columns:
+            series = dataframe[column]
+            non_null = int(series.notna().sum())
+            unique_count = int(series.nunique(dropna=True))
+            sample_values = series.dropna().astype(str).head(3).tolist()
+            column_rows.append((
+                str(column), self._column_type(str(column), series), non_null,
+                unique_count, ", ".join(sample_values) if sample_values else "—",
+            ))
+            missing_count = int(missing_by_column[column])
+            if missing_count:
+                missing_rows.append((str(column), missing_count, f"{missing_percent[column]:.1f}%"))
+
+        outlier_rows = []
+        for column in numeric.columns:
+            values = numeric[column].dropna()
+            if len(values) < 4:
+                continue
+            q1, q3 = values.quantile([0.25, 0.75]).tolist()
+            spread = q3 - q1
+            count = int(((values < q1 - 1.5 * spread) | (values > q3 + 1.5 * spread)).sum())
+            outlier_rows.append((str(column), count, f"{count / max(len(values), 1) * 100:.1f}%"))
+
+        # Bound correlation work for wide/large datasets while preserving a useful preview.
+        correlation_columns = list(numeric.columns[:20])
+        correlation_data = numeric.loc[:, correlation_columns]
+        if len(correlation_data) > 5000:
+            correlation_data = correlation_data.sample(n=5000, random_state=0)
+        correlation = correlation_data.corr().round(3) if len(correlation_columns) >= 2 else pd.DataFrame()
+        if not correlation.empty:
+            correlation.insert(0, "Column", correlation.index.astype(str))
+            correlation = correlation.reset_index(drop=True)
+
+        self._set_analysis_table("Data Quality", quality_table)
+        self._set_analysis_table(
+            "Columns",
+            pd.DataFrame(column_rows, columns=["Column", "Type", "Non-empty", "Unique", "Example values"]),
+        )
+        self._set_analysis_table(
+            "Missing Values",
+            pd.DataFrame(missing_rows, columns=["Column", "Missing", "Percent"]),
+        )
+        self._set_analysis_table(
+            "Outliers",
+            pd.DataFrame(outlier_rows, columns=["Numeric column", "Outlier rows", "Percent"]),
+        )
+        self._set_analysis_table("Correlation", correlation)
+
     def update_dataset(self, dataframe: pd.DataFrame | None, filename: str = ""):
         self._dataframe = dataframe
         self._dataset_name = filename or "Dataset"
@@ -471,6 +640,7 @@ class DatasetPreviewPage(QWidget):
             self.table.hide()
             self.empty_state.show()
             self._clear_column_rows()
+            self._update_analysis_views(None)
             return
 
         self.empty_state.hide()
@@ -488,6 +658,7 @@ class DatasetPreviewPage(QWidget):
         self.column_count_label.setText(f"{columns:,} columns")
         self.loaded_badge.show()
         self._populate_column_rows(dataframe)
+        self._update_analysis_views(dataframe, duplicates)
         if columns <= 12 and rows <= 500:
             self.table.resizeColumnsToContents()
             for column in range(columns):
