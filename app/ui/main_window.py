@@ -1776,13 +1776,17 @@ class AnalysisPage(QWidget):
         self.page_scroll = QScrollArea(self)
         self.page_scroll.setObjectName("analysisPageScroll")
         self.page_scroll.setWidgetResizable(True)
+        self.page_scroll.setMinimumWidth(0)
         self.page_scroll.setFrameShape(QFrame.NoFrame)
         self.page_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
         content = QWidget()
         content.setObjectName("analysisPageContent")
+        content.setMinimumWidth(0)
+        content.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         root_layout = QVBoxLayout(content)
         self._root_layout = root_layout
+        root_layout.setSizeConstraint(QLayout.SetNoConstraint)
 
         root_layout.setContentsMargins(36, 29, 25, 16)
         root_layout.setSpacing(0)
@@ -1938,6 +1942,7 @@ class AnalysisPage(QWidget):
 
         scroll = QScrollArea()
         scroll.setObjectName("analysisResultScroll")
+        scroll.setMinimumWidth(0)
 
         scroll.setWidgetResizable(
             True
@@ -1950,6 +1955,8 @@ class AnalysisPage(QWidget):
         )
 
         container = QWidget()
+        container.setMinimumWidth(0)
+        container.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
 
         self.result_layout = QVBoxLayout(
             container

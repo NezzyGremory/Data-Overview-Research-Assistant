@@ -116,10 +116,11 @@ class DatasetPreviewPage(QWidget):
         container.setObjectName("datasetPreviewContainer")
         container.setAttribute(Qt.WA_StyledBackground, True)
         container.setMinimumWidth(0)
+        container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         root = QVBoxLayout(container)
         root.setSizeConstraint(QLayout.SetNoConstraint)
         self.root_layout = root
-        root.setContentsMargins(36, 22, 25, 28)
+        root.setContentsMargins(36, 22, 25, 20)
         root.setSpacing(0)
 
         header = QFrame()
@@ -287,6 +288,8 @@ class DatasetPreviewPage(QWidget):
         preview_card = QFrame()
         self.preview_card = preview_card
         preview_card.setObjectName("datasetPreviewTableCard")
+        preview_card.setMinimumWidth(0)
+        preview_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         preview_layout = QVBoxLayout(preview_card)
         preview_layout.setContentsMargins(0, 20, 0, 16)
         preview_layout.setSpacing(24)
@@ -325,22 +328,27 @@ class DatasetPreviewPage(QWidget):
         self.table.horizontalHeader().setMinimumSectionSize(48)
         self.table.horizontalHeader().setFixedHeight(50)
         self.table.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        self.table.setFixedHeight(288)
-        self.table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        preview_layout.addWidget(self.table, 0, Qt.AlignTop)
+        self.table.setMinimumHeight(220)
+        self.table.setMinimumWidth(0)
+        self.table.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
+        self.table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        preview_layout.addWidget(self.table, 1)
         self.empty_state = QLabel("No dataset loaded")
         self.empty_state.setObjectName("emptyState")
         self.empty_state.setAlignment(Qt.AlignCenter)
         self.empty_state.setMinimumHeight(100)
         self.empty_state.hide()
         preview_layout.addWidget(self.empty_state, 0, Qt.AlignTop)
-        preview_layout.addStretch(1)
         apply_card_shadow(preview_card)
-        body.addWidget(preview_card, 972)
+        body.addWidget(preview_card, 7)
 
         columns_card = QFrame()
         self.columns_card = columns_card
         columns_card.setObjectName("datasetPreviewColumnsCard")
+        columns_card.setMinimumWidth(250)
+        columns_card.setMaximumWidth(420)
+        columns_card.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
         columns_layout = QVBoxLayout(columns_card)
         columns_layout.setContentsMargins(0, 0, 0, 0)
         columns_layout.setSpacing(0)
@@ -366,7 +374,7 @@ class DatasetPreviewPage(QWidget):
         self.columns_scroll.setWidget(self.columns_content)
         columns_layout.addWidget(self.columns_scroll, 1)
         apply_card_shadow(columns_card)
-        body.addWidget(columns_card, 448)
+        body.addWidget(columns_card, 3)
 
         self.content_stack = QStackedWidget()
         self.content_stack.setObjectName("datasetPreviewContentStack")
@@ -528,11 +536,19 @@ class DatasetPreviewPage(QWidget):
         self.body_layout.setDirection(
             QBoxLayout.TopToBottom if width < 1000 else QBoxLayout.LeftToRight
         )
+        if width < 1000:
+            self.columns_card.setMaximumWidth(16777215)
+            self.columns_card.setMinimumWidth(0)
+            self.columns_card.setMinimumHeight(220)
+        else:
+            self.columns_card.setMinimumWidth(250)
+            self.columns_card.setMaximumWidth(420)
+            self.columns_card.setMinimumHeight(0)
         self.footer_layout.setDirection(
             QBoxLayout.TopToBottom if width < 520 else QBoxLayout.LeftToRight
         )
         self.footer.setFixedHeight(92 if width < 520 else 61)
-        self.content_stack.setMinimumHeight(470 if width >= 1000 else 360)
+        self.content_stack.setMinimumHeight(470 if width >= 1000 else 520)
         self.tabs_scroll.setMinimumHeight(54)
         self.tab_strip.adjustSize()
         self.file_layout.invalidate()
