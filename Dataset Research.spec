@@ -1,21 +1,32 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 from pathlib import Path
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 
 project_root = Path(SPECPATH).resolve()
-app_icon = project_root / "app" / "ui" / "assets" / "dataset_research.ico"
+ui_root = project_root / "app" / "ui"
+app_icon = ui_root / "assets" / "dataset_research.ico"
+
+runtime_datas = []
+for source in (ui_root / "assets").rglob("*"):
+    if source.is_file() and source.suffix.lower() in {".ico", ".jpg", ".jpeg", ".png", ".svg", ".ttf", ".otf", ".txt"}:
+        runtime_datas.append((str(source), str(source.parent.relative_to(project_root))))
+for source in (ui_root / "styles").glob("*.qss"):
+    runtime_datas.append((str(source), str(source.parent.relative_to(project_root))))
+runtime_datas.append((str(ui_root / "data" / "credits.json"), "app/ui/data"))
+runtime_datas.append((str(ui_root / "app.qss"), "app/ui"))
+runtime_datas.append((str(project_root / "app" / "reports" / "templates" / "report.html"), "app/reports/templates"))
 
 a = Analysis(
     [str(project_root / "app" / "main.py")],
     pathex=[str(project_root)],
     binaries=[],
-    datas=[
-        (str(project_root / "app" / "ui" / "assets" / "logo.jpg"), "app/ui/assets"),
-        (str(app_icon), "app/ui/assets"),
-        (str(project_root / "app" / "ui" / "app.qss"), "app/ui"),
-        (str(project_root / "app" / "reports" / "templates" / "report.html"), "app/reports/templates"),
+    datas=runtime_datas + collect_data_files("pip") + copy_metadata("pip"),
+    hiddenimports=[
+        "app.ui.editor_notebook_kernel",
+        "PySide6.QtSvg",
+        *collect_submodules("pip"),
     ],
-    hiddenimports=[],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -91,8 +102,6 @@ unused_binary_markers = (
     "/pyside6/plugins/imageformats/qpdf.dll",
     "/pyside6/plugins/imageformats/qgif.dll",
     "/pyside6/plugins/imageformats/qicns.dll",
-    "/pyside6/plugins/imageformats/qico.dll",
-    "/pyside6/plugins/imageformats/qsvg.dll",
     "/pyside6/plugins/imageformats/qtga.dll",
     "/pyside6/plugins/imageformats/qtiff.dll",
     "/pyside6/plugins/imageformats/qwbmp.dll",
@@ -113,7 +122,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="Dataset Research",
+    name="DORA",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -133,5 +142,5 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=False,
-    name="Dataset Research",
+    name="DORA",
 )

@@ -2,7 +2,7 @@
 
 DORA adalah aplikasi desktop untuk membantu peneliti memahami dataset, mencoba analisis machine learning, dan meninjau literatur yang berkaitan. Analisis dataset berjalan lokal di komputer. DORA membantu proses riset; hasil dan rekomendasinya tetap perlu ditinjau oleh peneliti.
 
-Versi project saat ini: **v4.0.0**.
+Versi project saat ini: **v5.0.0**.
 
 Nama tim pada tampilan aplikasi: **Metriks Studio**.
 
@@ -219,6 +219,7 @@ Runner evaluasi cepat bekerja offline. Evaluasi benchmark final memerlukan datas
 
 ## Dokumentasi lain
 
+- [Panduan GitHub Release DORA](docs/GITHUB_RELEASE_DORA.md) — langkah rilis v5.0.0, pemeriksaan versi/tag, dan deskripsi siap-tempel.
 - [Panduan Windows Installer](docs/WINDOWS_INSTALLER.md)
 - [Protokol Evaluasi](docs/EVALUATION_PROTOCOL.md)
 - [Pengaturan Usage Telemetry](docs/USAGE_TELEMETRY.md)

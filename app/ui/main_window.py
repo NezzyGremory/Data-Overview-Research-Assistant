@@ -11611,7 +11611,7 @@ class MainWindow(QMainWindow):
         # widget is styled as soon as it is created.
         self._load_stylesheet()
 
-        self.setWindowTitle("Dataset Research")
+        self.setWindowTitle("DORA")
         app_icon = _resource_path("assets/dataset_research.ico")
         if app_icon.exists():
             self.setWindowIcon(QIcon(str(app_icon)))
@@ -11710,7 +11710,7 @@ class MainWindow(QMainWindow):
         except Exception as error:
             self._shutdown_pending = False
             self._shutdown_idle_checks = 0
-            self.setWindowTitle("Dataset Research")
+            self.setWindowTitle("DORA")
             if self.centralWidget() is not None:
                 self.centralWidget().setEnabled(True)
             self.statusBar().clearMessage()
@@ -11812,10 +11812,38 @@ class MainWindow(QMainWindow):
                     theme,
                 )
                 canvas = tokens.get("canvas", "#f1f7ff")
+                surface = tokens.get("surface", "#ffffff")
+                ink = tokens.get("ink", "#222222")
+                body = tokens.get("body", "#564e4e")
+                muted = tokens.get("muted", "#757575")
+                blue = tokens.get("blue", "#006bb8")
+                blue_active = tokens.get("blue-active", "#c9e0ff")
                 palette = self.palette()
-                for role in (QPalette.Window, QPalette.Base, QPalette.AlternateBase):
-                    palette.setColor(role, QColor(canvas))
+                role_colors = {
+                    QPalette.Window: canvas,
+                    QPalette.WindowText: ink,
+                    QPalette.Base: surface,
+                    QPalette.AlternateBase: canvas,
+                    QPalette.ToolTipBase: surface,
+                    QPalette.ToolTipText: ink,
+                    QPalette.Text: ink,
+                    QPalette.Button: surface,
+                    QPalette.ButtonText: ink,
+                    QPalette.BrightText: tokens.get("danger", "#e00000"),
+                    QPalette.Highlight: blue_active,
+                    QPalette.HighlightedText: ink,
+                    QPalette.Link: blue,
+                    QPalette.LinkVisited: blue,
+                }
+                for group in (QPalette.Active, QPalette.Inactive, QPalette.Disabled):
+                    for role, color in role_colors.items():
+                        palette.setColor(group, role, QColor(color))
+                for role in (QPalette.WindowText, QPalette.Text, QPalette.ButtonText):
+                    palette.setColor(QPalette.Disabled, role, QColor(muted if role != QPalette.WindowText else body))
                 self.setPalette(palette)
+                application = QApplication.instance()
+                if application is not None:
+                    application.setPalette(palette)
                 stylesheet += "\n\n" + theme
             self.setStyleSheet(stylesheet)
         except OSError as error:

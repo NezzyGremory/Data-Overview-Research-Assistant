@@ -1,6 +1,6 @@
 # Windows Installer
 
-The installer build creates a per-user Windows setup executable. It creates the install directory under `%LOCALAPPDATA%\Programs\Dataset Research`, always creates Desktop and Start Menu shortcuts, and includes an uninstaller. Administrator permission is not required.
+The installer build creates a per-user Windows setup executable. It creates the install directory under `%LOCALAPPDATA%\Programs\DORA`, always creates Desktop and Start Menu shortcuts, and includes an uninstaller. Administrator permission is not required.
 
 ## Prerequisites
 
@@ -20,17 +20,17 @@ Open PowerShell in the repository folder and run:
 All compiled output is kept in the new `hasil_compile` directory. The installer is written to:
 
 ```text
-hasil_compile\DatasetResearch-v3.0.0-Setup.exe
+hasil_compile\DORA-v5.0.0-Setup.exe
 ```
 
-The standalone application folder is also available at `hasil_compile\payload\Dataset Research\`. The build generates `app\ui\assets\dataset_research.ico` from the project logo, bundles the application with PyInstaller, then compiles the setup program with Inno Setup.
+The standalone application folder is also available at `hasil_compile\DORA\payload\DORA\`. The build generates `app\ui\assets\dataset_research.ico` from the project logo, bundles the application with PyInstaller, then compiles the setup program with Inno Setup.
 
 ## Existing Data
 
-Development runs continue using the repository's `data` directory. An installed build uses `%LOCALAPPDATA%\Dataset Research` for its database, configuration, downloaded datasets, and dataset versions. If an older portable copy has a `data` folder beside its executable, the new build copies missing files into the per-user data folder on first launch and leaves the original files untouched.
+Development runs continue using the repository's `data` directory. An installed build keeps runtime data under `%LOCALAPPDATA%\Dataset Research` so existing user data remains available after the product is renamed to DORA. If an older portable copy has a `data` folder beside its executable, the new build copies missing files into the per-user data folder on first launch and leaves the original files untouched.
 
 To carry data from the development checkout into the installed copy, close the app and copy the contents of the repository's `data` folder to `%LOCALAPPDATA%\Dataset Research` before launching the installed app. Do not distribute `data\config.json` or `.env`; they may contain API credentials.
 
 ## Distribution Notes
 
-The installer is not code-signed, so Windows SmartScreen may show an unrecognized publisher warning. Signing requires a code-signing certificate. Build output and generated icons are local artifacts and are not included in source control by default.
+The build supports Authenticode signing when `SIGN_CERT_SHA1` points to a trusted code-signing certificate. Unsigned builds can show a SmartScreen publisher warning; no packaging change can guarantee that Microsoft Defender or SmartScreen will never flag a new installer. Signing requires a code-signing certificate. The packaged Editor Analysis can run notebook cells and install packages into project-local folders. Build output and generated icons are local artifacts and are not included in source control by default.

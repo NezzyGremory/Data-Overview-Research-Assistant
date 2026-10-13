@@ -1218,6 +1218,8 @@ plt.tight_layout()
         self.execution_note.setText("Kode berhasil disalin ke clipboard.")
 
     def _execution_interpreter(self) -> Path:
+        if getattr(sys, "frozen", False):
+            return Path(sys.executable)
         if self._project_environment is None:
             raise RuntimeError("Lingkungan Python proyek belum disiapkan.")
         if os.name == "nt":
@@ -1295,11 +1297,6 @@ plt.tight_layout()
             return
         if self._kernel_busy or self._execution_queue or self._package_process is not None:
             return
-        if getattr(sys, "frozen", False):
-            self.execution_note.setText(
-                "Kernel notebook belum tersedia pada paket aplikasi ini. Jalankan DORA dari environment Python project."
-            )
-            return
         self._save_current_code()
         self._execution_queue = [index for index in step_indexes if 0 <= index < len(self._steps)]
         if not self._execution_queue:
@@ -1351,10 +1348,23 @@ plt.tight_layout()
         self._kernel_buffer.clear()
         self._kernel_ready = False
         process.setProgram(str(self._execution_interpreter()))
-        process.setArguments([str(worker_path), str(site_packages), str(dataset_path), str(self._project_workspace)])
+        if getattr(sys, "frozen", False):
+            process.setArguments([
+                "--dora-editor-kernel",
+                str(site_packages),
+                str(dataset_path),
+                str(self._project_workspace),
+            ])
+        else:
+            process.setArguments([
+                str(worker_path),
+                str(site_packages),
+                str(dataset_path),
+                str(self._project_workspace),
+            ])
         process.setWorkingDirectory(str(self._project_workspace))
         environment = QProcessEnvironment.systemEnvironment()
-        app_site_packages = sysconfig.get_paths().get("purelib", "")
+        app_site_packages = "" if getattr(sys, "frozen", False) else sysconfig.get_paths().get("purelib", "")
         existing_pythonpath = environment.value("PYTHONPATH")
         pythonpath = [path for path in (app_site_packages, existing_pythonpath) if path]
         environment.insert("PYTHONPATH", os.pathsep.join(pythonpath))
@@ -1647,9 +1657,20 @@ plt.tight_layout()
         process = QProcess(self)
         self._package_process = process
         process.setProgram(str(self._execution_interpreter()))
-        process.setArguments([
-            "-m", "pip", "install", "--disable-pip-version-check", "--upgrade", *packages,
-        ])
+        if getattr(sys, "frozen", False):
+            process.setArguments([
+                "--dora-editor-pip",
+                "install",
+                "--disable-pip-version-check",
+                "--upgrade",
+                "--target",
+                str(self._environment_site_packages()),
+                *packages,
+            ])
+        else:
+            process.setArguments([
+                "-m", "pip", "install", "--disable-pip-version-check", "--upgrade", *packages,
+            ])
         process.setWorkingDirectory(str(self._project_workspace))
         environment = QProcessEnvironment.systemEnvironment()
         environment.insert("PYTHONUTF8", "1")

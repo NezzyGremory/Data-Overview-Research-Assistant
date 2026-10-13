@@ -68,7 +68,7 @@ class TelemetryClient:
             "feature_name": safe_feature,
             "status": safe_status or "completed",
             "duration_ms": duration_ms,
-            "app_version": os.getenv("APP_VERSION", "4.0.0")[:30],
+            "app_version": os.getenv("APP_VERSION", "5.0.0")[:30],
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
         threading.Thread(target=self._send, args=(payload,), daemon=True).start()
