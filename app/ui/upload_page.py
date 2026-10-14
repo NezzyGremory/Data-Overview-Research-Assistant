@@ -226,7 +226,7 @@ class UploadPage(QWidget):
             self,
             "Select Dataset",
             "",
-            "CSV Files (*.csv)"
+            "Datasets (*.csv *.xlsx *.xls *.json *.parquet);;CSV Files (*.csv);;Excel Files (*.xlsx *.xls);;JSON Files (*.json);;Parquet Files (*.parquet)"
         )
 
         if not file_path:
@@ -235,7 +235,7 @@ class UploadPage(QWidget):
         try:
 
             dataframe = (
-                self.main_window.loader.load_csv(
+                self.main_window.loader.load(
                     file_path
                 )
             )

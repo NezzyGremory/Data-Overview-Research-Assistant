@@ -495,6 +495,30 @@ class DatasetVersionManager:
 
         return self._row_to_version(row)
 
+    def set_current_version(
+        self,
+        project_id: int,
+        version: int,
+    ) -> DatasetVersion:
+        """Mark an existing version as current without creating a new copy."""
+        if self.get_version(project_id, version) is None:
+            raise ValueError(
+                f"Version {version} tidak ditemukan untuk project {project_id}."
+            )
+
+        self.database.execute(
+            """
+            UPDATE dataset_versions
+            SET is_current = CASE WHEN version = ? THEN 1 ELSE 0 END
+            WHERE project_id = ?
+            """,
+            (version, project_id),
+        )
+        current = self.get_current_version(project_id)
+        if current is None:
+            raise RuntimeError("Versi aktif tidak dapat diperbarui.")
+        return current
+
     # ============================================================
     # LOAD DATAFRAME
     # ============================================================

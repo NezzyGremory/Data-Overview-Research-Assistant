@@ -83,6 +83,10 @@ Academic Research mencari serta memberi peringkat paper dari provider akademik y
 - Lihat pratinjau baris dan identifikasi tipe kolom.
 - Tinjau Data Quality, Columns, Missing Values, Outliers, dan Correlation.
 - Gunakan tindakan pembersihan data dan lanjutkan dataset ke tahap analisis.
+- Review Data Types Overview, Distribution Analysis, Class Balance, Data Leakage Check, split/preprocessing recommendations, and feature selection hints before modeling.
+- Use the ML Pipeline Checklist to see which workflow stages are complete, recommended, or not yet available.
+- Pada Missing Values, tinjau jumlah nilai kosong dan nilai 0 secara terpisah; buat salinan **Cleaned Dataset** dengan pilihan kolom, aturan `any/all`, dan perlakuan nol.
+- Ekspor salinan bersih ke folder dan nama CSV pilihan sekarang atau nanti. Versi Original tetap tersedia untuk analisis.
 
 ### Analysis
 
@@ -131,16 +135,62 @@ Provider pencarian akademik yang digunakan aplikasi mencakup OpenAlex, Crossref,
 - Overview menunjukkan status pipeline dan ringkasan hasil yang sudah tersedia.
 - Help memuat panduan penggunaan dan pintasan ke halaman aplikasi.
 - Tombol Copyright menampilkan animasi end credits; informasinya dapat diedit di `app/ui/data/credits.json`.
+- Atur **UI Scale** dari menu **View** dengan pilihan Auto atau 70%–150%. Gunakan **Ctrl+=** untuk memperbesar, **Ctrl+-** untuk memperkecil, **Ctrl+0** untuk kembali ke Auto, atau **Ctrl+scroll** di area konten.
+- Tombol sidebar di topbar dan pilihan **Show Sidebar** pada menu View dapat membuka atau menciutkan navigasi. Pada jendela sempit, sidebar otomatis berubah menjadi ikon.
 
 ## Alur penggunaan singkat
 
 1. Buka **Dataset** untuk memilih CSV, atau cari dataset publik di **Dataset Search**.
 2. Tinjau tabel dan kualitas data pada halaman Dataset.
-3. Jalankan **Analysis** dan periksa temuan sebelum membersihkan atau memodelkan data.
-4. Gunakan **ML Intelligence** untuk meninjau task dan kandidat metode.
-5. Gunakan **Editor Analysis** untuk mengubah dan menjalankan template kode secara manual.
-6. Jalankan **Academic Research**, lalu tinjau paper, landscape, serta kandidat research gap.
-7. Buka **Research Report** untuk melihat ringkasan dan mengekspor PDF jika semua tahap siap.
+3. Run **Analysis** and review the data types, distributions, class balance, quality summary, leakage warnings, split/preprocessing guidance, and feature selection hints before modeling. These are analytical suggestions, not decisions.
+4. Pada **Missing Values**, tinjau jumlah kosong dan nilai 0, lalu gunakan **Drop Missing Values** jika diperlukan. Periksa pratinjau dan konfirmasi sebelum membuat versi bersih.
+5. Gunakan **ML Intelligence** untuk meninjau task, kandidat metode, dan evaluasi empiris.
+6. Gunakan **Editor Analysis** untuk mengubah dan menjalankan template kode secara manual.
+7. Jalankan **Academic Research**, lalu tinjau paper, landscape, serta kandidat research gap.
+8. Buka **Research Report** untuk melihat ringkasan dan mengekspor PDF jika semua tahap siap.
+9. Jika tampilan terlalu besar atau kecil, buka **View → UI Scale** atau gunakan shortcut zoom. Skala Auto menyesuaikan diri dengan layar aktif.
+
+## Catatan Penting
+
+- **Drop Missing Values** membuat versi dataset baru di workspace. DataFrame aktif dan file CSV sumber tidak ditulis ulang; pilih **Original** atau versi **Cleaned** pada halaman Analysis untuk berpindah.
+- Mode Auto menandai nilai 0 hanya pada kolom numerik yang secara statistik mencurigakan dan selalu menampilkan peringatan. Mode Selective membatasi kolom yang dipilih; mode Strict dapat menghapus kelas pada kolom biner atau target.
+- Mode `any` menghapus baris jika sedikitnya satu kolom terpilih missing. Mode `all` hanya menghapus baris jika semua kolom terpilih missing, sehingga baris yang tersisa masih dapat memiliki missing value.
+- Export CSV bersifat opsional. Tanpa export, versi bersih tetap tersimpan di workspace dan dapat diekspor kemudian melalui **Export Cleaned Dataset**.
+
+### Strategi missing value
+
+Dialog **Drop Missing Values** menyediakan empat strategi:
+
+- **Drop baris** menghapus baris berdasarkan kolom terpilih (`any` atau `all`).
+- **Drop kolom** menghapus kolom terpilih jika proporsi missing melebihi ambang.
+- **Imputasi** mendukung mean, median, mode, forward/back fill, interpolasi, konstanta, dan statistik per kelompok.
+- **Laporan saja** menghitung dampak tanpa mengubah dataset.
+
+Placeholder umum seperti `-`, `NA`, `null`, `tidak tersedia`, dan `#VALUE!` dinormalisasi. Kolom angka berbentuk teks diparse dengan heuristik format Indonesia maupun internasional; kolom ID/kode tetap berupa teks. Mode nilai 0 otomatis hanya menandai kolom numerik yang mencurigakan dan menampilkan peringatan di pratinjau. Nilai 0 yang valid dapat dipertahankan dengan memilih **Jangan anggap 0 missing**.
+
+Hasil yang dikonfirmasi disimpan sebagai versi baru di workspace. Saat diekspor ke CSV, baris yang dibuang juga disimpan dalam file saudara bernama `<nama>_dropped_rows.csv`. Loader menerima CSV, Excel (`.xlsx`/`.xls`), JSON, dan Parquet; CSV mendeteksi encoding serta delimiter umum secara otomatis.
+
+Contoh pemakaian analyzer:
+
+```python
+from app.analyzer.cleaner import drop_missing
+
+# Dataset produksi padi: nilai produksi nol yang mencurigakan terdeteksi otomatis.
+padi = drop_missing(dataframe_padi, strategy="drop_rows", how="any")
+print(padi.formatted_report)
+
+# Dataset sensor: laporkan dahulu, lalu isi temperatur dengan median per perangkat.
+preview = drop_missing(dataframe_sensor, strategy="report")
+sensor_bersih = drop_missing(
+    dataframe_sensor,
+    strategy="impute",
+    method="median",
+    group_by=["device_id"],
+    zero_as_missing=False,
+)
+```
+
+Tambahkan marker khusus dengan `extra_placeholders=["belum diukur"]`. Untuk menganggap 0 sebagai missing pada kolom terpilih saja, gunakan `zero_as_missing=False, zero_cols=["measurement"]`.
 
 ## Persyaratan dan teknologi
 

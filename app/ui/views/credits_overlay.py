@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.ui.scale import scale_stylesheet
+
 
 _UI_ROOT = Path(__file__).resolve().parents[1]
 _CREDITS_PATH = _UI_ROOT / "data" / "credits.json"
@@ -40,6 +42,7 @@ class CreditsOverlay(QWidget):
     def __init__(self, parent: QWidget):
         super().__init__(parent)
         self.setObjectName("creditsOverlay")
+        self.setProperty("scaleStylesheetExternally", True)
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setFocusPolicy(Qt.StrongFocus)
         self._closing = False
@@ -50,7 +53,9 @@ class CreditsOverlay(QWidget):
 
         credits = _load_credits()
         self._theme_tokens = self._read_theme_tokens()
-        self.setStyleSheet(self._resolve_stylesheet())
+        application = QApplication.instance()
+        scale = float(application.property("uiScale") or 1.0) if application else 1.0
+        self.apply_scale(scale)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -160,6 +165,10 @@ class CreditsOverlay(QWidget):
             lambda match: self._theme_tokens.get(match.group(1), match.group(0)),
             stylesheet,
         )
+
+    def apply_scale(self, scale: float) -> None:
+        """Refresh overlay dimensions when the application zoom changes."""
+        self.setStyleSheet(scale_stylesheet(self._resolve_stylesheet(), scale))
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -290,6 +299,9 @@ def show_credits_overlay(parent: QWidget) -> CreditsOverlay:
         return existing
 
     overlay = CreditsOverlay(parent)
+    scale_manager = getattr(parent, "scale_manager", None)
+    if scale_manager is not None:
+        scale_manager.scaleChanged.connect(overlay.apply_scale)
     parent._credits_overlay = overlay
     parent.installEventFilter(overlay)
     overlay.destroyed.connect(lambda: setattr(parent, "_credits_overlay", None))

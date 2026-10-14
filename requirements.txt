@@ -6,6 +6,8 @@ httpx
 scikit-learn
 scipy
 pyarrow
+openpyxl
+xlrd
 jinja2
 matplotlib
 fastapi

@@ -4,6 +4,8 @@ from pathlib import Path
 from typing import Callable, Optional
 
 import pandas as pd
+from app.ui.scale import logical_width
+
 from PySide6.QtCore import QObject, QThread, Qt, Signal, QUrl, QTimer, QStandardPaths, QSize
 from PySide6.QtGui import QDesktopServices, QIcon, QPalette, QFont, QColor
 from PySide6.QtWidgets import (
@@ -273,15 +275,15 @@ class DatasetSearchPage(QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         width = self.scroll.viewport().width()
-        compact = width < 760
-        desktop_reference = width >= 1400
+        compact = logical_width(width) < 760
+        desktop_reference = logical_width(width) >= 1400
         self.container.layout().setContentsMargins(
             16 if compact else 36,
             16 if compact else 29,
             16 if compact else 27,
             12 if compact else 16,
         )
-        stacked_controls = width < 900
+        stacked_controls = logical_width(width) < 900
         self.search_controls_layout.setDirection(
             QBoxLayout.TopToBottom if stacked_controls else QBoxLayout.LeftToRight
         )
@@ -315,7 +317,7 @@ class DatasetSearchPage(QWidget):
             self.status_label.setMaximumHeight(16777215)
         # Two result cards contain long metadata and action labels. Keep one
         # column until the actual scroll viewport is wide enough for both.
-        direction = QBoxLayout.TopToBottom if width < 1400 else QBoxLayout.LeftToRight
+        direction = QBoxLayout.TopToBottom if logical_width(width) < 1400 else QBoxLayout.LeftToRight
         for row in self._result_rows:
             row_layout = row.layout()
             row_layout.setDirection(direction)

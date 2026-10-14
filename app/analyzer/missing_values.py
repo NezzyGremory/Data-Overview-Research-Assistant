@@ -1,70 +1,53 @@
 import pandas as pd
 
-
-MISSING_TEXT_VALUES = {
-    "", "na", "n/a", "n.a.", "nan", "null", "none", "nil",
-    "undefined", "missing", "missing value", "-", "?", "#na", "#n/a",
-}
-INVISIBLE_WHITESPACE = "\u200b\u200c\u200d\ufeff"
-INVISIBLE_WHITESPACE_TRANSLATION = str.maketrans("", "", INVISIBLE_WHITESPACE)
+from app.analyzer.cleaner import MISSING_TOKENS, drop_missing, normalize_missing
 
 
-def _normalize_missing_cell(value):
-    if not isinstance(value, str):
-        return value
-    text = value.translate(INVISIBLE_WHITESPACE_TRANSLATION).strip()
-    return pd.NA if text.casefold() in MISSING_TEXT_VALUES else text
+MISSING_TEXT_VALUES = MISSING_TOKENS
 
 
-def normalize_missing_values(dataframe: pd.DataFrame) -> pd.DataFrame:
-    """Return a copy where blank strings and common null markers are missing."""
-    normalized = dataframe.copy()
-    for column in normalized.columns:
-        series = normalized[column]
-        is_categorical = isinstance(series.dtype, pd.CategoricalDtype)
-        if not (
-            is_categorical
-            or pd.api.types.is_object_dtype(series.dtype)
-            or pd.api.types.is_string_dtype(series.dtype)
-        ):
-            continue
-        # Excel/CSV cells may contain ordinary or invisible whitespace. Keep
-        # non-text values intact in mixed-type object columns.
-        source = series.astype(object) if is_categorical else series
-        normalized[column] = source.map(_normalize_missing_cell)
-    return normalized
+def normalize_missing_values(
+    dataframe: pd.DataFrame,
+    extra_placeholders: list[str] | None = None,
+    zero_as_missing: bool | str = False,
+) -> pd.DataFrame:
+    """Compat wrapper for the shared missing-value normalizer."""
+    return normalize_missing(
+        dataframe,
+        extra_placeholders=extra_placeholders,
+        zero_as_missing=zero_as_missing,
+    )
 
 
-def drop_missing_rows(dataframe: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
+def drop_missing_rows(
+    dataframe: pd.DataFrame,
+    zero_as_missing: bool | str = "auto",
+    zero_cols: list[str] | None = None,
+    extra_placeholders: list[str] | None = None,
+) -> tuple[pd.DataFrame, dict]:
     """Drop every row containing an actual or recognized textual missing value."""
     if dataframe.empty or dataframe.shape[1] == 0:
         raise ValueError("Dataset tidak memiliki baris atau kolom untuk dibersihkan.")
 
-    normalized = normalize_missing_values(dataframe)
-    missing_before = int(normalized.isna().sum().sum())
-    rows_before = len(normalized)
-    rows_with_missing = int(normalized.isna().any(axis=1).sum())
-    cleaned = normalized.dropna(axis=0, how="any").copy()
-    missing_after = int(cleaned.isna().sum().sum())
-
-    if missing_after:
+    result = drop_missing(
+        dataframe,
+        zero_as_missing=zero_as_missing,
+        zero_cols=zero_cols,
+        extra_placeholders=extra_placeholders,
+        strategy="drop_rows",
+    )
+    if int(result.cleaned_df.isna().sum().sum()):
         raise ValueError(
-            f"Drop missing belum tuntas: masih ada {missing_after:,} nilai kosong."
+            f"Drop missing belum tuntas: masih ada {int(result.cleaned_df.isna().sum().sum()):,} nilai kosong."
         )
-    if cleaned.empty:
+    if result.cleaned_df.empty:
         raise ValueError(
             "Tidak ada baris yang seluruh kolomnya terisi. Dataset tidak diubah."
         )
-
-    return cleaned, {
-        "rows_before": rows_before,
-        "rows_after": len(cleaned),
-        "rows_dropped": rows_before - len(cleaned),
-        "rows_with_missing": rows_with_missing,
-        "missing_before": missing_before,
-        "missing_after": missing_after,
-        "how": "any",
-    }
+    report = dict(result.report)
+    report["rows_with_missing"] = result.rows_dropped
+    report["how"] = "any"
+    return result.cleaned_df, report
 
 
 def impute_missing_values(dataframe: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
@@ -139,12 +122,19 @@ class MissingValueAnalyzer:
     """Analyze missing values in a dataset."""
 
     def analyze(self, dataframe: pd.DataFrame) -> list[dict]:
-        normalized = normalize_missing_values(dataframe)
+        normalized = normalize_missing(dataframe)
         total_rows = len(normalized)
         results = []
 
         for column in normalized.columns:
             missing_count = int(normalized[column].isna().sum())
+            if pd.api.types.is_bool_dtype(normalized[column].dtype):
+                zero_count = 0
+            else:
+                numeric_values = pd.to_numeric(
+                    normalized[column], errors="coerce"
+                )
+                zero_count = int(numeric_values.eq(0).fillna(False).sum())
 
             results.append(
                 {
@@ -152,6 +142,12 @@ class MissingValueAnalyzer:
                     "missing_count": missing_count,
                     "missing_percentage": (
                         missing_count / total_rows * 100
+                        if total_rows > 0
+                        else 0
+                    ),
+                    "zero_count": zero_count,
+                    "zero_percentage": (
+                        zero_count / total_rows * 100
                         if total_rows > 0
                         else 0
                     ),

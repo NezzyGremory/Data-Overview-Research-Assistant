@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.ui.scale import logical_width, ui_px
 from app.ui.style_utils import apply_card_shadow
 
 
@@ -182,24 +183,24 @@ class AboutPage(QWidget):
         self._apply_responsive_width(event.size().width())
 
     def _apply_responsive_width(self, page_width: int) -> None:
-        available = max(320, page_width - 82)
-        card_width = min(935, available)
-        text_width = max(1, page_width - 82)
+        available = max(ui_px(320), page_width - ui_px(82))
+        card_width = min(ui_px(935), available)
+        text_width = max(1, page_width - ui_px(82))
         subtitle_height = self.subtitle.fontMetrics().boundingRect(
             QRect(0, 0, text_width, 1000),
             Qt.TextWordWrap,
             self.subtitle.text(),
         ).height()
-        self.subtitle.setFixedHeight(max(31, subtitle_height + 4))
+        self.subtitle.setFixedHeight(max(ui_px(31), subtitle_height + ui_px(4)))
         self.application_card.setFixedWidth(card_width)
         self.application_layout.setDirection(
-            QBoxLayout.LeftToRight if card_width >= 820 else QBoxLayout.TopToBottom
+            QBoxLayout.LeftToRight if logical_width(card_width) >= 820 else QBoxLayout.TopToBottom
         )
-        if card_width >= 820:
-            self.application_identity.setFixedWidth(416)
+        if logical_width(card_width) >= 820:
+            self.application_identity.setFixedWidth(ui_px(416))
             self.application_description_panel.setMinimumHeight(0)
             self.application_description_panel.setMaximumHeight(16777215)
-            body_width = max(1, card_width - 428)
+            body_width = max(1, card_width - ui_px(428))
             description_height = self.application_description.fontMetrics().boundingRect(
                 QRect(0, 0, body_width, 1000),
                 Qt.TextWordWrap,
@@ -208,22 +209,25 @@ class AboutPage(QWidget):
             self.application_description.setFixedHeight(description_height)
             self.application_identity.setMinimumHeight(0)
             self.application_identity.setMaximumHeight(16777215)
-            self.application_card.setFixedHeight(max(259, description_height + 84))
+            self.application_card.setFixedHeight(max(ui_px(259), description_height + ui_px(84)))
         else:
-            self.application_identity.setFixedWidth(max(0, card_width - 32))
-            body_width = max(1, card_width - 12)
+            self.application_identity.setFixedWidth(max(0, card_width - ui_px(32)))
+            body_width = max(1, card_width - ui_px(12))
             description_height = self.application_description.fontMetrics().boundingRect(
                 QRect(0, 0, body_width, 1000),
                 Qt.TextWordWrap,
                 self.application_description.text(),
             ).height()
             self.application_description.setFixedHeight(description_height)
-            identity_height = 179
+            identity_height = ui_px(179)
             self.application_identity.setFixedHeight(identity_height)
             self.application_description_panel.setFixedHeight(
-                description_height + 79
+                description_height + ui_px(79)
             )
             self.application_card.setFixedHeight(
-                identity_height + description_height + 81
+                identity_height + description_height + ui_px(81)
             )
         self.canvas.setMinimumWidth(max(1, page_width))
+
+    def apply_scale(self, _scale=None):
+        self._apply_responsive_width(self.width())

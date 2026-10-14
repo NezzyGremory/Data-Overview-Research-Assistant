@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
+from app.ui.scale import logical_width
+
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSize, Qt
 from PySide6.QtGui import QIcon, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
@@ -484,7 +486,7 @@ class DatasetPreviewPage(QWidget):
         self._apply_responsive_layout(self.width())
 
     def _apply_responsive_layout(self, width: int):
-        compact = width < 760
+        compact = logical_width(width) < 760
         self.root_layout.setContentsMargins(
             12 if compact else 36,
             14 if compact else 22,
@@ -492,20 +494,20 @@ class DatasetPreviewPage(QWidget):
             14 if compact else 29,
         )
         self.header_layout.setDirection(
-            QBoxLayout.TopToBottom if width < 620 else QBoxLayout.LeftToRight
+            QBoxLayout.TopToBottom if logical_width(width) < 620 else QBoxLayout.LeftToRight
         )
-        self.header.setFixedHeight(126 if width < 620 else 78)
+        self.header.setFixedHeight(126 if logical_width(width) < 620 else 78)
         self.header_upload_button.setFixedSize(
-            190 if width < 620 else 253,
-            46 if width < 620 else 63,
+            190 if logical_width(width) < 620 else 253,
+            46 if logical_width(width) < 620 else 63,
         )
-        self.upload_action.setFixedSize(190 if width < 620 else 253, 126 if width < 620 else 78)
+        self.upload_action.setFixedSize(190 if logical_width(width) < 620 else 253, 126 if logical_width(width) < 620 else 78)
         self.file_actions.setDirection(
-            QBoxLayout.TopToBottom if width < 430 else QBoxLayout.LeftToRight
+            QBoxLayout.TopToBottom if logical_width(width) < 430 else QBoxLayout.LeftToRight
         )
-        self.file_actions.setSpacing(8 if width < 430 else 0)
-        self.file_card.setMinimumHeight(230 if width < 430 else 176)
-        columns = 5 if width >= 1100 else 2 if width >= 620 else 1
+        self.file_actions.setSpacing(8 if logical_width(width) < 430 else 0)
+        self.file_card.setMinimumHeight(230 if logical_width(width) < 430 else 176)
+        columns = 5 if logical_width(width) >= 1100 else 2 if logical_width(width) >= 620 else 1
         if columns != self._layout_columns:
             for column in range(self.overview_layout.columnCount()):
                 self.overview_layout.setColumnMinimumWidth(column, 0)
@@ -534,9 +536,9 @@ class DatasetPreviewPage(QWidget):
             self._layout_columns = columns
 
         self.body_layout.setDirection(
-            QBoxLayout.TopToBottom if width < 1000 else QBoxLayout.LeftToRight
+            QBoxLayout.TopToBottom if logical_width(width) < 1000 else QBoxLayout.LeftToRight
         )
-        if width < 1000:
+        if logical_width(width) < 1000:
             self.columns_card.setMaximumWidth(16777215)
             self.columns_card.setMinimumWidth(0)
             self.columns_card.setMinimumHeight(220)
@@ -545,10 +547,10 @@ class DatasetPreviewPage(QWidget):
             self.columns_card.setMaximumWidth(420)
             self.columns_card.setMinimumHeight(0)
         self.footer_layout.setDirection(
-            QBoxLayout.TopToBottom if width < 520 else QBoxLayout.LeftToRight
+            QBoxLayout.TopToBottom if logical_width(width) < 520 else QBoxLayout.LeftToRight
         )
-        self.footer.setFixedHeight(92 if width < 520 else 61)
-        self.content_stack.setMinimumHeight(470 if width >= 1000 else 520)
+        self.footer.setFixedHeight(92 if logical_width(width) < 520 else 61)
+        self.content_stack.setMinimumHeight(470 if logical_width(width) >= 1000 else 520)
         self.tabs_scroll.setMinimumHeight(54)
         self.tab_strip.adjustSize()
         self.file_layout.invalidate()

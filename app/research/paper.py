@@ -19,6 +19,7 @@ class Paper:
     keywords: List[str] = field(default_factory=list)
     issn: List[str] = field(default_factory=list)
     sinta_screening: Dict[str, Any] = field(default_factory=dict)
+    accreditation_screening: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -35,6 +36,7 @@ class Paper:
             "keywords": self.keywords,
             "issn": self.issn,
             "sinta_screening": self.sinta_screening,
+            "accreditation_screening": self.accreditation_screening,
         }
 
     @property

@@ -164,6 +164,27 @@ def test_create_version_and_trail():
         print("  - create_version_and_trail: PASSED")
 
 
+def test_set_current_version_switches_without_creating_version():
+    with temp_workspace() as ws:
+        vm: DatasetVersionManager = ws["version_manager"]
+        project_id = ws["project_id"]
+        original = ws["sample_df"]
+        vm.create_initial_version(project_id, dataframe=original)
+        vm.create_version(
+            project_id=project_id,
+            dataframe=original.iloc[:3],
+            operation="drop_missing_values",
+            label="Cleaned Dataset",
+        )
+
+        selected = vm.set_current_version(project_id, 0)
+
+        assert selected.version == 0
+        assert selected.is_current is True
+        assert len(vm.list_versions(project_id)) == 2
+        assert vm.get_version(project_id, 1).is_current is False
+
+
 def test_load_dataframes_by_version():
     with temp_workspace() as ws:
         vm: DatasetVersionManager = ws["version_manager"]

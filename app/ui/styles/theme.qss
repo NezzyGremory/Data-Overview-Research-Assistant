@@ -584,7 +584,8 @@ QLabel#overviewInfoIcon { background: transparent; }
 QFrame#overviewPipelineCard,
 QFrame#overviewDatasetCard,
 QFrame#overviewQualityCard,
-QFrame#overviewMLCard {
+QFrame#overviewMLCard,
+QFrame#overviewGapCard {
     background: rgba(255, 255, 255, 0.5);
     border: 1px solid #c7c6c6;
     border-radius: 15px;
@@ -679,6 +680,15 @@ QLabel#overviewReadinessBadge {
     border: none;
     border-radius: 12px;
     color: #806600;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 3px 9px;
+}
+QLabel#overviewGapBadge {
+    background: #cde8ff;
+    border: none;
+    border-radius: 12px;
+    color: #006bb8;
     font-size: 14px;
     font-weight: 600;
     padding: 3px 9px;

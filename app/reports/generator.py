@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Union
 import html
 import math
 import re
+import pandas as pd
 
 try:
     from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -225,6 +226,79 @@ class ReportGenerator:
         }
         primary_task_display = task_display_map.get(task_name, task_name.replace("_", " ").title())
 
+        ml_readiness = analysis_data.get("ml_readiness") or {}
+        if not ml_readiness and isinstance(metadata.get("dataframe"), pd.DataFrame):
+            from app.analyzer.ml_readiness import analyze_ml_readiness
+
+            recommendation = ml_data.get("recommendation") or {}
+            ml_readiness = analyze_ml_readiness(
+                metadata["dataframe"],
+                missing_values=missing_values,
+                duplicates=duplicates,
+                outliers=analysis_data.get("outliers") or [],
+                quality_issues=raw_quality,
+                target=target_col,
+                task=task_name if task_name != "unknown_task" else None,
+                recommended_models=recommendation.get("recommendations") or [],
+                ml_result=ml_data,
+            )
+
+        readiness_quality = ml_readiness.get("quality_summary") or {}
+        report_quality_rows = [
+            {"check": "Missing Values", "value": readiness_quality.get("missing_cells", 0)},
+            {"check": "Duplicate Rows", "value": readiness_quality.get("duplicate_rows", 0)},
+            {"check": "Outlier Values", "value": readiness_quality.get("outlier_values", 0)},
+            {"check": "Constant Columns", "value": ", ".join(readiness_quality.get("constant_columns", [])) or "None"},
+            {"check": "ID-like Columns", "value": ", ".join(readiness_quality.get("id_like_columns", [])) or "None"},
+            {"check": "Mixed-type Columns", "value": ", ".join(readiness_quality.get("mixed_type_columns", [])) or "None"},
+        ] if ml_readiness else []
+
+        readiness_balance = ml_readiness.get("class_balance") or {}
+        readiness_preprocessing = ml_readiness.get("preprocessing") or {}
+        report_preprocessing_rows = []
+        for item in readiness_preprocessing.get("encoding", []):
+            report_preprocessing_rows.append({
+                "area": "Encoding", "scope": item.get("column"), "recommendation": item.get("method")
+            })
+        for item in readiness_preprocessing.get("scaling", []):
+            report_preprocessing_rows.append({
+                "area": "Scaling", "scope": ", ".join(item.get("columns", [])), "recommendation": item.get("method")
+            })
+        if readiness_preprocessing:
+            report_preprocessing_rows.append({
+                "area": "Imbalance Handling", "scope": "Target", "recommendation": readiness_preprocessing.get("imbalance", "None")
+            })
+            for item in readiness_preprocessing.get("missing_strategy", []):
+                report_preprocessing_rows.append({
+                    "area": "Missing Value Strategy", "scope": item.get("column"), "recommendation": item.get("method")
+                })
+
+        readiness_features = ml_readiness.get("feature_selection") or {}
+        report_feature_rows = [
+            {"hint": "Constant", "feature": column, "result": "Review"}
+            for column in readiness_features.get("constant_columns", [])
+        ]
+        report_feature_rows += [
+            {"hint": "Near-constant", "feature": column, "result": "Review low variance"}
+            for column in readiness_features.get("near_constant_columns", [])
+        ]
+        report_feature_rows += [
+            {
+                "hint": "High Correlation",
+                "feature": f"{item.get('left')} / {item.get('right')}",
+                "result": f"|r| = {item.get('correlation', 0):.3f}",
+            }
+            for item in readiness_features.get("correlated_pairs", [])
+        ]
+        report_feature_rows += [
+            {
+                "hint": "Quick Feature Importance",
+                "feature": item.get("feature"),
+                "result": f"{item.get('importance', 0):.4f}",
+            }
+            for item in readiness_features.get("importance", [])
+        ]
+
         evaluation = ml_data.get("evaluation", {})
         eval_results = evaluation.get("results") or []
         ml_evaluated = bool(eval_results)
@@ -429,6 +503,18 @@ class ReportGenerator:
             "chart_paths": chart_paths,
             "papers_list": papers_list,
             "ai_synthesis": ai_synthesis,
+            "ml_readiness_available": bool(ml_readiness),
+            "readiness_summary_note": ml_readiness.get("summary_note", ""),
+            "readiness_quality_summary": readiness_quality.get("summary", "Not applicable for this dataset"),
+            "readiness_quality_rows": report_quality_rows,
+            "readiness_class_balance": readiness_balance,
+            "readiness_preprocessing_summary": readiness_preprocessing.get("summary", "Not applicable for this dataset"),
+            "readiness_preprocessing_rows": report_preprocessing_rows,
+            "readiness_fit_note": readiness_preprocessing.get("fit_note", "Fit preprocessing on the training set only to avoid data leakage."),
+            "readiness_feature_summary": readiness_features.get("summary", "Not applicable for this dataset"),
+            "readiness_feature_rows": report_feature_rows,
+            "readiness_feature_importance_note": readiness_features.get("importance_note", ""),
+            "readiness_pipeline_checklist": ml_readiness.get("pipeline_checklist", []),
         }
 
     @staticmethod

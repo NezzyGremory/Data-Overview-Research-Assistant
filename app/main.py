@@ -1,6 +1,7 @@
 import sys
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QCoreApplication, Qt
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication
 
 from app.core.config import init_environment
@@ -33,10 +34,12 @@ def main():
         raise SystemExit(editor_exit_code)
 
     # Preserve fractional scaling for 125%, 150%, and 175% Windows displays.
-    QApplication.setHighDpiScaleFactorRoundingPolicy(
+    QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
         Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
 
+    QCoreApplication.setOrganizationName("DORA")
+    QCoreApplication.setApplicationName("Dataset Research")
     app = QApplication(sys.argv)
     from app.ui.main_window import MainWindow
 

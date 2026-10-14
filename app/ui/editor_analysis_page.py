@@ -12,6 +12,8 @@ import sys
 import sysconfig
 from pathlib import Path
 
+from app.ui.scale import logical_width
+
 from PySide6.QtCore import (
     QEasingCurve,
     QProcess,
@@ -2013,17 +2015,17 @@ plt.tight_layout()
             self.library_status.setText("Belum ada library tambahan di lingkungan proyek ini.")
 
     def _apply_responsive_layout(self, width: int):
-        compact = width < 1080
-        self.root_layout.setContentsMargins(16 if width < 760 else 30, 16, 16 if width < 760 else 28, 18)
+        compact = logical_width(width) < 1080
+        self.root_layout.setContentsMargins(16 if logical_width(width) < 760 else 30, 16, 16 if logical_width(width) < 760 else 28, 18)
         self.workspace.setDirection(QBoxLayout.TopToBottom if compact else QBoxLayout.LeftToRight)
         self.template_toolbar.setDirection(
-            QBoxLayout.TopToBottom if width < 650 else QBoxLayout.LeftToRight
+            QBoxLayout.TopToBottom if logical_width(width) < 650 else QBoxLayout.LeftToRight
         )
         self.notebook_toolbar.setDirection(
-            QBoxLayout.TopToBottom if width < 650 else QBoxLayout.LeftToRight
+            QBoxLayout.TopToBottom if logical_width(width) < 650 else QBoxLayout.LeftToRight
         )
         self.library_row.setDirection(
-            QBoxLayout.TopToBottom if width < 650 else QBoxLayout.LeftToRight
+            QBoxLayout.TopToBottom if logical_width(width) < 650 else QBoxLayout.LeftToRight
         )
         self.steps_card.setMinimumWidth(0 if compact else 240)
         self.steps_card.setMaximumWidth(16777215 if compact else 360)

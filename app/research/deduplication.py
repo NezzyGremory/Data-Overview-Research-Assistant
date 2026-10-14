@@ -99,4 +99,7 @@ class PaperDeduplicator:
         if not first.sinta_screening and second.sinta_screening:
             first.sinta_screening = second.sinta_screening
 
+        if not getattr(first, "accreditation_screening", None) and getattr(second, "accreditation_screening", None):
+            first.accreditation_screening = second.accreditation_screening
+
         return first

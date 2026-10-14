@@ -162,7 +162,12 @@ class DashboardPage(QWidget):
         layout.addWidget(self.pipeline_card)
         layout.addSpacing(24)
 
-        self.summary_cards = [self._make_dataset_card(), self._make_quality_card(), self._make_ml_card()]
+        self.summary_cards = [
+            self._make_dataset_card(),
+            self._make_quality_card(),
+            self._make_ml_card(),
+            self._make_gap_card(),
+        ]
         self.summary_cards_layout = QGridLayout()
         self.summary_cards_layout.setContentsMargins(0, 0, 0, 0)
         self.summary_cards_layout.setHorizontalSpacing(22)
@@ -232,9 +237,21 @@ class DashboardPage(QWidget):
         layout.addWidget(label, 1, Qt.AlignVCenter)
         return row, layout
 
+    def _make_details_button(self, callback):
+        button = QPushButton("View details")
+        button.setObjectName("overviewDetailsButton")
+        button.setIcon(QIcon(str(_asset_path("assets/icons/overview-arrow-right.svg"))))
+        button.setIconSize(QSize(10, 10))
+        button.setLayoutDirection(Qt.RightToLeft)
+        button.setCursor(Qt.PointingHandCursor)
+        button.clicked.connect(callback)
+        return button
+
     def _make_dataset_card(self):
         card, layout = self._make_card("overviewDatasetCard")
-        heading, heading_layout = self._heading_row("Dataset", "assets/icons/dataset.svg")
+        heading, heading_layout = self._heading_row(
+            "Dataset", "assets/icons/dataset.svg"
+        )
         self.dataset_loaded_badge = QLabel("Loaded")
         self.dataset_loaded_badge.setObjectName("overviewLoadedBadge")
         heading_layout.addWidget(self.dataset_loaded_badge, 0, Qt.AlignVCenter)
@@ -291,16 +308,17 @@ class DashboardPage(QWidget):
         self.column_type_legend.addStretch(1)
         layout.addLayout(self.column_type_legend)
         layout.addStretch(1)
-        self.dataset_details_button = QPushButton("View details →")
-        self.dataset_details_button.setObjectName("overviewDetailsButton")
-        self.dataset_details_button.setCursor(Qt.PointingHandCursor)
-        self.dataset_details_button.clicked.connect(self.main_window.open_datasets_page)
+        self.dataset_details_button = self._make_details_button(
+            self.main_window.open_datasets_page
+        )
         layout.addWidget(self.dataset_details_button, 0, Qt.AlignLeft)
         return card
 
     def _make_quality_card(self):
         card, layout = self._make_card("overviewQualityCard")
-        heading, heading_layout = self._heading_row("Data Quality", "assets/icons/research-gap.svg")
+        heading, heading_layout = self._heading_row(
+            "Data Quality", "assets/icons/overview-quality-folder.svg"
+        )
         self.quality_readiness_badge = QLabel("Readiness")
         self.quality_readiness_badge.setObjectName("overviewReadinessBadge")
         heading_layout.addWidget(self.quality_readiness_badge, 0, Qt.AlignVCenter)
@@ -320,16 +338,17 @@ class DashboardPage(QWidget):
         self.quality_most_missing.setWordWrap(True)
         layout.addWidget(self.quality_most_missing)
         layout.addStretch(1)
-        self.quality_details_button = QPushButton("View details →")
-        self.quality_details_button.setObjectName("overviewDetailsButton")
-        self.quality_details_button.setCursor(Qt.PointingHandCursor)
-        self.quality_details_button.clicked.connect(self.main_window.open_analysis_page)
+        self.quality_details_button = self._make_details_button(
+            self.main_window.open_analysis_page
+        )
         layout.addWidget(self.quality_details_button, 0, Qt.AlignLeft)
         return card
 
     def _make_ml_card(self):
         card, layout = self._make_card("overviewMLCard")
-        heading, _ = self._heading_row("ML Intelligence", "assets/icons/ml-intelligence.svg")
+        heading, _ = self._heading_row(
+            "ML Intelligence", "assets/icons/ml-intelligence.svg"
+        )
         layout.addWidget(heading)
         self.ml_tags = QHBoxLayout()
         self.ml_tags.setContentsMargins(0, 0, 0, 0)
@@ -368,11 +387,46 @@ class DashboardPage(QWidget):
             layout.addWidget(row)
             self.model_rows.append((name, bar, value))
         layout.addStretch(1)
-        self.ml_details_button = QPushButton("View details →")
-        self.ml_details_button.setObjectName("overviewDetailsButton")
-        self.ml_details_button.setCursor(Qt.PointingHandCursor)
-        self.ml_details_button.clicked.connect(self.main_window.open_ml_page)
+        self.ml_details_button = self._make_details_button(
+            self.main_window.open_ml_page
+        )
         layout.addWidget(self.ml_details_button, 0, Qt.AlignLeft)
+        return card
+
+    def _make_gap_card(self):
+        card, layout = self._make_card("overviewGapCard")
+        heading, heading_layout = self._heading_row(
+            "Research Gap", "assets/icons/overview-research-gap.svg"
+        )
+        self.gap_badge = QLabel("Not analyzed")
+        self.gap_badge.setObjectName("overviewGapBadge")
+        heading_layout.addWidget(self.gap_badge, 0, Qt.AlignVCenter)
+        layout.addWidget(heading)
+
+        self.gap_count_line = QLabel("Potential gaps: —")
+        self.gap_count_line.setObjectName("overviewQualityLine")
+        self.gap_count_line.setWordWrap(True)
+        layout.addWidget(self.gap_count_line)
+        self.gap_papers_line = QLabel("Papers analyzed: —")
+        self.gap_papers_line.setObjectName("overviewQualityLine")
+        self.gap_papers_line.setWordWrap(True)
+        layout.addWidget(self.gap_papers_line)
+
+        candidate_title = QLabel("TOP POTENTIAL GAP")
+        candidate_title.setObjectName("overviewSmallHeading")
+        layout.addWidget(candidate_title)
+        self.gap_preview = QLabel(
+            "Run Academic Research to identify potential research gaps."
+        )
+        self.gap_preview.setObjectName("overviewMostMissing")
+        self.gap_preview.setWordWrap(True)
+        layout.addWidget(self.gap_preview)
+        layout.addStretch(1)
+
+        self.gap_details_button = self._make_details_button(
+            self.main_window.open_gap_tool
+        )
+        layout.addWidget(self.gap_details_button, 0, Qt.AlignLeft)
         return card
 
     def _reflow_summary_cards(self, columns):
@@ -396,29 +450,43 @@ class DashboardPage(QWidget):
             )
 
     def _apply_responsive_layout(self, width):
-        summary_columns = 3 if width >= 1360 else 2 if width >= 900 else 1
+        scale_manager = getattr(self.main_window, "scale_manager", None)
+        scale = scale_manager.get_scale() if scale_manager is not None else 1.0
+        px = scale_manager.px if scale_manager is not None else lambda value: round(value)
+        logical_width = width / max(scale, 0.01)
+        summary_columns = 3 if logical_width >= 1360 else 2 if logical_width >= 900 else 1
         if self._summary_columns != summary_columns:
             self._summary_columns = summary_columns
             self._reflow_summary_cards(summary_columns)
-        pipeline_columns = 7 if width >= 1360 else 4 if width >= 900 else 2 if width >= 560 else 1
+        pipeline_columns = 7 if logical_width >= 1360 else 4 if logical_width >= 900 else 2 if logical_width >= 560 else 1
         if self._pipeline_columns != pipeline_columns:
             self._pipeline_columns = pipeline_columns
             self._reflow_pipeline(pipeline_columns)
-        compact = width < 1000
-        self._canvas_layout.setContentsMargins(18 if compact else 36, 4, 18 if compact else 42, 20 if compact else 24)
-        if width < 1100:
-            self.report_button.setFixedSize(min(300, max(180, width // 3)), 56 if width < 800 else 66)
-            self.report_button.setIconSize(QSize(24, 24))
+        compact = logical_width < 1000
+        self._canvas_layout.setContentsMargins(
+            px(18 if compact else 36), px(4), px(18 if compact else 42),
+            px(20 if compact else 24),
+        )
+        if logical_width < 1100:
+            self.report_button.setFixedSize(
+                px(min(300, max(180, logical_width // 3))),
+                px(56 if logical_width < 800 else 66),
+            )
+            self.report_button.setIconSize(QSize(px(24), px(24)))
         else:
-            self.report_button.setFixedSize(401, 66)
-            self.report_button.setIconSize(QSize(30, 30))
+            self.report_button.setFixedSize(px(401), px(66))
+            self.report_button.setIconSize(QSize(px(30), px(30)))
         if pipeline_columns == 7:
-            self.pipeline_card.setMinimumHeight(185)
+            self.pipeline_card.setMinimumHeight(px(185))
         else:
             rows = (7 + pipeline_columns - 1) // pipeline_columns
-            self.pipeline_card.setMinimumHeight(38 + rows * 81 + (rows - 1) * 9 + 26)
+            self.pipeline_card.setMinimumHeight(px(38 + rows * 81 + (rows - 1) * 9 + 26))
         for card in self.summary_cards:
-            card.setMinimumHeight(258 if summary_columns == 3 else 240)
+            card.setMinimumHeight(px(258 if summary_columns == 3 else 240))
+
+    def apply_scale(self, _scale=None):
+        """Reflow dashboard grids after the UI scale changes."""
+        self._apply_responsive_layout(self.width())
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -609,6 +677,86 @@ class DashboardPage(QWidget):
             progress.setValue(max(0, min(100, round(score))))
             value_label.setText(f"{score:.1f}%")
 
+    @staticmethod
+    def _research_gap_info(research):
+        if not isinstance(research, dict) or not research:
+            return 0, 0, "Run Academic Research to identify potential research gaps."
+
+        papers = research.get("papers", [])
+        papers = papers if isinstance(papers, list) else []
+        summary = research.get("summary", {})
+        summary = summary if isinstance(summary, dict) else {}
+        gaps = research.get("gaps", {})
+        gap_summary = gaps.get("summary", {}) if isinstance(gaps, dict) else {}
+        gap_summary = gap_summary if isinstance(gap_summary, dict) else {}
+        if isinstance(gaps, dict):
+            candidates = (
+                gaps.get("gaps")
+                or gaps.get("potential_gaps")
+                or gaps.get("items")
+                or []
+            )
+        elif isinstance(gaps, list):
+            candidates = gaps
+        else:
+            candidates = []
+        candidates = candidates if isinstance(candidates, list) else []
+
+        gap_count = summary.get("potential_gap_count")
+        if gap_count is None:
+            gap_count = gap_summary.get("gap_count", len(candidates))
+        try:
+            gap_count = max(0, int(gap_count or 0))
+        except (TypeError, ValueError):
+            gap_count = len(candidates)
+
+        paper_count = summary.get("papers_found", len(papers))
+        try:
+            paper_count = max(0, int(paper_count or 0))
+        except (TypeError, ValueError):
+            paper_count = len(papers)
+
+        preview = "No candidate gap is available yet."
+        if candidates:
+            first = candidates[0]
+            if isinstance(first, dict):
+                for key in (
+                    "title", "gap", "description", "statement",
+                    "research_question", "summary",
+                ):
+                    value = first.get(key)
+                    if value:
+                        preview = " ".join(str(value).split())
+                        break
+            elif isinstance(first, str):
+                preview = " ".join(first.split())
+            if preview == "No candidate gap is available yet.":
+                preview = "Open Research Gap to review the detected candidates."
+            if len(preview) > 180:
+                preview = preview[:177].rstrip() + "…"
+        elif gap_count:
+            preview = "Open Research Gap to review the detected candidates."
+        elif not papers:
+            preview = "No papers were available to identify research gaps."
+
+        return gap_count, paper_count, preview
+
+    def _update_gap_card(self, research):
+        if not isinstance(research, dict) or not research:
+            self.gap_badge.setText("Not analyzed")
+            self.gap_count_line.setText("Potential gaps: —")
+            self.gap_papers_line.setText("Papers analyzed: —")
+            self.gap_preview.setText(
+                "Run Academic Research to identify potential research gaps."
+            )
+            return
+
+        gap_count, paper_count, preview = self._research_gap_info(research)
+        self.gap_badge.setText(f"{gap_count:,} candidate" + ("s" if gap_count != 1 else ""))
+        self.gap_count_line.setText(f"Potential gaps: {gap_count:,}")
+        self.gap_papers_line.setText(f"Papers analyzed: {paper_count:,}")
+        self.gap_preview.setText(preview)
+
     def _set_key_findings(self, analysis, research, paper_count, gap_count):
         dataframe = getattr(self.main_window, "current_dataset", None)
         if dataframe is None:
@@ -630,11 +778,17 @@ class DashboardPage(QWidget):
             model_name = model.get("method") or model.get("name") or "a recommended model"
             score = model.get("score", model.get("accuracy"))
             try:
-                score_text = f"{float(score):.2f}%" if score is not None else "—"
+                if score is None:
+                    score_text = "—"
+                else:
+                    score_value = float(score)
+                    if score_value <= 1:
+                        score_value *= 100
+                    score_text = f"{score_value:.2f}%"
             except (TypeError, ValueError):
                 score_text = "—"
-            model_display = str(model_name).replace("Random Forest", "Random Foreset")
-            finding = f"your dataset suits <b>{task}</b> ({model_display} perform best, {score_text})."
+            model_display = str(model_name)
+            finding = f"your dataset suits <b>{task}</b> ({model_display} performs best, {score_text})."
         else:
             finding = "ML Intelligence has not been run yet."
         if research:
@@ -673,12 +827,9 @@ class DashboardPage(QWidget):
         research = self._research_result
         if not research:
             research = getattr(getattr(self.main_window, "research_page", None), "research_result", {}) or {}
-        papers = research.get("papers", []) if isinstance(research, dict) else []
-        paper_count = len(papers) if isinstance(papers, list) else 0
-        gaps = research.get("gaps", {}) if isinstance(research, dict) else {}
-        gap_summary = gaps.get("summary", {}) if isinstance(gaps, dict) else {}
-        gap_count = gap_summary.get("gap_count", 0) if isinstance(gap_summary, dict) else 0
+        gap_count, paper_count, _ = self._research_gap_info(research)
         analysis = getattr(self.main_window, "analysis_result", {}) or {}
+        self._update_gap_card(research)
         self._set_key_findings(analysis, research, paper_count, gap_count)
         self._update_pipeline()
 

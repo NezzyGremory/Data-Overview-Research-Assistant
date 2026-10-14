@@ -279,6 +279,41 @@ class Database:
                 CREATE INDEX IF NOT EXISTS
                     idx_screening_paper_key
                 ON journal_screening(paper_key);
+
+                -- ============================================
+                -- NON-SINTA ACCREDITATION PERSISTENCE
+                -- ============================================
+
+                CREATE TABLE IF NOT EXISTS non_sinta_screening (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    doi TEXT,
+                    paper_key TEXT,
+                    system TEXT,
+                    journal_name TEXT,
+                    issn_matched TEXT,
+                    rank TEXT,
+                    status TEXT NOT NULL,
+                    period_start INTEGER,
+                    period_end INTEGER,
+                    period_confirmed INTEGER DEFAULT 0,
+                    checked_for_year INTEGER,
+                    verification_source TEXT,
+                    source_url TEXT,
+                    is_ambiguous INTEGER DEFAULT 0,
+                    ambiguity_reason TEXT,
+                    notes TEXT,
+                    screening_json TEXT,
+                    checked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE INDEX IF NOT EXISTS
+                    idx_non_sinta_doi
+                ON non_sinta_screening(doi);
+
+                CREATE INDEX IF NOT EXISTS
+                    idx_non_sinta_paper_key
+                ON non_sinta_screening(paper_key);
                 """
             )
 
@@ -289,6 +324,8 @@ class Database:
                 cursor.execute("ALTER TABLE papers ADD COLUMN issn_json TEXT")
             if "sinta_screening_json" not in columns:
                 cursor.execute("ALTER TABLE papers ADD COLUMN sinta_screening_json TEXT")
+            if "accreditation_screening_json" not in columns:
+                cursor.execute("ALTER TABLE papers ADD COLUMN accreditation_screening_json TEXT")
 
             cursor.execute("PRAGMA table_info(journal_screening)")
             screening_columns = {row[1] for row in cursor.fetchall()}
@@ -369,6 +406,7 @@ class Database:
             connection.execute("PRAGMA secure_delete = ON")
             connection.execute("BEGIN IMMEDIATE")
             connection.execute("DELETE FROM journal_screening")
+            connection.execute("DELETE FROM non_sinta_screening")
             connection.execute("DELETE FROM projects")
             connection.commit()
         except Exception:

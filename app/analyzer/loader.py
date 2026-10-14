@@ -7,6 +7,7 @@ import pandas as pd
 
 from app.core.constants import MAX_DATASET_SIZE_MB
 from app.core.exceptions import DatasetLoadError
+from app.analyzer.cleaner import MISSING_TOKENS
 from app.analyzer.missing_values import normalize_missing_values
 
 
@@ -22,18 +23,15 @@ class DatasetLoader:
     COMMON_DELIMITERS = [",", ";", "\t", "|", ":"]
     ENCODINGS = ["utf-8-sig", "utf-8", "cp1252", "latin1"]
 
-    def load_csv(self, file_path: str) -> pd.DataFrame:
-        path = Path(file_path)
+    SUPPORTED_SUFFIXES = {".csv", ".xlsx", ".xls", ".json", ".parquet"}
 
+    def load(self, file_path: str, chunksize: int = 100_000) -> pd.DataFrame:
+        """Baca CSV, Excel, JSON, atau Parquet dan normalkan placeholder."""
+        path = Path(file_path)
         if not path.exists():
             raise DatasetLoadError("File dataset tidak ditemukan.")
-
-        if path.suffix.lower() != ".csv":
-            raise DatasetLoadError("Format dataset harus CSV.")
-
         file_size = path.stat().st_size
         file_size_mb = file_size / (1024 * 1024)
-
         if file_size_mb > MAX_DATASET_SIZE_MB:
             raise DatasetLoadError(
                 f"Ukuran dataset terlalu besar. "
@@ -41,38 +39,29 @@ class DatasetLoader:
             )
 
         if file_size == 0:
-            raise DatasetLoadError("File CSV kosong.")
-
-        try:
-            sample_text = self._read_sample(path)
-
-            delimiter = self._detect_delimiter(sample_text)
-
-            dataframe = self._read_dataframe(
-                path=path,
-                delimiter=delimiter,
+            raise DatasetLoadError("File dataset kosong.")
+        suffix = path.suffix.lower()
+        if suffix not in self.SUPPORTED_SUFFIXES:
+            raise DatasetLoadError(
+                "Format tidak didukung. Gunakan CSV, XLSX, XLS, JSON, atau Parquet."
             )
-
-            # Safety fallback:
-            # Jika pandas membaca hanya 1 kolom, tetapi sample jelas memiliki
-            # delimiter lain, coba kandidat delimiter lain secara otomatis.
-            if len(dataframe.columns) <= 1:
-                alternative = self._best_alternative_delimiter(
-                    sample_text,
-                    current=delimiter,
-                )
-
-                if alternative is not None:
-                    alternative_df = self._read_dataframe(
-                        path=path,
-                        delimiter=alternative,
-                    )
-
-                    if len(alternative_df.columns) > len(
-                        dataframe.columns
-                    ):
-                        dataframe = alternative_df
-
+        try:
+            if suffix == ".csv":
+                sample_text = self._read_sample(path)
+                delimiter = self._detect_delimiter(sample_text)
+                dataframe = self._read_dataframe(path, delimiter, chunksize=chunksize)
+                if len(dataframe.columns) <= 1:
+                    alternative = self._best_alternative_delimiter(sample_text, current=delimiter)
+                    if alternative is not None:
+                        alternative_df = self._read_dataframe(path, alternative, chunksize=chunksize)
+                        if len(alternative_df.columns) > len(dataframe.columns):
+                            dataframe = alternative_df
+            elif suffix in {".xlsx", ".xls"}:
+                dataframe = pd.read_excel(path)
+            elif suffix == ".json":
+                dataframe = pd.read_json(path)
+            else:
+                dataframe = pd.read_parquet(path)
         except UnicodeDecodeError as error:
             raise DatasetLoadError(
                 "Encoding CSV tidak dapat dibaca."
@@ -88,6 +77,17 @@ class DatasetLoader:
                 f"Gagal membaca dataset: {error}"
             ) from error
 
+        return self._finalize_dataframe(dataframe)
+
+    def load_csv(self, file_path: str, chunksize: int = 100_000) -> pd.DataFrame:
+        """Wrapper kompatibel untuk pemanggil lama yang khusus membaca CSV."""
+        if Path(file_path).suffix.lower() != ".csv":
+            raise DatasetLoadError("Format dataset harus CSV.")
+        return self.load(file_path, chunksize=chunksize)
+
+    def _finalize_dataframe(self, dataframe: pd.DataFrame) -> pd.DataFrame:
+        if not isinstance(dataframe, pd.DataFrame):
+            raise DatasetLoadError("File tidak berisi tabel DataFrame yang didukung.")
         if dataframe.empty:
             raise DatasetLoadError("Dataset tidak memiliki data.")
 
@@ -101,9 +101,7 @@ class DatasetLoader:
             for column in dataframe.columns
         ]
 
-        dataframe = normalize_missing_values(dataframe)
-
-        return dataframe
+        return normalize_missing_values(dataframe)
 
     # =============================================================
     # SAMPLE / ENCODING
@@ -135,6 +133,7 @@ class DatasetLoader:
         self,
         path: Path,
         delimiter: str | None,
+        chunksize: int | None = None,
     ) -> pd.DataFrame:
         """
         Read the dataframe using a detected delimiter.
@@ -147,14 +146,22 @@ class DatasetLoader:
 
         for encoding in self.ENCODINGS:
             try:
-                return pd.read_csv(
+                parsed = pd.read_csv(
                     path,
                     sep=delimiter,
                     engine="python",
                     encoding=encoding,
+                    na_values=sorted(MISSING_TOKENS),
                     skipinitialspace=True,
                     on_bad_lines="error",
+                    chunksize=chunksize,
                 )
+                if chunksize is not None:
+                    chunks = list(parsed)
+                    if not chunks:
+                        return pd.DataFrame()
+                    return pd.concat(chunks, ignore_index=True)
+                return parsed
             except UnicodeDecodeError as error:
                 last_decode_error = error
                 continue
@@ -186,21 +193,8 @@ class DatasetLoader:
         if not sample:
             raise DatasetLoadError("CSV tidak memiliki isi yang dapat dibaca.")
 
-        # First choice: Python's CSV dialect detector.
-        try:
-            dialect = csv.Sniffer().sniff(
-                sample[:65536],
-                delimiters="".join(self.COMMON_DELIMITERS),
-            )
-
-            detected = dialect.delimiter
-
-            if detected in self.COMMON_DELIMITERS:
-                return detected
-        except (csv.Error, TypeError, ValueError):
-            pass
-
-        # Fallback: score delimiter consistency across non-empty lines.
+        # Score field-count consistency before csv.Sniffer: decimal commas
+        # can trick Sniffer into choosing a number's decimal mark as delimiter.
         lines = sample.splitlines()
         candidate_scores: list[tuple[float, str]] = []
 
@@ -244,6 +238,13 @@ class DatasetLoader:
                 reverse=True,
             )
             return candidate_scores[0][1]
+
+        try:
+            dialect = csv.Sniffer().sniff(sample[:65536], delimiters="".join(self.COMMON_DELIMITERS))
+            if dialect.delimiter in self.COMMON_DELIMITERS:
+                return dialect.delimiter
+        except (csv.Error, TypeError, ValueError):
+            pass
 
         # A true single-column CSV is valid, so comma is the safest default.
         return ","
