@@ -741,6 +741,16 @@ class PaperRanker:
                     if len(token) < 4:
                         continue
 
+                    # SequenceMatcher cannot reach 0.90 when the strings are
+                    # too different in length. Skip those pairs before its
+                    # comparatively expensive character matching step.
+                    if (
+                        2 * min(len(term), len(token))
+                        / (len(term) + len(token))
+                        < 0.90
+                    ):
+                        continue
+
                     ratio = SequenceMatcher(
                         None,
                         term,

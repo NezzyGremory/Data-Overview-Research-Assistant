@@ -30,9 +30,11 @@ from PySide6.QtGui import (
     QFont,
     QImage,
     QPixmap,
+    QPainter,
     QSyntaxHighlighter,
     QTextCharFormat,
     QTextCursor,
+    QTextFormat,
 )
 from PySide6.QtWidgets import (
     QApplication,
@@ -50,6 +52,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QPlainTextEdit,
+    QTextEdit,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -105,12 +108,102 @@ class PythonCodeHighlighter(QSyntaxHighlighter):
 class PythonCodeEditor(QPlainTextEdit):
     runRequested = Signal()
 
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.line_number_area = CodeLineNumberArea(self)
+        self.line_number_area.setObjectName("editorAnalysisLineNumberArea")
+        self.blockCountChanged.connect(self._update_line_number_width)
+        self.updateRequest.connect(self._update_line_number_area)
+        self.cursorPositionChanged.connect(self._highlight_current_line)
+        self._update_line_number_width()
+        self._highlight_current_line()
+
+    def line_number_area_width(self) -> int:
+        digits = max(2, len(str(max(1, self.blockCount()))))
+        return 12 + self.fontMetrics().horizontalAdvance("9") * digits
+
+    def _update_line_number_width(self, *_args):
+        self.setViewportMargins(self.line_number_area_width(), 0, 0, 0)
+
+    def _update_line_number_area(self, rect, dy: int):
+        if dy:
+            self.line_number_area.scroll(0, dy)
+        else:
+            self.line_number_area.update(0, rect.y(), self.line_number_area.width(), rect.height())
+        if rect.contains(self.viewport().rect()):
+            self._update_line_number_width()
+
+    def paint_line_number_area(self, event):
+        painter = QPainter(self.line_number_area)
+        painter.fillRect(event.rect(), QColor("#111b2d"))
+        block = self.firstVisibleBlock()
+        block_number = block.blockNumber()
+        top = self.blockBoundingGeometry(block).translated(self.contentOffset()).top()
+        bottom = top + self.blockBoundingRect(block).height()
+        current_block = self.textCursor().blockNumber()
+        while block.isValid() and top <= event.rect().bottom():
+            if block.isVisible() and bottom >= event.rect().top():
+                color = "#82aaff" if block_number == current_block else "#718096"
+                painter.setPen(QColor(color))
+                painter.drawText(
+                    0,
+                    int(top),
+                    self.line_number_area.width() - 8,
+                    self.fontMetrics().height(),
+                    Qt.AlignRight,
+                    str(block_number + 1),
+                )
+            block = block.next()
+            top = bottom
+            bottom = top + self.blockBoundingRect(block).height()
+            block_number += 1
+
+    def _highlight_current_line(self):
+        selections = []
+        if not self.isReadOnly():
+            selection = QTextEdit.ExtraSelection()
+            selection.format.setBackground(QColor("#203047"))
+            selection.format.setProperty(QTextFormat.FullWidthSelection, True)
+            selection.cursor = self.textCursor()
+            selection.cursor.clearSelection()
+            selections.append(selection)
+        self.setExtraSelections(selections)
+        self.line_number_area.update()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        contents = self.contentsRect()
+        self.line_number_area.setGeometry(
+            contents.left(), contents.top(), self.line_number_area_width(), contents.height()
+        )
+
     def keyPressEvent(self, event):
         if event.key() in (Qt.Key_Return, Qt.Key_Enter) and event.modifiers() & Qt.ControlModifier:
             self.runRequested.emit()
             event.accept()
             return
+        if event.key() == Qt.Key_Tab and not event.modifiers() & (Qt.ControlModifier | Qt.AltModifier):
+            self.textCursor().insertText("    ")
+            event.accept()
+            return
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            current_line = self.textCursor().block().text()
+            indentation = re.match(r"\s*", current_line).group(0)
+            if current_line.rstrip().endswith(":"):
+                indentation += "    "
+            super().keyPressEvent(event)
+            self.textCursor().insertText(indentation)
+            return
         super().keyPressEvent(event)
+
+
+class CodeLineNumberArea(QWidget):
+    def __init__(self, editor: PythonCodeEditor):
+        super().__init__(editor)
+        self.editor = editor
+
+    def paintEvent(self, event):
+        self.editor.paint_line_number_area(event)
 
 
 class EditorAnalysisPage(QWidget):
@@ -981,6 +1074,20 @@ plt.tight_layout()
         self.target_row.addStretch(1)
         layout.addLayout(self.target_row)
 
+        self.code_chrome = QFrame()
+        self.code_chrome.setObjectName("editorAnalysisCodeChrome")
+        chrome_layout = QHBoxLayout(self.code_chrome)
+        chrome_layout.setContentsMargins(12, 0, 12, 0)
+        chrome_layout.setSpacing(10)
+        self.editor_file_label = QLabel("CELL 01 · DATA UNDERSTANDING")
+        self.editor_file_label.setObjectName("editorAnalysisFileTab")
+        chrome_layout.addWidget(self.editor_file_label)
+        chrome_layout.addStretch(1)
+        chrome_hint = QLabel("Python · Ctrl+Enter untuk menjalankan")
+        chrome_hint.setObjectName("editorAnalysisChromeHint")
+        chrome_layout.addWidget(chrome_hint)
+        layout.addWidget(self.code_chrome)
+
         self.code_editor = PythonCodeEditor()
         self.code_editor.setObjectName("editorAnalysisCodeEditor")
         self.code_editor.setPlaceholderText("Pilih tahapan untuk memuat template kode.")
@@ -990,6 +1097,7 @@ plt.tight_layout()
         code_font.setFamily("Consolas")
         code_font.setPixelSize(14)
         self.code_editor.setFont(code_font)
+        self.code_editor._update_line_number_width()
         self.code_editor.setTabStopDistance(self.code_editor.fontMetrics().horizontalAdvance(" ") * 4)
         self.code_highlighter = PythonCodeHighlighter(self.code_editor.document())
         self.code_editor.runRequested.connect(self._execute_code)
@@ -997,7 +1105,25 @@ plt.tight_layout()
         self.code_editor.setMinimumHeight(300)
         self.code_editor.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.code_editor.textChanged.connect(self._save_current_code)
+        self.code_editor.cursorPositionChanged.connect(self._update_cursor_status)
         layout.addWidget(self.code_editor, 1)
+
+        self.code_statusbar = QFrame()
+        self.code_statusbar.setObjectName("editorAnalysisCodeStatusbar")
+        status_layout = QHBoxLayout(self.code_statusbar)
+        status_layout.setContentsMargins(10, 2, 10, 2)
+        status_layout.setSpacing(14)
+        self.cursor_position_label = QLabel("Ln 1, Col 1")
+        self.cursor_position_label.setObjectName("editorAnalysisStatusText")
+        status_layout.addWidget(self.cursor_position_label)
+        status_layout.addStretch(1)
+        self.code_encoding_label = QLabel("UTF-8")
+        self.code_encoding_label.setObjectName("editorAnalysisStatusText")
+        status_layout.addWidget(self.code_encoding_label)
+        self.code_language_label = QLabel("Python 3")
+        self.code_language_label.setObjectName("editorAnalysisStatusLanguage")
+        status_layout.addWidget(self.code_language_label)
+        layout.addWidget(self.code_statusbar)
 
         output_title = QLabel("Hasil eksekusi")
         output_title.setObjectName("editorAnalysisFieldLabel")
@@ -1075,11 +1201,27 @@ plt.tight_layout()
     def _populate_step_list(self):
         self.step_list.blockSignals(True)
         self.step_list.clear()
-        for step in self._steps:
-            item = QListWidgetItem(step["title"])
+        for index, step in enumerate(self._steps, start=1):
+            item = QListWidgetItem(f"{index:02d}   {step['title']}")
             item.setToolTip(step["description"])
             self.step_list.addItem(item)
         self.step_list.blockSignals(False)
+
+    def _update_cursor_status(self):
+        cursor = self.code_editor.textCursor()
+        self.cursor_position_label.setText(
+            f"Ln {cursor.blockNumber() + 1}, Col {cursor.positionInBlock() + 1}"
+        )
+
+    def _update_editor_file_label(self):
+        if 0 <= self._selected_step < len(self._steps):
+            step = self._steps[self._selected_step]
+            title = re.sub(r"\s+", " ", step.get("title") or "Analisis").strip()
+            self.editor_file_label.setText(
+                f"CELL {self._selected_step + 1:02d} · {title.upper()}"
+            )
+        else:
+            self.editor_file_label.setText("PILIH CELL ANALISIS")
 
     def _fill_template_choices(self, category: str, selected: str = ""):
         choices = self.template_groups.get(category, {})
@@ -1114,6 +1256,7 @@ plt.tight_layout()
         if not 0 <= index < len(self._steps):
             self._selected_step = -1
             self.step_title.setText("Pilih tahapan analisis")
+            self._update_editor_file_label()
             self.step_description.clear()
             self.code_editor.clear()
             self._update_target_controls("")
@@ -1122,6 +1265,7 @@ plt.tight_layout()
             return
         self._selected_step = index
         step = self._steps[index]
+        self._update_editor_file_label()
         self.step_title.setText(step["template"])
         self.step_description.setText(step["description"])
         self.template_category_combo.blockSignals(True)

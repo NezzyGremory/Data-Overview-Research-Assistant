@@ -37,6 +37,7 @@ class KeywordExtractor:
         "date",
         "time",
     }
+    MAX_VALUE_SAMPLE_ROWS = 10_000
 
     def __init__(
         self,
@@ -145,7 +146,20 @@ class KeywordExtractor:
 
         for column in categorical_columns:
 
-            series = dataframe[column].dropna()
+            series = dataframe[column]
+
+            # Value discovery only needs common labels. Sampling large columns
+            # at a fixed stride avoids repeated full-column scans while still
+            # observing values from across the dataset.
+            if len(series) > self.MAX_VALUE_SAMPLE_ROWS:
+                stride = max(
+                    1,
+                    (len(series) + self.MAX_VALUE_SAMPLE_ROWS - 1)
+                    // self.MAX_VALUE_SAMPLE_ROWS,
+                )
+                series = series.iloc[::stride].head(self.MAX_VALUE_SAMPLE_ROWS)
+
+            series = series.dropna()
 
             if series.empty:
                 continue

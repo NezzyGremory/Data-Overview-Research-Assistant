@@ -1664,6 +1664,20 @@ QProgressBar::chunk {
     background: #F2F7FD;
     border: none;
 }
+#paperResultsGuide {
+    background: #EFF6FF;
+    border: @px(1) solid #CFE0F5;
+    border-radius: @px(8);
+}
+#paperResultsGuideTitle {
+    color: #1E3A5F;
+    font-size: @px(11);
+    font-weight: 700;
+}
+#paperResultsGuideText {
+    color: #52647C;
+    font-size: @px(10);
+}
 #sintaScreeningPanel QProgressBar {
     background: #E5EDF8;
     border: none;

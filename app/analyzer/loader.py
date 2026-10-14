@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import csv
+from collections import Counter
+from io import StringIO
 from pathlib import Path
 
 import pandas as pd
@@ -20,10 +22,11 @@ class DatasetLoader:
     dataset-specific rules.
     """
 
-    COMMON_DELIMITERS = [",", ";", "\t", "|", ":"]
+    COMMON_DELIMITERS = [",", ";", "\t", "|", ":", "^", "~"]
     ENCODINGS = ["utf-8-sig", "utf-8", "cp1252", "latin1"]
+    CSV_ENGINES = ("c", "python")
 
-    SUPPORTED_SUFFIXES = {".csv", ".xlsx", ".xls", ".json", ".parquet"}
+    SUPPORTED_SUFFIXES = {".csv", ".tsv", ".xlsx", ".xls", ".json", ".parquet"}
 
     def load(self, file_path: str, chunksize: int = 100_000) -> pd.DataFrame:
         """Baca CSV, Excel, JSON, atau Parquet dan normalkan placeholder."""
@@ -43,19 +46,22 @@ class DatasetLoader:
         suffix = path.suffix.lower()
         if suffix not in self.SUPPORTED_SUFFIXES:
             raise DatasetLoadError(
-                "Format tidak didukung. Gunakan CSV, XLSX, XLS, JSON, atau Parquet."
+                "Format tidak didukung. Gunakan CSV, TSV, XLSX, XLS, JSON, atau Parquet."
             )
         try:
-            if suffix == ".csv":
+            if suffix in {".csv", ".tsv"}:
                 sample_text = self._read_sample(path)
-                delimiter = self._detect_delimiter(sample_text)
-                dataframe = self._read_dataframe(path, delimiter, chunksize=chunksize)
-                if len(dataframe.columns) <= 1:
-                    alternative = self._best_alternative_delimiter(sample_text, current=delimiter)
-                    if alternative is not None:
-                        alternative_df = self._read_dataframe(path, alternative, chunksize=chunksize)
-                        if len(alternative_df.columns) > len(dataframe.columns):
-                            dataframe = alternative_df
+                delimiter, skiprows, sample_text = self._csv_read_options(
+                    sample_text,
+                    preferred="\t" if suffix == ".tsv" else None,
+                )
+                dataframe = self._read_dataframe(
+                    path,
+                    delimiter,
+                    chunksize=chunksize,
+                    sample_text=sample_text,
+                    skiprows=skiprows,
+                )
             elif suffix in {".xlsx", ".xls"}:
                 dataframe = pd.read_excel(path)
             elif suffix == ".json":
@@ -68,7 +74,7 @@ class DatasetLoader:
             ) from error
         except pd.errors.ParserError as error:
             raise DatasetLoadError(
-                "Format CSV tidak valid atau rusak."
+                f"CSV tidak dapat dibaca setelah mencoba delimiter dan engine umum: {error}"
             ) from error
         except DatasetLoadError:
             raise
@@ -112,15 +118,24 @@ class DatasetLoader:
         Read a small text sample using common CSV encodings.
         """
 
-        raw = path.read_bytes()[:sample_size]
+        with path.open("rb") as source:
+            raw = source.read(sample_size)
 
         last_error: Exception | None = None
 
-        for encoding in self.ENCODINGS:
-            try:
-                return raw.decode(encoding)
-            except UnicodeDecodeError as error:
-                last_error = error
+        for encoding in self._encoding_candidates(raw):
+            # A bounded sample can end halfway through a multibyte character.
+            for trim in range(4):
+                sample = raw[:-trim] if trim else raw
+                try:
+                    text = sample.decode(encoding)
+                    if len(raw) == sample_size:
+                        last_newline = text.rfind("\n")
+                        if last_newline >= 0:
+                            text = text[:last_newline + 1]
+                    return text
+                except UnicodeDecodeError as error:
+                    last_error = error
 
         if last_error is not None:
             raise last_error
@@ -134,6 +149,8 @@ class DatasetLoader:
         path: Path,
         delimiter: str | None,
         chunksize: int | None = None,
+        sample_text: str | None = None,
+        skiprows: int = 0,
     ) -> pd.DataFrame:
         """
         Read the dataframe using a detected delimiter.
@@ -142,36 +159,293 @@ class DatasetLoader:
         encodings without changing the dataset content.
         """
 
+        delimiters = (
+            self._delimiter_candidates(sample_text, preferred=delimiter)
+            if sample_text is not None
+            else [delimiter or ",", *[d for d in self.COMMON_DELIMITERS if d != (delimiter or ",")]]
+        )
         last_decode_error: Exception | None = None
+        last_parser_error: Exception | None = None
+        single_column_dataframe: pd.DataFrame | None = None
 
-        for encoding in self.ENCODINGS:
-            try:
-                parsed = pd.read_csv(
-                    path,
-                    sep=delimiter,
-                    engine="python",
-                    encoding=encoding,
-                    na_values=sorted(MISSING_TOKENS),
-                    skipinitialspace=True,
-                    on_bad_lines="error",
-                    chunksize=chunksize,
+        with path.open("rb") as source:
+            prefix = source.read(4096)
+        encodings = self._encoding_candidates(prefix)
+
+        for encoding in encodings:
+            decode_failed = False
+            for candidate in delimiters:
+                engines = (
+                    ("python",)
+                    if len(candidate.encode("utf-8")) > 1
+                    else self.CSV_ENGINES
                 )
-                if chunksize is not None:
-                    chunks = list(parsed)
-                    if not chunks:
-                        return pd.DataFrame()
-                    return pd.concat(chunks, ignore_index=True)
-                return parsed
-            except UnicodeDecodeError as error:
-                last_decode_error = error
-                continue
+                for engine in engines:
+                    quote_options = [
+                        {"quoting": csv.QUOTE_MINIMAL, "quotechar": '"', "doublequote": True},
+                        {
+                            "quoting": csv.QUOTE_MINIMAL,
+                            "quotechar": '"',
+                            "doublequote": True,
+                            "escapechar": "\\",
+                        },
+                    ]
+                    if sample_text is not None and self._quote_none_is_consistent(
+                        sample_text, candidate
+                    ):
+                        # Some exports contain literal, unescaped quote marks.
+                        # Only disable quote handling when that preserves the
+                        # same field count throughout the sample.
+                        quote_options.append(
+                            {"quoting": csv.QUOTE_NONE, "escapechar": "\\"}
+                        )
 
+                    for quote_option in quote_options:
+                        try:
+                            parsed = pd.read_csv(
+                                path,
+                                sep=candidate,
+                                engine=engine,
+                                encoding=encoding,
+                                na_values=sorted(MISSING_TOKENS),
+                                skipinitialspace=True,
+                                skiprows=skiprows,
+                                on_bad_lines="error",
+                                chunksize=chunksize,
+                                **quote_option,
+                            )
+                            if chunksize is not None:
+                                chunks = list(parsed)
+                                dataframe = (
+                                    pd.concat(chunks, ignore_index=True)
+                                    if chunks
+                                    else pd.DataFrame()
+                                )
+                            else:
+                                dataframe = parsed
+                            if sample_text is not None and len(dataframe.columns) <= 1:
+                                if single_column_dataframe is None:
+                                    single_column_dataframe = dataframe
+                                # A wrong separator often parses successfully
+                                # as one column. Keep looking for a better one.
+                                continue
+                            return dataframe
+                        except UnicodeDecodeError as error:
+                            last_decode_error = error
+                            decode_failed = True
+                            break
+                        except (
+                            csv.Error,
+                            pd.errors.ParserError,
+                            pd.errors.EmptyDataError,
+                            ValueError,
+                        ) as error:
+                            # The Python engine may raise _csv.Error directly
+                            # (for example: "; expected after \""). Treat it
+                            # as a failed attempt so other dialects can run.
+                            last_parser_error = error
+                    if decode_failed:
+                        break
+                if decode_failed:
+                    break
+
+        fallback_dataframe = self._read_csv_fallback(
+            path,
+            delimiters=delimiters,
+            encodings=encodings,
+            skiprows=skiprows,
+        )
+        if fallback_dataframe is not None:
+            return fallback_dataframe
+        if single_column_dataframe is not None:
+            return single_column_dataframe
+
+        if last_parser_error is not None:
+            raise last_parser_error
         if last_decode_error is not None:
             raise last_decode_error
+        raise DatasetLoadError("CSV tidak memiliki isi tabel yang dapat dibaca.")
 
-        raise DatasetLoadError(
-            "Encoding CSV tidak dapat dibaca."
-        )
+    @staticmethod
+    def _read_csv_fallback(
+        path: Path,
+        delimiters: list[str],
+        encodings: list[str],
+        skiprows: int = 0,
+    ) -> pd.DataFrame | None:
+        """Recover CSVs rejected by pandas using Python's more permissive reader."""
+        quote_options = [
+            {"quoting": csv.QUOTE_MINIMAL, "quotechar": '"', "doublequote": True},
+            {
+                "quoting": csv.QUOTE_MINIMAL,
+                "quotechar": '"',
+                "doublequote": True,
+                "escapechar": "\\",
+            },
+            {"quoting": csv.QUOTE_MINIMAL, "quotechar": "'", "doublequote": True},
+            {"quoting": csv.QUOTE_NONE, "escapechar": "\\"},
+        ]
+        best_frame: pd.DataFrame | None = None
+        best_score: tuple[float, int, int, int] | None = None
+
+        for encoding in encodings:
+            try:
+                text = path.read_text(encoding=encoding)
+            except UnicodeDecodeError:
+                continue
+
+            for delimiter_index, delimiter in enumerate(delimiters):
+                for quote_index, options in enumerate(quote_options):
+                    try:
+                        reader = csv.reader(
+                            StringIO(text, newline=""),
+                            delimiter=delimiter,
+                            skipinitialspace=True,
+                            strict=False,
+                            **options,
+                        )
+                        rows = []
+                        for row_index, row in enumerate(reader):
+                            if row_index < skiprows:
+                                continue
+                            if row and any(value.strip() for value in row):
+                                rows.append(row)
+                    except (csv.Error, TypeError, ValueError):
+                        continue
+
+                    if len(rows) < 2 or not rows[0]:
+                        continue
+                    column_count = len(rows[0])
+                    data_rows = rows[1:]
+                    if any(len(row) > column_count for row in data_rows):
+                        continue
+
+                    exact_width_rows = sum(
+                        len(row) == column_count for row in data_rows
+                    )
+                    consistency = exact_width_rows / max(len(data_rows), 1)
+                    # The fallback can fill absent trailing cells, but a
+                    # delimiter that invents extra fields is rejected above.
+                    if consistency < 0.8:
+                        continue
+                    score = (
+                        consistency,
+                        column_count,
+                        -delimiter_index,
+                        -quote_index,
+                    )
+                    if best_score is not None and score <= best_score:
+                        continue
+
+                    headers = DatasetLoader._unique_headers(rows[0])
+                    normalized_rows = []
+                    for row in data_rows:
+                        values = list(row) + [""] * (column_count - len(row))
+                        normalized_rows.append(values)
+                    frame = pd.DataFrame(normalized_rows, columns=headers)
+                    DatasetLoader._infer_fallback_column_types(frame)
+                    best_frame = frame
+                    best_score = score
+
+        return best_frame
+
+    @staticmethod
+    def _unique_headers(raw_headers: list[str]) -> list[str]:
+        """Match pandas' duplicate-header behavior for the fallback dataframe."""
+        headers: list[str] = []
+        used: set[str] = set()
+        occurrences: dict[str, int] = {}
+        for index, raw_header in enumerate(raw_headers, start=1):
+            base = str(raw_header).replace("\ufeff", "").strip() or f"column_{index}"
+            count = occurrences.get(base, 0)
+            header = base if count == 0 else f"{base}.{count}"
+            while header in used:
+                count += 1
+                header = f"{base}.{count}"
+            occurrences[base] = count + 1
+            used.add(header)
+            headers.append(header)
+        return headers
+
+    @staticmethod
+    def _infer_fallback_column_types(dataframe: pd.DataFrame) -> None:
+        """Retain basic pandas-like numeric and boolean inference on fallback."""
+        missing_values = {value.casefold() for value in MISSING_TOKENS}
+        for column in dataframe.columns:
+            series = dataframe[column].map(
+                lambda value: (
+                    pd.NA
+                    if isinstance(value, str) and value.strip().casefold() in missing_values
+                    else value
+                )
+            )
+            observed = series.dropna()
+            if observed.empty:
+                dataframe[column] = series
+                continue
+
+            lowered = observed.map(lambda value: str(value).strip().casefold())
+            if lowered.isin({"true", "false"}).all():
+                boolean_values = series.map(
+                    lambda value: (
+                        pd.NA
+                        if pd.isna(value)
+                        else str(value).strip().casefold() == "true"
+                    )
+                )
+                dataframe[column] = boolean_values.astype("boolean")
+                continue
+
+            numeric = pd.to_numeric(series, errors="coerce")
+            if numeric.loc[observed.index].notna().all():
+                dataframe[column] = numeric
+            else:
+                dataframe[column] = series
+
+    @staticmethod
+    def _quote_none_is_consistent(sample_text: str, delimiter: str) -> bool:
+        """Allow literal-quote fallback only when it keeps a stable row width."""
+        try:
+            rows = [
+                row
+                for row in csv.reader(
+                    StringIO(sample_text),
+                    delimiter=delimiter,
+                    quoting=csv.QUOTE_NONE,
+                    escapechar="\\",
+                )
+                if row and any(value.strip() for value in row)
+            ][:60]
+        except csv.Error:
+            return False
+
+        if len(rows) < 2:
+            return False
+        expected_width = len(rows[0])
+        if expected_width <= 1:
+            return False
+        matching_rows = sum(len(row) == expected_width for row in rows[1:])
+        return matching_rows / (len(rows) - 1) >= 0.95
+
+    @classmethod
+    def _encoding_candidates(cls, raw: bytes) -> list[str]:
+        """Prefer BOM/byte-pattern encoding detection, then common CSV encodings."""
+        if raw.startswith((b"\xff\xfe\x00\x00", b"\x00\x00\xfe\xff")):
+            return ["utf-32"]
+        elif raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+            return ["utf-16"]
+        elif raw.startswith(b"\xef\xbb\xbf"):
+            return ["utf-8-sig"]
+        elif len(raw) >= 8:
+            even_nuls = sum(raw[index] == 0 for index in range(0, len(raw), 2))
+            odd_nuls = sum(raw[index] == 0 for index in range(1, len(raw), 2))
+            pairs = max(1, len(raw) // 2)
+            if even_nuls / pairs > 0.3:
+                return ["utf-16-be"]
+            elif odd_nuls / pairs > 0.3:
+                return ["utf-16-le"]
+
+        return list(cls.ENCODINGS)
 
     # =============================================================
     # DELIMITER DETECTION
@@ -179,132 +453,92 @@ class DatasetLoader:
 
     def _detect_delimiter(self, sample_text: str) -> str:
         """
-        Detect a delimiter using csv.Sniffer first, then fall back to
-        frequency/consistency scoring over common delimiters.
+        Detect a delimiter by comparing quote-aware field counts first.
         """
 
-        # Remove completely empty lines before sniffing.
-        sample = "\n".join(
-            line
-            for line in sample_text.splitlines()
-            if line.strip()
-        )
-
-        if not sample:
+        if not sample_text.strip():
             raise DatasetLoadError("CSV tidak memiliki isi yang dapat dibaca.")
+        return self._delimiter_candidates(sample_text)[0]
 
-        # Score field-count consistency before csv.Sniffer: decimal commas
-        # can trick Sniffer into choosing a number's decimal mark as delimiter.
-        lines = sample.splitlines()
-        candidate_scores: list[tuple[float, str]] = []
-
-        for delimiter in self.COMMON_DELIMITERS:
-            counts = [
-                line.count(delimiter)
-                for line in lines[:30]
-            ]
-
-            positive = [
-                count
-                for count in counts
-                if count > 0
-            ]
-
-            if not positive:
-                continue
-
-            # A real delimiter usually occurs repeatedly with a reasonably
-            # stable number of fields across rows.
-            average = sum(positive) / len(positive)
-            consistency = 1.0 - (
-                max(positive) - min(positive)
-            ) / max(max(positive), 1)
-
-            coverage = len(positive) / max(len(counts), 1)
-
-            score = (
-                average * 2.0
-                + consistency * 3.0
-                + coverage * 4.0
-            )
-
-            candidate_scores.append(
-                (score, delimiter)
-            )
-
-        if candidate_scores:
-            candidate_scores.sort(
-                key=lambda item: item[0],
-                reverse=True,
-            )
-            return candidate_scores[0][1]
-
-        try:
-            dialect = csv.Sniffer().sniff(sample[:65536], delimiters="".join(self.COMMON_DELIMITERS))
-            if dialect.delimiter in self.COMMON_DELIMITERS:
-                return dialect.delimiter
-        except (csv.Error, TypeError, ValueError):
-            pass
-
-        # A true single-column CSV is valid, so comma is the safest default.
-        return ","
-
-    def _best_alternative_delimiter(
+    def _csv_read_options(
         self,
         sample_text: str,
-        current: str,
-    ) -> str | None:
-        """
-        When the first pass produces one column, find another delimiter that
-        clearly creates more fields.
-        """
+        preferred: str | None = None,
+    ) -> tuple[str, int, str]:
+        """Handle Excel's optional ``sep=;`` directive before delimiter sniffing."""
+        lines = sample_text.splitlines()
+        skiprows = 0
+        directive = None
+        for index, line in enumerate(lines):
+            value = line.strip()
+            if not value:
+                continue
+            if value.casefold().startswith("sep=") and len(value) == 5:
+                directive = value[-1]
+                skiprows = index + 1
+                sample_text = "\n".join(lines[index + 1:])
+            break
 
-        lines = [
-            line
-            for line in sample_text.splitlines()
-            if line.strip()
-        ]
+        delimiter = directive or preferred or self._detect_delimiter(sample_text)
+        return delimiter, skiprows, sample_text
 
-        if not lines:
-            return None
-
-        candidates: list[tuple[int, float, str]] = []
-
+    def _delimiter_candidates(
+        self,
+        sample_text: str,
+        preferred: str | None = None,
+    ) -> list[str]:
+        """Rank delimiters by quote-aware consistency across CSV records."""
+        scored: list[tuple[float, float, int, str]] = []
         for delimiter in self.COMMON_DELIMITERS:
-            if delimiter == current:
+            widths: list[int] = []
+            try:
+                reader = csv.reader(StringIO(sample_text), delimiter=delimiter)
+                for row in reader:
+                    if row and any(value.strip() for value in row):
+                        widths.append(len(row))
+                    if len(widths) >= 60:
+                        break
+            except csv.Error:
                 continue
 
-            counts = [
-                line.count(delimiter)
-                for line in lines[:30]
-            ]
-
-            positive = [
-                count
-                for count in counts
-                if count > 0
-            ]
-
-            if not positive:
+            if not widths:
                 continue
+            common_width, common_rows = Counter(widths).most_common(1)[0]
+            consistency = common_rows / len(widths)
+            if common_width <= 1 or consistency < 0.5:
+                continue
+            score = common_width * consistency
+            scored.append((score, consistency, common_width, delimiter))
 
-            average = sum(positive) / len(positive)
-            coverage = len(positive) / max(len(counts), 1)
-
-            candidates.append(
-                (
-                    int(max(positive)),
-                    average * coverage,
-                    delimiter,
-                )
-            )
-
-        if not candidates:
-            return None
-
-        candidates.sort(
-            key=lambda item: (item[0], item[1]),
-            reverse=True,
+        scored.sort(key=lambda entry: entry[:3], reverse=True)
+        candidates = (
+            [preferred]
+            if preferred and len(preferred) == 1 and preferred not in {"\r", "\n", '"', "'"}
+            else []
         )
-
-        return candidates[0][2]
+        candidates.extend(delimiter for _, _, _, delimiter in scored)
+        try:
+            dialect = csv.Sniffer().sniff(sample_text[:65536])
+            if (
+                len(dialect.delimiter) == 1
+                and not dialect.delimiter.isspace()
+                and not dialect.delimiter.isalnum()
+                and dialect.delimiter not in {'"', "'"}
+            ):
+                widths: list[int] = []
+                reader = csv.reader(
+                    StringIO(sample_text), delimiter=dialect.delimiter
+                )
+                for row in reader:
+                    if row and any(value.strip() for value in row):
+                        widths.append(len(row))
+                    if len(widths) >= 60:
+                        break
+                if widths:
+                    common_width, common_rows = Counter(widths).most_common(1)[0]
+                    if common_width > 1 and common_rows / len(widths) >= 0.5:
+                        candidates.append(dialect.delimiter)
+        except (csv.Error, TypeError, ValueError):
+            pass
+        candidates.extend(self.COMMON_DELIMITERS)
+        return list(dict.fromkeys(candidates))

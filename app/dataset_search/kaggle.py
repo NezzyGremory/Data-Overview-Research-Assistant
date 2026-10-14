@@ -161,6 +161,20 @@ class KaggleDatasetClient:
         Download Kaggle dataset zip archive and extract tabular files.
         Returns the Path to the primary extracted data file (.csv / .parquet).
         """
+        extracted_files = self.download_dataset_files(
+            dataset_id,
+            destination_dir,
+            filename=filename,
+        )
+        return extracted_files[0]
+
+    def download_dataset_files(
+        self,
+        dataset_id: str,
+        destination_dir: Path,
+        filename: Optional[str] = None,
+    ) -> List[Path]:
+        """Download a Kaggle archive and return every supported tabular file."""
         clean_ref = dataset_id.replace("kaggle:", "").strip()
         if "/" not in clean_ref:
             raise ValueError(f"Format dataset id Kaggle tidak valid: {clean_ref}")
@@ -207,13 +221,13 @@ class KaggleDatasetClient:
             # If not a zip, it might be a direct CSV or tabular file
             direct_file = target_dir / f"{safe_name}.csv"
             direct_file.write_bytes(content)
-            return direct_file
+            return [direct_file]
 
         if not extracted_files:
             # List any extracted files
             all_extracted = list(target_dir.glob("*"))
             if all_extracted:
-                return all_extracted[0]
+                return [all_extracted[0]]
             raise RuntimeError("Dataset berhasil diunduh tetapi tidak ditemukan file tabular di dalamnya.")
 
         # Pick the best tabular file (prioritize CSV, then largest size)
@@ -221,7 +235,7 @@ class KaggleDatasetClient:
             key=lambda p: (1 if p.suffix.lower() == ".csv" else 0, p.stat().st_size),
             reverse=True,
         )
-        return extracted_files[0]
+        return extracted_files
 
     # =====================================================================
     # HELPERS

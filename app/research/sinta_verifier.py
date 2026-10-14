@@ -795,15 +795,20 @@ class SintaVerifier:
         )
 
     @staticmethod
-    def _gemini_api_key() -> Optional[str]:
-        """Return the first configured Gemini key without exposing it to prompts."""
+    def _gemini_api_keys() -> List[str]:
+        """Return configured Gemini keys without exposing them to prompts."""
         try:
             from app.ai.gemini_explainer import get_saved_api_key
 
             raw_key = get_saved_api_key() or ""
         except Exception:
             raw_key = ""
-        keys = [part.strip() for part in raw_key.replace(";", ",").split(",") if part.strip()]
+        return [part.strip() for part in raw_key.replace(";", ",").split(",") if part.strip()]
+
+    @classmethod
+    def _gemini_api_key(cls) -> Optional[str]:
+        """Compatibility helper returning the first configured Gemini key."""
+        keys = cls._gemini_api_keys()
         return keys[0] if keys else None
 
     def _find_gemini_profile_candidate(
@@ -812,8 +817,8 @@ class SintaVerifier:
         journal_name: str,
     ) -> tuple[Optional[Dict[str, str]], str]:
         """Use grounded Gemini search only to locate a profile URL, never to assign a rank."""
-        key = self._gemini_api_key()
-        if not key:
+        keys = self._gemini_api_keys()
+        if not keys:
             return None, "Bantuan Gemini belum aktif karena API key belum dikonfigurasi."
 
         normalized_issns = list(dict.fromkeys(
@@ -833,7 +838,8 @@ class SintaVerifier:
                 or os.getenv("GEMINI_MODEL", "").strip()
             )
             default_model = "gemini-3.8-flash"
-            models = [configured_model or default_model]
+            configured_model = (configured_model or default_model).removeprefix("models/")
+            models = [configured_model]
             if models[0] != default_model:
                 models.append(default_model)
             prompt = (
@@ -858,29 +864,64 @@ class SintaVerifier:
                 "propertyOrdering": ["profile_url", "journal_name", "matched_issn", "evidence"],
             }
             response = None
+            deadline = time.monotonic() + 35.0
             for model in models:
-                response = httpx.post(
-                    f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-                    headers={"x-goog-api-key": key, "Content-Type": "application/json"},
-                    json={
-                        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                        "tools": [{"googleSearch": {}}],
-                        "generationConfig": {
-                            "temperature": 0,
-                            "maxOutputTokens": 500,
-                            "responseMimeType": "application/json",
-                            "responseSchema": schema,
-                            **({"thinkingConfig": {"thinkingLevel": "low"}} if model.startswith("gemini-3") else {}),
-                        },
-                    },
-                    timeout=httpx.Timeout(16.0, connect=5.0),
-                )
-                if response.status_code in {400, 404} and model != models[-1]:
-                    continue
-                response.raise_for_status()
-                break
+                next_model = False
+                for key in keys:
+                    for attempt in range(1, 3):
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            break
+                        request_timeout = min(12.0, remaining)
+                        try:
+                            response = httpx.post(
+                                f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                                headers={"x-goog-api-key": key, "Content-Type": "application/json"},
+                                json={
+                                    "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                                    "tools": [{"googleSearch": {}}],
+                                    "generationConfig": {
+                                        "temperature": 0,
+                                        "maxOutputTokens": 500,
+                                        "responseMimeType": "application/json",
+                                        "responseSchema": schema,
+                                        **({"thinkingConfig": {"thinkingLevel": "low"}} if model.startswith("gemini-3") else {}),
+                                    },
+                                },
+                                timeout=httpx.Timeout(
+                                    request_timeout,
+                                    connect=min(5.0, request_timeout),
+                                ),
+                            )
+                        except (httpx.TimeoutException, httpx.RequestError):
+                            if attempt < 2 and time.monotonic() < deadline:
+                                time.sleep(min(0.4 * attempt, max(0.0, deadline - time.monotonic())))
+                                continue
+                            response = None
+                            break
+
+                        if response.status_code == 200:
+                            break
+                        if response.status_code in {400, 404}:
+                            next_model = True
+                            break
+                        if response.status_code in {401, 403}:
+                            break
+                        if response.status_code in {408, 429, 500, 502, 503, 504} and attempt < 2:
+                            time.sleep(min(0.4 * attempt, max(0.0, deadline - time.monotonic())))
+                            continue
+                        break
+                    if response is not None and response.status_code == 200:
+                        break
+                    if next_model or time.monotonic() >= deadline:
+                        break
+                if response is not None and response.status_code == 200:
+                    break
+                if time.monotonic() >= deadline:
+                    break
             if response is None:
                 return None, "Gemini belum dapat menemukan profil; pemeriksaan dapat dicoba kembali."
+            response.raise_for_status()
             payload = response.json()
             parts = (
                 payload.get("candidates", [{}])[0]
@@ -908,7 +949,6 @@ class SintaVerifier:
             self._gemini_candidate_cache[cache_key] = candidate
             return candidate, ""
         except Exception:
-            self._gemini_candidate_cache[cache_key] = None
             return None, "Gemini belum dapat menemukan profil; pemeriksaan dapat dicoba kembali."
 
     def verify(

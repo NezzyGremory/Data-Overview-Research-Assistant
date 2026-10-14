@@ -139,7 +139,7 @@ def _sinta_ui_note(screening: Dict[str, Any] | None) -> str:
 class GeminiExplainWorker(QObject):
     """Run Gemini / Hybrid academic explanation off the Qt UI thread."""
 
-    finished = Signal(str, str)  # (text, source)
+    finished = Signal(str, str, str)  # (text, source, optional cloud status)
     failed = Signal(str)
 
     def __init__(self, analysis: dict[str, Any]):
@@ -154,7 +154,7 @@ class GeminiExplainWorker(QObject):
                 raise RuntimeError("Gunakan penjelasan lokal pada aplikasi terkemas.")
             helper = Path(__file__).with_name("gemini_subprocess.py")
             child_env = os.environ.copy()
-            child_env["GEMINI_TIMEOUT"] = "3"
+            child_env["GEMINI_TIMEOUT"] = "12"
             command = [sys.executable, str(helper)]
             creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
             completed = subprocess.run(
@@ -162,7 +162,7 @@ class GeminiExplainWorker(QObject):
                 input=pickle.dumps(self.analysis, protocol=pickle.HIGHEST_PROTOCOL),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                timeout=20,
+                timeout=45,
                 cwd=str(Path(__file__).resolve().parents[2]),
                 env=child_env,
                 creationflags=creation_flags,
@@ -170,12 +170,14 @@ class GeminiExplainWorker(QObject):
             )
             if completed.returncode != 0:
                 raise RuntimeError("Proses Gemini gagal.")
-            text, source = pickle.loads(completed.stdout)
-            self.finished.emit(text, source)
+            result = pickle.loads(completed.stdout)
+            text, source = result[:2]
+            detail = str(result[2] or "") if len(result) > 2 else ""
+            self.finished.emit(text, source, detail)
         except Exception:
             try:
                 local_text = LocalAcademicExplainer().explain(self.analysis)
-                self.finished.emit(local_text, "local")
+                self.finished.emit(local_text, "local", "Penjelasan lokal digunakan karena proses Gemini tidak dapat dijalankan.")
             except Exception as local_exc:
                 self.failed.emit(str(local_exc))
 
@@ -415,8 +417,30 @@ class AcademicResearchWorker(QObject):
                 ml_result=ml_result,
                 search_limit=20,
                 max_queries=5,
+                include_insights=False,
             )
             self.finished.emit(result, ml_result)
+        except Exception as error:
+            self.failed.emit(str(error))
+
+
+class AcademicResearchInsightsWorker(QObject):
+    """Calculate the optional landscape/trend/gap views without searching again."""
+
+    finished = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, engine, result, ml_result):
+        super().__init__()
+        self.engine = engine
+        self.result = dict(result or {})
+        self.result["pipeline"] = dict(self.result.get("pipeline") or {})
+        self.ml_result = dict(ml_result or {})
+
+    def run(self):
+        try:
+            result = self.engine.analyze_insights(self.result, self.ml_result)
+            self.finished.emit(result)
         except Exception as error:
             self.failed.emit(str(error))
 
@@ -668,12 +692,20 @@ class NonSintaBatchLookupWorker(QObject):
 
     def run(self):
         from app.research.accreditation_verifier import AccreditationVerifier
+        from app.research.journal_index_verifier import JournalIndexVerifier
 
         verifier = AccreditationVerifier(timeout=8.0)
+        index_verifier = JournalIndexVerifier(timeout=5.0)
         total = len(self.tasks)
-        completed = 0
         try:
-            for task in self.tasks:
+            all_issns = [
+                value
+                for task in self.tasks
+                for value in (task.get("issn") or [])
+            ]
+            assessment_by_issn = index_verifier.verify_official_assessments(all_issns)
+
+            for completed, task in enumerate(self.tasks, start=1):
                 try:
                     result = verifier.verify(
                         issn_list=task.get("issn", []),
@@ -686,9 +718,42 @@ class NonSintaBatchLookupWorker(QObject):
                         "status": "UNVERIFIED",
                         "lookup_status": "FAILED",
                         "journal_name": task.get("journal"),
-                        "notes": f"Pemeriksaan akreditasi non-SINTA belum berhasil: {error}",
+                        "notes": f"Pemeriksaan direktori HK-dir / ABDC belum berhasil: {error}",
                     }
-                completed += 1
+
+                normalized_issns = {
+                    index_verifier.normalize_issn(value)
+                    for value in (task.get("issn") or [])
+                    if index_verifier.normalize_issn(value)
+                }
+                assessments = []
+                assessment_states = []
+                seen_lists = set()
+                for issn in normalized_issns:
+                    lookup = assessment_by_issn.get(issn, {})
+                    assessment_states.append(str(lookup.get("status") or "FAILED"))
+                    for assessment in lookup.get("assessments", []):
+                        if not isinstance(assessment, dict):
+                            continue
+                        list_id = str(assessment.get("list_id") or "")
+                        if list_id and list_id not in seen_lists:
+                            seen_lists.add(list_id)
+                            assessments.append(dict(assessment))
+
+                if assessments:
+                    result["found"] = True
+
+                if not assessment_states:
+                    assessment_status = "NO_METADATA"
+                elif all(state == "CHECKED" for state in assessment_states):
+                    assessment_status = "CHECKED"
+                elif any(state == "CHECKED" for state in assessment_states):
+                    assessment_status = "PARTIAL"
+                else:
+                    assessment_status = "FAILED"
+                result["official_assessments"] = assessments
+                result["official_assessments_status"] = assessment_status
+                result["official_assessments_source"] = "OpenAlex source lists"
                 self.progress.emit(
                     completed,
                     total,
@@ -2011,7 +2076,7 @@ class UploadPage(QWidget):
                 self,
                 "Select Dataset",
                 "",
-                "Datasets (*.csv *.xlsx *.xls *.json *.parquet);;CSV Files (*.csv);;Excel Files (*.xlsx *.xls);;JSON Files (*.json);;Parquet Files (*.parquet)",
+                "Datasets (*.csv *.tsv *.xlsx *.xls *.json *.parquet);;CSV/TSV Files (*.csv *.tsv);;Excel Files (*.xlsx *.xls);;JSON Files (*.json);;Parquet Files (*.parquet)",
             )
 
         if not file_path:
@@ -2022,7 +2087,7 @@ class UploadPage(QWidget):
             QMessageBox.information(
                 self,
                 "Unsupported file",
-                "Please choose a CSV, Excel, JSON, or Parquet dataset.",
+                "Please choose a CSV/TSV, Excel, JSON, or Parquet dataset.",
             )
             return
 
@@ -2104,6 +2169,7 @@ class AnalysisPage(QWidget):
         self._gemini_thread: QThread | None = None
         self._gemini_worker: GeminiExplainWorker | None = None
         self._gemini_label: QLabel | None = None
+        self._gemini_status_label: QLabel | None = None
         self._visualization_dataframe: pd.DataFrame | None = None
         self._visualization_correlations = None
         self._visualization_missing_values = None
@@ -3763,14 +3829,27 @@ class AnalysisPage(QWidget):
         self._gemini_thread = None
         self._gemini_worker = None
 
-    def _on_gemini_finished(self, text: str, _source: str = "local"):
+    def _on_gemini_finished(self, text: str, source: str = "local", detail: str = ""):
         if self._gemini_label is not None:
             self._gemini_label.setText(text)
+        if self._gemini_status_label is not None:
+            self._gemini_status_label.setText(
+                "Sumber penjelasan: Gemini"
+                if source == "gemini"
+                else (
+                    "Gemini tidak tersedia; ditampilkan penjelasan lokal. "
+                    + (detail if detail else "Periksa API key dan koneksi internet.")
+                )
+            )
 
     def _on_gemini_failed(self, message: str):
         if self._gemini_label is not None:
             self._gemini_label.setText(
                 "Gagal memuat interpretasi cloud. Sistem menggunakan interpretasi lokal."
+            )
+        if self._gemini_status_label is not None:
+            self._gemini_status_label.setText(
+                "Penjelasan lokal juga belum berhasil dibuat. Coba jalankan analisis kembali."
             )
 
     # =====================================================
@@ -4748,11 +4827,10 @@ class AnalysisPage(QWidget):
         key_btn.clicked.connect(self._handle_configure_gemini_key)
         cfg_row.addWidget(key_btn)
 
-        status_note = QLabel(
-            "<span style='color: #8492A5; font-size: 10px;'>"
-            "Aplikasi menggunakan Hybrid Engine: otomatis beralih ke mesin lokal jika offline atau limit."
-            "</span>"
-        )
+        status_note = QLabel("Menghubungkan ke Gemini; jika tidak tersedia, dipakai penjelasan lokal.")
+        status_note.setObjectName("cardDescription")
+        status_note.setWordWrap(True)
+        self._gemini_status_label = status_note
         cfg_row.addWidget(status_note)
         cfg_row.addStretch()
         layout.addLayout(cfg_row)
@@ -6193,7 +6271,6 @@ class MLIntelligencePage(QWidget):
                 print(f"Warning: ML workflow could not be saved: {error}")
         self.main_window.dashboard.update_workflow_state(
             has_dataset=True, analysis_done=True, ml_done=True,
-            research_done=bool(getattr(self.main_window.research_page, "last_result", None)),
         )
         self._finish_ml_run()
 
@@ -6978,17 +7055,27 @@ class MLIntelligencePage(QWidget):
                     item.layout()
                 )
 
+class _ResearchPaperTableItem(QTableWidgetItem):
+    """Table item with native numeric sorting for rank, year, and relevance."""
+
+    def __init__(self, text, sort_key=None):
+        super().__init__(str(text))
+        self._sort_key = str(text).casefold() if sort_key is None else sort_key
+
+    def __lt__(self, other):
+        other_key = getattr(other, "_sort_key", other.text().casefold())
+        try:
+            return self._sort_key < other_key
+        except TypeError:
+            return str(self._sort_key).casefold() < str(other_key).casefold()
+
+
 class ResearchPage(QWidget):
     """
     Academic Research workspace.
 
     Menampilkan:
-    - Research Overview
-    - Ranked Papers
-    - Dataset Usage Confidence
-    - Research Landscape
-    - Research Trend
-    - Research Gap
+    - Ranked Papers and journal screening
     """
 
     def __init__(self, main_window):
@@ -7000,11 +7087,14 @@ class ResearchPage(QWidget):
         self.task_detector = MLTaskDetector()
 
         self.research_result: Dict[str, Any] = {}
+        self._last_ml_result: Dict[str, Any] = {}
         self._all_papers = []
         self._all_paper_result_indices = []
         self.filtered_paper_indices = []
         self._research_thread: QThread | None = None
         self._research_worker: AcademicResearchWorker | None = None
+        self._insights_thread: QThread | None = None
+        self._insights_worker: AcademicResearchInsightsWorker | None = None
         self._sinta_thread: QThread | None = None
         self._sinta_worker: SintaLookupWorker | None = None
         self._sinta_lookup_cache = {}
@@ -7059,7 +7149,7 @@ class ResearchPage(QWidget):
         )
 
         subtitle = QLabel(
-            "Explore related papers, publication trends, and potential research gaps."
+            "Temukan paper yang relevan, telaah detail artikel, dan periksa status jurnal dalam satu workspace."
         )
         self.subtitle_label = subtitle
 
@@ -7169,7 +7259,7 @@ class ResearchPage(QWidget):
         root.addWidget(self.progress)
         self.loading_card = LoadingCard(
             "Academic research is running",
-            "Searching literature and preparing the research overview, papers, landscape, and potential gaps.",
+            "Searching academic sources and preparing ranked paper results.",
             self,
         )
         self.loading_card.setVisible(False)
@@ -7184,42 +7274,10 @@ class ResearchPage(QWidget):
         self.tabs.setDocumentMode(
             True
         )
-
-        self.overview_tab = (
-            self._scroll_tab(self._create_overview_tab())
-        )
+        self.tabs.tabBar().setVisible(False)
 
         self.papers_tab = self._create_papers_tab()
-
-        self.landscape_tab = self._create_landscape_tab()
-
-        self.trend_tab = self._create_trend_tab()
-
-        self.gap_tab = self._create_gap_tab()
-
-        self.tabs.addTab(
-            self.overview_tab,
-            "Overview",
-        )
-
-        # Keep every research result in one scrollable overview. The sidebar
-        # still opens the dedicated Papers, Landscape, and Gap tools.
-        overview_content = self.overview_tab.widget()
-        overview_layout = overview_content.layout()
-        if overview_layout.count() and overview_layout.itemAt(overview_layout.count() - 1).widget() is None:
-            overview_layout.takeAt(overview_layout.count() - 1)
-        for section in (
-            self.landscape_tab,
-            self.trend_tab,
-            self.gap_tab,
-        ):
-            divider = QFrame()
-            divider.setObjectName("researchSectionDivider")
-            divider.setFrameShape(QFrame.NoFrame)
-            divider.setFixedHeight(1)
-            overview_layout.addWidget(divider)
-            overview_layout.addWidget(section)
-        overview_layout.addStretch(1)
+        self.tabs.addTab(self.papers_tab, "Papers")
 
         root.addWidget(
             self.tabs,
@@ -7228,16 +7286,6 @@ class ResearchPage(QWidget):
 
         # Initial state
         self.show_empty_state()
-
-    @staticmethod
-    def _scroll_tab(content_widget):
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        scroll.setWidget(content_widget)
-        return scroll
 
     def _apply_responsive_layout(self, width):
         compact = logical_width(width) < 760
@@ -7271,19 +7319,6 @@ class ResearchPage(QWidget):
             )
         else:
             self.header_widget.setMinimumHeight(0)
-        overview_cards = getattr(self, "_overview_cards_layout", None)
-        if overview_cards is not None:
-            overview_cards.setDirection(
-                QBoxLayout.TopToBottom if logical_width(width) < 1000 else QBoxLayout.LeftToRight
-            )
-        for metrics_layout in (
-            getattr(self, "_landscape_metrics_layout", None),
-            getattr(self, "_trend_metrics_layout", None),
-        ):
-            if metrics_layout is not None:
-                metrics_layout.setDirection(
-                    QBoxLayout.TopToBottom if logical_width(width) < 1000 else QBoxLayout.LeftToRight
-                )
         compact = logical_width(width) < 1100
         for layout_name in (
             "_paper_toolbar_layout",
@@ -7300,18 +7335,6 @@ class ResearchPage(QWidget):
             selection_layout.setDirection(
                 QBoxLayout.TopToBottom if logical_width(width) < 1250 else QBoxLayout.LeftToRight
             )
-        chart_stacked = logical_width(width) < 1100
-        if (
-            self.research_result
-            and getattr(self, "_landscape_chart_stacked", None) is not None
-            and chart_stacked != self._landscape_chart_stacked
-        ):
-            landscape = self.research_result.get("landscape") or {}
-            self._render_landscape_chart(landscape)
-            self._render_trend_chart(
-                self.research_result.get("trend") or {}, landscape
-            )
-
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._apply_responsive_layout(event.size().width())
@@ -7324,225 +7347,6 @@ class ResearchPage(QWidget):
     # TAB FACTORIES
     # =========================================================
 
-    def _create_overview_tab(self):
-
-        widget = QWidget()
-
-        layout = QVBoxLayout(
-            widget
-        )
-
-        layout.setContentsMargins(
-            5,
-            15,
-            5,
-            5,
-        )
-
-        layout.setSpacing(18)
-
-        # -----------------------------------------------------
-        # SUMMARY CARDS
-        # -----------------------------------------------------
-
-        cards = QHBoxLayout()
-        self._overview_cards_layout = cards
-
-        self.papers_card = (
-            self._create_metric_card(
-                "Papers Found",
-                "0",
-            )
-        )
-
-        self.score_card = (
-            self._create_metric_card(
-                "Top Relevance",
-                "-",
-            )
-        )
-
-        self.domain_card = (
-            self._create_metric_card(
-                "Research Domain",
-                "-",
-            )
-        )
-
-        self.gap_card = (
-            self._create_metric_card(
-                "Potential Gaps",
-                "0",
-            )
-        )
-
-        cards.addWidget(
-            self.papers_card
-        )
-
-        cards.addWidget(
-            self.score_card
-        )
-
-        cards.addWidget(
-            self.domain_card
-        )
-
-        cards.addWidget(
-            self.gap_card
-        )
-
-        layout.addLayout(
-            cards
-        )
-
-        # -----------------------------------------------------
-        # INTELLIGENCE
-        # -----------------------------------------------------
-
-        intelligence_frame = QFrame()
-
-        intelligence_frame.setObjectName(
-            "researchCard"
-        )
-
-        intelligence_layout = QVBoxLayout(
-            intelligence_frame
-        )
-
-        intelligence_title = QLabel(
-            "Research Intelligence"
-        )
-
-        intelligence_title.setObjectName(
-            "sectionTitle"
-        )
-
-        intelligence_layout.addWidget(
-            intelligence_title
-        )
-
-        self.keyword_text = QLabel(
-            "Keywords: -"
-        )
-
-        self.domain_text = QLabel(
-            "Domain: -"
-        )
-
-        self.task_text = QLabel(
-            "ML Task: -"
-        )
-
-        self.method_text = QLabel(
-            "Dominant Method: -"
-        )
-
-        self.direction_text = QLabel(
-            "Research Direction: -"
-        )
-
-        self.latest_year_text = QLabel(
-            "Latest Publication: -"
-        )
-
-        for label in (
-            self.keyword_text,
-            self.domain_text,
-            self.task_text,
-            self.method_text,
-            self.direction_text,
-            self.latest_year_text,
-        ):
-            label.setWordWrap(True)
-
-            intelligence_layout.addWidget(
-                label
-            )
-
-        layout.addWidget(
-            intelligence_frame
-        )
-
-        # -----------------------------------------------------
-        # TOP PAPER
-        # -----------------------------------------------------
-
-        top_frame = QFrame()
-
-        top_frame.setObjectName(
-            "researchCard"
-        )
-
-        top_layout = QVBoxLayout(
-            top_frame
-        )
-
-        top_title = QLabel(
-            "Ranked Papers"
-        )
-
-        top_title.setObjectName(
-            "sectionTitle"
-        )
-
-        self.top_paper_title = QLabel(
-            "No research has been run yet."
-        )
-
-        self.top_paper_title.setWordWrap(
-            True
-        )
-
-        self.top_paper_info = QLabel(
-            ""
-        )
-
-        self.top_paper_info.setWordWrap(
-            True
-        )
-
-        top_layout.addWidget(
-            top_title
-        )
-
-        top_layout.addWidget(
-            self.top_paper_title
-        )
-
-        top_layout.addWidget(
-            self.top_paper_info
-        )
-
-        self.additional_papers_title = QLabel("More relevant papers")
-        self.additional_papers_title.setObjectName("sectionTitle")
-        self.additional_papers_title.setVisible(False)
-        top_layout.addWidget(self.additional_papers_title)
-
-        self.overview_papers_layout = QVBoxLayout()
-        self.overview_papers_layout.setContentsMargins(0, 0, 0, 0)
-        self.overview_papers_layout.setSpacing(8)
-        top_layout.addLayout(self.overview_papers_layout)
-
-        self.overview_papers_status = QLabel(
-            "Run Academic Research to see ranked papers here."
-        )
-        self.overview_papers_status.setObjectName("cardDescription")
-        self.overview_papers_status.setWordWrap(True)
-        top_layout.addWidget(self.overview_papers_status)
-
-        layout.addWidget(
-            top_frame
-        )
-
-        layout.addStretch()
-
-        return widget
-
-    # ---------------------------------------------------------
-
-    # ---------------------------------------------------------
-
     def _create_papers_tab(self):
 
         widget = QWidget()
@@ -7553,18 +7357,39 @@ class ResearchPage(QWidget):
         layout.setContentsMargins(16, 10, 16, 10)
         layout.setSpacing(7)
 
-        title = QLabel(
-            "Artikel Akademik Terperingkat"
-        )
+        title = QLabel("Ranked Papers")
 
         title.setObjectName(
             "sectionTitle"
         )
 
         description = QLabel(
-            "Tinjau artikel dan sumbernya, lalu filter status SINTA dan indeks jurnal yang diperiksa otomatis."
+            "Daftar literatur yang ditemukan dan diurutkan berdasarkan relevansi terhadap topik dataset. "
+            "Pilih satu baris untuk membaca metadata, membuka sumber, dan memeriksa status jurnal."
         )
         description.setObjectName("cardDescription")
+        description.setWordWrap(True)
+
+        guide = QFrame()
+        guide.setObjectName("paperResultsGuide")
+        guide_layout = QVBoxLayout(guide)
+        guide_layout.setContentsMargins(14, 10, 14, 10)
+        guide_layout.setSpacing(3)
+        guide_title = QLabel("Panduan membaca hasil")
+        guide_title.setObjectName("paperResultsGuideTitle")
+        guide_text = QLabel(
+            "Skor relevansi adalah penyaringan heuristik topik, bukan akurasi model atau bukti bahwa paper "
+            "memakai dataset yang sama. Klik judul kolom untuk mengurutkan tabel; klik dua kali baris "
+            "untuk membuka sumber artikel."
+        )
+        guide_text.setObjectName("paperResultsGuideText")
+        guide_text.setWordWrap(True)
+        guide_layout.addWidget(guide_title)
+        guide_layout.addWidget(guide_text)
+        self.paper_run_summary = QLabel("Belum ada hasil. Jalankan Academic Research untuk mencari paper.")
+        self.paper_run_summary.setObjectName("topbarStatus")
+        self.paper_run_summary.setWordWrap(True)
+        guide_layout.addWidget(self.paper_run_summary)
 
         filter_panel = QFrame()
         filter_panel.setObjectName("paperScreeningToolbar")
@@ -7622,7 +7447,7 @@ class ResearchPage(QWidget):
         self.accreditation_filter.addItem("HK-dir Level 2 (Unggulan)", "HKDIR_L2")
         self.accreditation_filter.addItem("HK-dir Level 1 (Akademik)", "HKDIR_L1")
         self.accreditation_filter.addItem("ABDC Rating A* / A", "ABDC_TOP")
-        self.accreditation_filter.addItem("ABDC Terakreditasi (A*-C)", "ABDC_ACCREDITED")
+        self.accreditation_filter.addItem("ABDC Rating (A*-C)", "ABDC_ACCREDITED")
         self.accreditation_filter.addItem("Tidak Terakreditasi (Level 0)", "NOT_ACCREDITED")
         self.accreditation_filter.addItem("Belum Diperiksa", "UNVERIFIED")
         self.accreditation_filter.addItem("Periode Perlu Verifikasi", "PERIOD_UNVERIFIED")
@@ -7722,12 +7547,16 @@ class ResearchPage(QWidget):
         self.paper_table.setAlternatingRowColors(
             True
         )
+        self.paper_table.setShowGrid(True)
+        self.paper_table.setSortingEnabled(True)
 
         header = (
             self.paper_table.horizontalHeader()
         )
 
         header.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        header.setSectionsClickable(True)
+        header.setSortIndicatorShown(True)
         header.setSectionResizeMode(0, QHeaderView.Fixed)
         self.paper_table.setColumnWidth(0, 38)
         header.setSectionResizeMode(1, QHeaderView.Stretch)
@@ -7749,12 +7578,15 @@ class ResearchPage(QWidget):
         self.paper_table.setMinimumHeight(210)
         self.paper_table.setWordWrap(False)
         self.paper_table.setTextElideMode(Qt.ElideRight)
-        self.paper_table.setShowGrid(False)
+        self.paper_table.setShowGrid(True)
         self.paper_table.verticalHeader().setDefaultSectionSize(34)
         self.paper_table.verticalHeader().setVisible(False)
 
         self.paper_table.itemSelectionChanged.connect(
             self._show_selected_paper
+        )
+        self.paper_table.cellDoubleClicked.connect(
+            self._open_paper_source_for_row
         )
 
         self.paper_detail = QTextBrowser()
@@ -7953,6 +7785,7 @@ class ResearchPage(QWidget):
         selection_layout.addWidget(self.paper_detail, 3)
         selection_layout.addLayout(screening_box, 3)
         selection_panel.setMinimumHeight(240)
+        self.paper_selection_panel = selection_panel
 
         layout.addWidget(
             title
@@ -7961,6 +7794,8 @@ class ResearchPage(QWidget):
         layout.addWidget(
             description
         )
+
+        layout.addWidget(guide)
 
         layout.addWidget(filter_panel)
         layout.addLayout(provider_row)
@@ -7975,203 +7810,6 @@ class ResearchPage(QWidget):
         return widget
 
     # ---------------------------------------------------------
-
-    def _create_landscape_tab(self):
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(14, 14, 14, 14)
-        layout.setSpacing(14)
-
-        title = QLabel("Research Landscape")
-        title.setObjectName("sectionTitle")
-        description = QLabel(
-            "Distribution of publication sources, methods, and venues in the papers found."
-        )
-        description.setObjectName("cardDescription")
-        description.setWordWrap(True)
-        layout.addWidget(title)
-        layout.addWidget(description)
-
-        metrics = QHBoxLayout()
-        self._landscape_metrics_layout = metrics
-        self.landscape_papers_metric = self._create_metric_card("Papers analyzed", "0")
-        self.landscape_methods_metric = self._create_metric_card("Methods identified", "0")
-        self.landscape_venues_metric = self._create_metric_card("Publication venues", "0")
-        self.landscape_latest_metric = self._create_metric_card("Latest year", "-")
-        for card in (self.landscape_papers_metric, self.landscape_methods_metric,
-                     self.landscape_venues_metric, self.landscape_latest_metric):
-            metrics.addWidget(card)
-        layout.addLayout(metrics)
-
-        chart_card = QFrame()
-        chart_card.setObjectName("researchCard")
-        chart_layout = QVBoxLayout(chart_card)
-        chart_layout.setContentsMargins(12, 10, 12, 10)
-        self.landscape_figure = Figure(figsize=(11, 3.6))
-        self.landscape_axes = list(self.landscape_figure.subplots(1, 3).ravel())
-        self._landscape_chart_stacked = None
-        self.landscape_canvas = FigureCanvasQTAgg(self.landscape_figure)
-        self.landscape_canvas.setMinimumWidth(0)
-        self.landscape_canvas.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        chart_layout.addWidget(self.landscape_canvas)
-        layout.addWidget(chart_card, 1)
-
-        self.landscape_text = QTextEdit()
-        self.landscape_text.setReadOnly(True)
-        self.landscape_text.setMaximumHeight(150)
-        layout.addWidget(self.landscape_text)
-        return widget
-
-    # ---------------------------------------------------------
-
-    def _create_trend_tab(self):
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(14, 14, 14, 14)
-        layout.setSpacing(14)
-
-        title = QLabel("Publication Trend")
-        title.setObjectName("sectionTitle")
-        description = QLabel(
-            "Annual publication counts for the papers returned by this literature search."
-        )
-        description.setObjectName("cardDescription")
-        description.setWordWrap(True)
-        layout.addWidget(title)
-        layout.addWidget(description)
-
-        metrics = QHBoxLayout()
-        self._trend_metrics_layout = metrics
-        self.trend_years_metric = self._create_metric_card("Years represented", "0")
-        self.trend_peak_metric = self._create_metric_card("Peak publication year", "-")
-        self.trend_direction_metric = self._create_metric_card("Recent direction", "-")
-        self.trend_growth_metric = self._create_metric_card("Endpoint change", "-")
-        for card in (self.trend_years_metric, self.trend_peak_metric,
-                     self.trend_direction_metric, self.trend_growth_metric):
-            metrics.addWidget(card)
-        layout.addLayout(metrics)
-
-        chart_card = QFrame()
-        chart_card.setObjectName("researchCard")
-        chart_layout = QVBoxLayout(chart_card)
-        chart_layout.setContentsMargins(12, 10, 12, 10)
-        self.trend_figure = Figure(figsize=(10, 3.8))
-        self.trend_axes = self.trend_figure.subplots()
-        self.trend_canvas = FigureCanvasQTAgg(self.trend_figure)
-        self.trend_canvas.setMinimumWidth(0)
-        self.trend_canvas.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        chart_layout.addWidget(self.trend_canvas)
-        layout.addWidget(chart_card, 1)
-
-        self.trend_text = QTextEdit()
-        self.trend_text.setReadOnly(True)
-        self.trend_text.setMaximumHeight(115)
-        layout.addWidget(self.trend_text)
-        return widget
-
-    # ---------------------------------------------------------
-
-    def _create_gap_tab(self):
-
-        widget = QWidget()
-
-        layout = QVBoxLayout(
-            widget
-        )
-
-        title = QLabel(
-            "Potential Research Gap"
-        )
-
-        title.setObjectName(
-            "sectionTitle"
-        )
-
-        description = QLabel(
-            "These are potential research directions inferred "
-            "from the analyzed literature. They are not claims "
-            "that a research gap has been definitively proven."
-        )
-
-        description.setWordWrap(
-            True
-        )
-
-        self.gap_summary_label = QLabel("Potential directions: 0")
-        self.gap_summary_label.setObjectName("statusLabel")
-        self.gap_text = QTextBrowser()
-        self.gap_text.setOpenExternalLinks(True)
-        self.gap_text.setReadOnly(True)
-
-        layout.addWidget(
-            title
-        )
-
-        layout.addWidget(description)
-        layout.addWidget(self.gap_summary_label)
-        layout.addWidget(self.gap_text, 1)
-
-        return widget
-
-    # =========================================================
-    # METRIC CARD
-    # =========================================================
-
-    @staticmethod
-    def _create_metric_card(
-        title: str,
-        value: str,
-    ):
-
-        frame = QFrame()
-
-        frame.setObjectName(
-            "metricCard"
-        )
-
-        frame.setMinimumHeight(
-            105
-        )
-
-        layout = QVBoxLayout(
-            frame
-        )
-
-        title_label = QLabel(
-            title
-        )
-
-        title_label.setObjectName(
-            "metricTitle"
-        )
-
-        value_label = QLabel(
-            value
-        )
-
-        value_label.setObjectName(
-            "metricValue"
-        )
-
-        value_label.setWordWrap(
-            True
-        )
-
-        layout.addWidget(
-            title_label
-        )
-
-        layout.addWidget(
-            value_label
-        )
-
-        frame.value_label = value_label
-
-        return frame
-
-    # =========================================================
-    # EMPTY STATE
-    # =========================================================
 
     def show_empty_state(self):
 
@@ -8196,61 +7834,11 @@ class ResearchPage(QWidget):
             "Analysis: Not available"
         )
 
-        self._set_metric(
-            self.papers_card,
-            "0",
-        )
-
-        self._set_metric(
-            self.score_card,
-            "-",
-        )
-
-        self._set_metric(
-            self.domain_card,
-            "-",
-        )
-
-        self._set_metric(
-            self.gap_card,
-            "0",
-        )
-
-        self.keyword_text.setText(
-            "Keywords: -"
-        )
-
-        self.domain_text.setText(
-            "Domain: -"
-        )
-
-        self.task_text.setText(
-            "ML Task: -"
-        )
-
-        self.method_text.setText(
-            "Dominant Method: -"
-        )
-
-        self.direction_text.setText(
-            "Research Direction: -"
-        )
-
-        self.latest_year_text.setText(
-            "Latest Publication: -"
-        )
-
-        self.top_paper_title.setText(
-            "No research has been run yet."
-        )
-
-        self.top_paper_info.setText(
-            ""
-        )
-        self._render_overview_papers([])
-
         self.paper_table.setRowCount(
             0
+        )
+        self.paper_run_summary.setText(
+            "Belum ada hasil. Jalankan Academic Research untuk mencari paper."
         )
 
         self.paper_detail.clear()
@@ -8268,29 +7856,10 @@ class ResearchPage(QWidget):
             "Select a paper and check its journal using ISSN or journal title."
         )
 
-        self.landscape_text.clear()
-
-        self.trend_text.clear()
-
-        self.gap_text.clear()
-        self.gap_summary_label.setText("Potential directions: 0")
-        for card in (self.landscape_papers_metric, self.landscape_methods_metric,
-                     self.landscape_venues_metric, self.landscape_latest_metric):
-            self._set_metric(card, "-")
-        for card in (self.trend_years_metric, self.trend_peak_metric,
-                     self.trend_direction_metric, self.trend_growth_metric):
-            self._set_metric(card, "-")
-        for axis in self.landscape_axes:
-            axis.clear()
-            axis.set_axis_off()
-        self.landscape_canvas.draw_idle()
-        self.trend_axes.clear()
-        self.trend_axes.set_axis_off()
-        self.trend_canvas.draw_idle()
         self.loading_card.setVisible(False)
-
-        if hasattr(self.main_window, "papers_tool_page"):
-            self.main_window.papers_tool_page.show_empty_state()
+        papers_tool_page = getattr(self.main_window, "papers_tool_page", None)
+        if papers_tool_page is not None:
+            papers_tool_page.show_empty_state()
 
     def restore_result(self, result: dict[str, Any]) -> None:
         """Rebuild the research page from a result stored in the local project DB."""
@@ -8332,6 +7901,9 @@ class ResearchPage(QWidget):
         self.run_button.setText("Researching...")
         self.progress.setVisible(True)
         self.loading_card.setVisible(True)
+        papers_tool_page = getattr(self.main_window, "papers_tool_page", None)
+        if papers_tool_page is not None:
+            papers_tool_page.set_research_running(True)
         self._research_thread = QThread(self)
         self._research_worker = AcademicResearchWorker(
             self.engine, self.task_detector, dataframe, fingerprint
@@ -8352,6 +7924,7 @@ class ResearchPage(QWidget):
                 QMessageBox.critical(self, "Research Error", str(result.get("error", "Unknown research error.")))
                 return
             self.research_result = result
+            self._last_ml_result = dict(ml_result or {})
             if result.get("status") == "PARTIAL":
                 QMessageBox.warning(
                     self, "Academic Research Parsial",
@@ -8365,19 +7938,12 @@ class ResearchPage(QWidget):
                     self.main_window.repository.save_research_result(project_id, result)
                 except Exception as error:
                     print(f"Warning: research workflow could not be saved: {error}")
-            self.main_window.dashboard.update_research_result(result)
-            self.main_window.dashboard.update_workflow_state(
-                has_dataset=True,
-                analysis_done=bool(self.main_window.analysis_result),
-                ml_done=bool(self.main_window.ml_page.last_task_result and self.main_window.ml_page.last_method_result),
-                research_done=True,
-            )
-            self.main_window.papers_tool_page.update_from_result(result)
-            self.main_window.landscape_tool_page.update_from_result(result)
-            self.main_window.gap_tool_page.update_from_result(result)
             self._update_status(self.main_window.current_dataset, self.main_window.analysis_result)
             self._populate_result(result, ml_result)
-            self.tabs.setCurrentWidget(self.overview_tab)
+            # External non-SINTA journal lists are checked off the UI thread;
+            # their matches update the table as enrichment finishes.
+            self._check_pending_non_sinta_batch()
+            self.tabs.setCurrentWidget(self.papers_tab)
         except Exception as error:
             QMessageBox.critical(self, "Academic Research Error", str(error))
         finally:
@@ -8392,10 +7958,82 @@ class ResearchPage(QWidget):
         self.loading_card.setVisible(False)
         self.run_button.setEnabled(True)
         self.run_button.setText("Run Academic Research")
+        papers_tool_page = getattr(self.main_window, "papers_tool_page", None)
+        if papers_tool_page is not None:
+            papers_tool_page.set_research_running(False)
 
     def _cleanup_research_worker(self):
         self._research_worker = None
         self._research_thread = None
+
+    def ensure_insights(self):
+        """Start expensive landscape/trend/gap analysis only when its page is opened."""
+        if not self.research_result or self._insights_thread is not None:
+            return
+        if self.research_result.get("insights_status") == "READY":
+            return
+        if self.research_result.get("insights_status") != "NOT_COMPUTED":
+            if all(self.research_result.get(key) for key in ("landscape", "trend", "gaps")):
+                return
+
+        ml_result = self._last_ml_result
+        if not ml_result:
+            ml_page = getattr(self.main_window, "ml_page", None)
+            saved_task = getattr(ml_page, "last_task_result", {}) if ml_page is not None else {}
+            ml_result = dict(saved_task) if isinstance(saved_task, dict) else {}
+
+        landscape_status = getattr(self.main_window.landscape_tool_page, "status_label", None)
+        if landscape_status is not None:
+            landscape_status.setText("Menghitung landscape dari hasil Papers...")
+        gap_status = getattr(self.main_window.gap_tool_page, "status", None)
+        if gap_status is not None:
+            gap_status.setText("Menghitung kandidat research gap...")
+
+        self._insights_thread = QThread(self)
+        self._insights_worker = AcademicResearchInsightsWorker(
+            self.engine, self.research_result, ml_result
+        )
+        self._insights_worker.moveToThread(self._insights_thread)
+        self._insights_thread.started.connect(self._insights_worker.run)
+        self._insights_worker.finished.connect(self._on_insights_finished)
+        self._insights_worker.failed.connect(self._on_insights_failed)
+        self._insights_worker.finished.connect(self._insights_thread.quit)
+        self._insights_worker.failed.connect(self._insights_thread.quit)
+        self._insights_thread.finished.connect(self._insights_worker.deleteLater)
+        self._insights_thread.finished.connect(self._cleanup_insights_worker)
+        self._insights_thread.start()
+
+    @Slot(object)
+    def _on_insights_finished(self, result):
+        if not isinstance(result, dict):
+            return
+        self.research_result = result
+        project_id = getattr(self.main_window, "current_project_id", None)
+        if project_id is not None:
+            try:
+                self.main_window.repository.save_workflow_section(project_id, "research", result)
+                self.main_window.repository.save_research_result(project_id, result)
+            except Exception as error:
+                print(f"Warning: hasil Insights tidak dapat disimpan: {error}")
+        self.main_window.landscape_tool_page.update_from_result(result)
+        self.main_window.gap_tool_page.update_from_result(result)
+        if getattr(self.main_window, "_current_page_key", "") == "report":
+            self.main_window.report_tool_page.generate_preview(force=True)
+
+    @Slot(str)
+    def _on_insights_failed(self, error):
+        message = f"Analisis Insights belum selesai: {error}"
+        for page, attribute in (
+            (self.main_window.landscape_tool_page, "status_label"),
+            (self.main_window.gap_tool_page, "status"),
+        ):
+            label = getattr(page, attribute, None)
+            if label is not None:
+                label.setText(message)
+
+    def _cleanup_insights_worker(self):
+        self._insights_worker = None
+        self._insights_thread = None
 
     # =========================================================
     # ML RESULT
@@ -8487,37 +8125,45 @@ class ResearchPage(QWidget):
     # POPULATE RESULT
     # =========================================================
 
-    def _populate_result(
-        self,
-        result,
-        ml_result,
-    ):
-
-        query_list = result.get("queries") or []
+    def _populate_result(self, result, ml_result):
+        """Populate the paper workspace; analysis views are built on demand."""
+        queries = result.get("queries") or []
         self.ucl_search_query = next(
-            (str(query).strip() for query in query_list if str(query).strip()),
+            (str(query).strip() for query in queries if str(query).strip()),
             "",
         )
-
-        summary = result.get(
-            "summary",
-            {}
-        )
-
-        papers = result.get(
-            "papers",
-            []
-        )
+        papers = result.get("papers", [])
+        if not isinstance(papers, list):
+            papers = []
+        summary = result.get("summary") or {}
+        top_score = summary.get("top_relevance_score")
+        summary_parts = [f"{len(papers):,} paper ditemukan"]
+        if queries:
+            summary_parts.append(f"{len(queries)} query pencarian")
+        if isinstance(top_score, (int, float)):
+            summary_parts.append(f"skor relevansi tertinggi {top_score:.1f}%")
+        self.paper_run_summary.setText("  |  ".join(summary_parts))
 
         academic_search = (result.get("pipeline") or {}).get("academic_search") or {}
         provider_status = academic_search.get("provider_status") or {}
         provider_counts = academic_search.get("sources") or {}
         provider_parts = []
-        for provider in ("OpenAlex", "Crossref", "Semantic Scholar", "Europe PMC", "OpenAIRE", "Scopus"):
+        for provider in (
+            "OpenAlex",
+            "Crossref",
+            "Semantic Scholar",
+            "Europe PMC",
+            "OpenAIRE",
+            "Scopus",
+        ):
             state = provider_status.get(provider)
             count = provider_counts.get(provider)
             if state == "NOT_CONFIGURED":
-                requirement = "Elsevier key/access needed" if provider == "Scopus" else "key/access needed"
+                requirement = (
+                    "Elsevier key/access needed"
+                    if provider == "Scopus"
+                    else "key/access needed"
+                )
                 provider_parts.append(f"{provider}: {requirement}")
             elif state == "DISABLED":
                 provider_parts.append(f"{provider}: off")
@@ -8526,308 +8172,13 @@ class ResearchPage(QWidget):
             elif state == "RATE_LIMITED":
                 provider_parts.append(f"{provider}: rate limited")
             elif state == "ENABLED":
-                candidate_count = int(count or 0)
-                provider_parts.append(f"{provider} {candidate_count}")
-        if provider_parts:
-            self.provider_status_label.setText(
-                "Candidates before deduplication  |  " + "  |  ".join(provider_parts)
-            )
-
-        keywords_result = result.get(
-            "keywords",
-            {}
+                provider_parts.append(f"{provider} {int(count or 0)}")
+        self.provider_status_label.setText(
+            "Candidates before deduplication  |  "
+            + ("  |  ".join(provider_parts) if provider_parts else "No provider status available.")
         )
-
-        domain_result = result.get(
-            "domain",
-            {}
-        )
-
-        # -----------------------------------------------------
-        # SUMMARY
-        # -----------------------------------------------------
-
-        papers_found = summary.get(
-            "papers_found",
-            len(papers),
-        )
-
-        top_score = summary.get(
-            "top_relevance_score"
-        )
-
-        gap_count = summary.get(
-            "potential_gap_count",
-            0,
-        )
-
-        domain = self._extract_domain(
-            domain_result
-        )
-
-        self._set_metric(
-            self.papers_card,
-            str(papers_found),
-        )
-
-        self._set_metric(
-            self.score_card,
-            (
-                f"{top_score:.1f}%"
-                if isinstance(
-                    top_score,
-                    (int, float)
-                )
-                else "-"
-            ),
-        )
-
-        self._set_metric(
-            self.domain_card,
-            domain or "-",
-        )
-
-        self._set_metric(
-            self.gap_card,
-            str(gap_count),
-        )
-
-        # -----------------------------------------------------
-        # KEYWORDS
-        # -----------------------------------------------------
-
-        keywords = self._extract_keywords(
-            keywords_result
-        )
-
-        if keywords:
-
-            self.keyword_text.setText(
-                "Keywords: "
-                + ", ".join(
-                    str(k)
-                    for k in keywords
-                )
-            )
-
-        else:
-
-            self.keyword_text.setText(
-                "Keywords: -"
-            )
-
-        # -----------------------------------------------------
-        # DOMAIN
-        # -----------------------------------------------------
-
-        self.domain_text.setText(
-            f"Research Domain: {domain or '-'}"
-        )
-
-        # -----------------------------------------------------
-        # ML TASK
-        # -----------------------------------------------------
-
-        task = ml_result.get(
-            "primary_task"
-        )
-
-        self.task_text.setText(
-            f"ML Task: {task or '-'}"
-        )
-
-        # -----------------------------------------------------
-        # LANDSCAPE SUMMARY
-        # -----------------------------------------------------
-
-        landscape = result.get(
-            "landscape",
-            {}
-        )
-
-        landscape_summary = (
-            landscape.get(
-                "summary",
-                {}
-            )
-            if isinstance(
-                landscape,
-                dict
-            )
-            else {}
-        )
-
-        dominant_method = (
-            landscape_summary.get(
-                "dominant_method"
-            )
-        )
-
-        latest_year = (
-            landscape_summary.get(
-                "latest_publication_year"
-            )
-        )
-
-        self.method_text.setText(
-            f"Dominant Method: "
-            f"{dominant_method or '-'}"
-        )
-
-        self.latest_year_text.setText(
-            f"Latest Publication: "
-            f"{latest_year or '-'}"
-        )
-
-        # -----------------------------------------------------
-        # TREND
-        # -----------------------------------------------------
-
-        trend = result.get(
-            "trend",
-            {}
-        )
-
-        direction = (
-            trend.get(
-                "recent_direction",
-                "UNKNOWN",
-            )
-            if isinstance(
-                trend,
-                dict
-            )
-            else "UNKNOWN"
-        )
-
-        self.direction_text.setText(
-            f"Research Direction: {direction}"
-        )
-
-        # -----------------------------------------------------
-        # TOP PAPER
-        # -----------------------------------------------------
-
-        top_paper = (
-            papers[0]
-            if papers
-            else None
-        )
-
-        if top_paper:
-
-            title = top_paper.get(
-                "title",
-                "Untitled",
-            )
-
-            score = top_paper.get(
-                "relevance_score"
-            )
-
-            confidence = top_paper.get(
-                "dataset_usage_confidence",
-                "UNKNOWN",
-            )
-
-            self.top_paper_title.setText(
-                title
-            )
-
-            self.top_paper_info.setText(
-                f"Relevance: "
-                f"{self._format_score(score)}"
-                f"    •    "
-                f"Dataset Usage Confidence: "
-                f"{confidence}"
-            )
-
-        else:
-
-            self.top_paper_title.setText(
-                "No academic papers found."
-            )
-
-            self.top_paper_info.setText(
-                ""
-            )
-
-        # -----------------------------------------------------
-        # PAPERS
-        # -----------------------------------------------------
-
-        self._populate_papers(
-            papers
-        )
-        self._render_overview_papers(papers)
-
-        # -----------------------------------------------------
-        # LANDSCAPE
-        # -----------------------------------------------------
-
-        landscape = landscape if isinstance(landscape, dict) else {}
-        landscape_summary = landscape.get("summary") or {}
-        years = landscape.get("publication_years") or {}
-        self._set_metric(self.landscape_papers_metric, str(landscape.get("paper_count", len(papers))))
-        self._set_metric(self.landscape_methods_metric, str(len(landscape.get("methods") or [])))
-        self._set_metric(self.landscape_venues_metric, str(len(landscape.get("top_venues") or [])))
-        self._set_metric(
-            self.landscape_latest_metric,
-            str(landscape_summary.get("latest_publication_year") or (max(years, key=str) if years else "-")),
-        )
-        self._render_landscape_chart(landscape)
-        top_source = (landscape.get("sources") or [{}])[0]
-        top_method = (landscape.get("methods") or [{}])[0]
-        top_venue = (landscape.get("top_venues") or [{}])[0]
-        self.landscape_text.setPlainText(
-            "Landscape summary\n"
-            f"Papers analyzed: {landscape.get('paper_count', len(papers))}\n"
-            f"Latest publication: {landscape_summary.get('latest_publication_year') or '-'}\n"
-            f"Most represented source: {top_source.get('name', '-')} ({top_source.get('percentage', 0)}%)\n"
-            f"Most identified method: {top_method.get('name', '-')} ({top_method.get('percentage', 0)}%)\n"
-            f"Leading venue: {top_venue.get('name', '-')} ({top_venue.get('percentage', 0)}%)"
-        )
-
-        # -----------------------------------------------------
-        # TREND
-        # -----------------------------------------------------
-
-        trend = trend if isinstance(trend, dict) else {}
-        trend_rows = trend.get("publication_trend") or landscape.get("research_activity") or []
-        growth = trend.get("growth") if isinstance(trend.get("growth"), dict) else {}
-        self._set_metric(self.trend_years_metric, str(len(trend_rows)))
-        self._set_metric(self.trend_peak_metric, str(trend.get("peak_year") or "-"))
-        self._set_metric(self.trend_direction_metric, str(trend.get("recent_direction") or "-"))
-        growth_pct = growth.get("percentage")
-        self._set_metric(self.trend_growth_metric, f"{growth_pct:+g}%" if isinstance(growth_pct, (int, float)) else "Insufficient data")
-        self._render_trend_chart(trend, landscape)
-        year_range = trend.get("year_range") if isinstance(trend.get("year_range"), dict) else {}
-        self.trend_text.setPlainText(
-            "Trend summary\n"
-            f"Recent direction: {trend.get('recent_direction', 'UNKNOWN')}\n"
-            f"Peak year: {trend.get('peak_year') or '-'} ({trend.get('peak_paper_count', 0)} papers)\n"
-            f"Year range: {year_range.get('start', '-')} to {year_range.get('end', '-')}\n"
-            f"Endpoint change: {growth_pct:+g}%" if isinstance(growth_pct, (int, float)) else
-            "Trend summary\n"
-            f"Recent direction: {trend.get('recent_direction', 'UNKNOWN')}\n"
-            f"Peak year: {trend.get('peak_year') or '-'} ({trend.get('peak_paper_count', 0)} papers)\n"
-            f"Year range: {year_range.get('start', '-')} to {year_range.get('end', '-')}\n"
-            "Endpoint change: insufficient data"
-        )
-
-        # -----------------------------------------------------
-        # GAP
-        # -----------------------------------------------------
-
-        gaps = result.get("gaps", {})
-        gap_items = []
-        if isinstance(gaps, dict):
-            gap_items = gaps.get("gaps") or gaps.get("potential_gaps") or gaps.get("items") or []
-        elif isinstance(gaps, list):
-            gap_items = gaps
-        self.gap_summary_label.setText(f"Potential directions: {len(gap_items)}")
-        self.gap_text.setHtml(self._format_gap_html(gaps))
-
+        self._populate_papers(papers)
+        self.main_window.papers_tool_page.update_from_result(result)
     def _open_ucl_discovery_search(self):
         base_url = "https://discovery.ucl.ac.uk/cgi/search/simple"
         if self.ucl_search_query:
@@ -8835,147 +8186,6 @@ class ResearchPage(QWidget):
         else:
             url = "https://discovery.ucl.ac.uk/"
         QDesktopServices.openUrl(QUrl(url))
-
-    def _render_landscape_chart(self, landscape):
-        stacked = self.width() < 1100
-        if stacked != self._landscape_chart_stacked:
-            self.landscape_figure.clear()
-            axes = (
-                self.landscape_figure.subplots(3, 1)
-                if stacked
-                else self.landscape_figure.subplots(1, 3)
-            )
-            self.landscape_axes = list(axes.ravel())
-            figure_width = max(5.5, min(11.0, (self.width() - 100) / 100))
-            self.landscape_figure.set_size_inches(
-                figure_width, 7.5 if stacked else 3.6, forward=False
-            )
-            self.landscape_canvas.setMinimumHeight(750 if stacked else 360)
-            self._landscape_chart_stacked = stacked
-
-        groups = [
-            ("Sources", landscape.get("sources") or []),
-            ("Methods", landscape.get("methods") or []),
-            ("Venues", landscape.get("top_venues") or []),
-        ]
-        for axis, (title, entries) in zip(self.landscape_axes, groups):
-            axis.clear()
-            entries = [item for item in entries if isinstance(item, dict) and item.get("name")]
-            entries = entries[:6]
-            axis.set_title(title, loc="left", fontsize=10, fontweight="bold", color="#20324A")
-            if not entries:
-                axis.text(0.5, 0.5, "No data available", ha="center", va="center", color="#718096", transform=axis.transAxes)
-                axis.set_axis_off()
-                continue
-            axis.set_axis_on()
-            names = [str(item["name"]) for item in reversed(entries)]
-            if stacked:
-                names = [textwrap.fill(name, width=18) for name in names]
-            percentages = [float(item.get("percentage", 0) or 0) for item in reversed(entries)]
-            bars = axis.barh(names, percentages, color="#4F8CFF", height=0.62)
-            axis_limit = max(100, max(percentages, default=0) * 1.16)
-            axis.set_xlim(0, axis_limit)
-            axis.set_xlabel("Share of analyzed papers (%)", fontsize=8, color="#64748B")
-            axis.tick_params(axis="both", labelsize=8, colors="#64748B")
-            for spine in ("top", "right", "left"):
-                axis.spines[spine].set_visible(False)
-            axis.grid(axis="x", color="#E8EEF6", linewidth=0.7)
-            axis.set_axisbelow(True)
-            for bar, value in zip(bars, percentages):
-                near_edge = value >= axis_limit * 0.84
-                axis.text(
-                    value - 1.0 if near_edge else value + 0.8,
-                    bar.get_y() + bar.get_height() / 2,
-                    f"{value:g}%",
-                    ha="right" if near_edge else "left",
-                    va="center",
-                    fontsize=8,
-                    color="#FFFFFF" if near_edge else "#344158",
-                )
-        # The three side-by-side horizontal charts can have long category
-        # names. Reserve room for their y-axis labels explicitly instead of
-        # asking tight_layout to shrink each axes until it becomes too narrow.
-        if stacked:
-            self.landscape_figure.subplots_adjust(
-                left=0.30, right=0.98, bottom=0.06, top=0.96, hspace=0.55
-            )
-        else:
-            self.landscape_figure.subplots_adjust(
-                left=0.28, right=0.98, bottom=0.22, top=0.90, wspace=0.55
-            )
-        self.landscape_canvas.draw_idle()
-
-    def _render_trend_chart(self, trend, landscape):
-        axis = self.trend_axes
-        axis.clear()
-        rows = trend.get("publication_trend") or landscape.get("research_activity") or []
-        if not rows and isinstance(landscape.get("publication_years"), dict):
-            rows = [{"year": year, "paper_count": count} for year, count in landscape["publication_years"].items()]
-        rows = [row for row in rows if isinstance(row, dict) and row.get("year") is not None]
-        rows.sort(key=lambda row: int(row["year"]))
-        axis.set_title("Papers by publication year", loc="left", fontsize=10, fontweight="bold", color="#20324A")
-        if not rows:
-            axis.text(0.5, 0.5, "No publication year data available", ha="center", va="center", color="#718096", transform=axis.transAxes)
-            axis.set_axis_off()
-        else:
-            axis.set_axis_on()
-            years = [str(row["year"]) for row in rows]
-            counts = [int(row.get("paper_count", 0) or 0) for row in rows]
-            bars = axis.bar(years, counts, color="#4F8CFF", width=0.72)
-            axis.set_ylabel("Papers", fontsize=8, color="#64748B")
-            axis.set_xlabel("Publication year", fontsize=8, color="#64748B")
-            axis.tick_params(axis="both", labelsize=8, colors="#64748B")
-            for spine in ("top", "right", "left"):
-                axis.spines[spine].set_visible(False)
-            axis.grid(axis="y", color="#E8EEF6", linewidth=0.7)
-            axis.set_axisbelow(True)
-            for bar, count in zip(bars, counts):
-                axis.text(bar.get_x() + bar.get_width() / 2, count, str(count), ha="center", va="bottom", fontsize=8, color="#344158")
-        self.trend_figure.subplots_adjust(
-            left=0.08, right=0.98, bottom=0.22, top=0.90
-        )
-        self.trend_canvas.draw_idle()
-
-    @staticmethod
-    def _format_gap_html(gaps):
-        if not isinstance(gaps, dict):
-            gaps = {"gaps": gaps if isinstance(gaps, list) else []}
-        items = gaps.get("gaps") or gaps.get("potential_gaps") or gaps.get("items") or []
-        if not isinstance(items, list):
-            items = []
-        cards = []
-        for index, item in enumerate(items, 1):
-            if isinstance(item, dict):
-                title = item.get("title") or item.get("gap") or item.get("description") or "Potential research direction"
-                description = item.get("description") or item.get("rationale") or item.get("problem") or ""
-                evidence = item.get("evidence")
-                details = []
-                if description and description != title:
-                    details.append(f"<p>{html_escape(str(description))}</p>")
-                if evidence:
-                    evidence_text = ResearchPage._format_section(evidence)
-                    details.append(f"<p><b>Evidence</b><br>{html_escape(evidence_text).replace(chr(10), '<br>')}</p>")
-                for key, label in (("recommendation", "Suggested direction"), ("method", "Method"), ("dataset", "Dataset")):
-                    value = item.get(key)
-                    if value:
-                        details.append(f"<p><b>{label}:</b> {html_escape(str(value))}</p>")
-                body = "".join(details) or "<p>Potential direction inferred from the discovered literature.</p>"
-            else:
-                title = f"Potential direction {index}"
-                body = f"<p>{html_escape(str(item))}</p>"
-            cards.append(
-                "<div style='background:#FFFFFF;border:1px solid #DCE7F5;border-radius:10px;padding:14px;margin:8px 2px;'>"
-                f"<h3 style='color:#20324A;margin:0 0 8px 0;'>{index}. {html_escape(str(title))}</h3>{body}</div>"
-            )
-        warning = gaps.get("warning") or "Potential research gaps are heuristic signals and should be validated against the literature."
-        header = f"<p style='color:#607086;'>{html_escape(str(warning))}</p>"
-        if not cards:
-            return header + "<p style='color:#607086;'>No potential research directions were identified in this result.</p>"
-        return header + "".join(cards)
-
-    # =========================================================
-    # PAPER TABLE
-    # =========================================================
 
     def _populate_papers(
         self,
@@ -9047,68 +8257,6 @@ class ResearchPage(QWidget):
                 bool(self._all_papers) and self._non_sinta_thread is None
             )
         self._apply_paper_filter()
-
-    def _render_overview_papers(self, papers):
-        while self.overview_papers_layout.count():
-            item = self.overview_papers_layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
-
-        papers = [
-            paper for paper in (papers if isinstance(papers, list) else [])
-            if isinstance(paper, dict)
-        ]
-        additional = papers[1:5]
-        self.additional_papers_title.setVisible(bool(additional))
-
-        for rank, paper in enumerate(additional, start=2):
-            row = QFrame()
-            row.setObjectName("researchPaperPreviewRow")
-            row_layout = QHBoxLayout(row)
-            row_layout.setContentsMargins(12, 10, 12, 10)
-            row_layout.setSpacing(12)
-
-            rank_label = QLabel(f"{rank:02d}")
-            rank_label.setObjectName("researchPaperPreviewRank")
-            rank_label.setAlignment(Qt.AlignCenter)
-            rank_label.setFixedWidth(38)
-            row_layout.addWidget(rank_label, 0, Qt.AlignTop)
-
-            details = QVBoxLayout()
-            details.setContentsMargins(0, 0, 0, 0)
-            details.setSpacing(4)
-            title = QLabel(str(paper.get("title") or "Untitled paper"))
-            title.setObjectName("researchPaperPreviewTitle")
-            title.setWordWrap(True)
-            title.setMinimumWidth(0)
-            metadata = []
-            if paper.get("year"):
-                metadata.append(str(paper["year"]))
-            if paper.get("venue"):
-                metadata.append(str(paper["venue"]))
-            score = paper.get("relevance_score")
-            if isinstance(score, (int, float)):
-                metadata.append(f"Relevance {self._format_score(score)}")
-            summary = QLabel("  ·  ".join(metadata) or "Publication details unavailable")
-            summary.setObjectName("cardDescription")
-            summary.setWordWrap(True)
-            summary.setMinimumWidth(0)
-            details.addWidget(title)
-            details.addWidget(summary)
-            row_layout.addLayout(details, 1)
-            self.overview_papers_layout.addWidget(row)
-
-        if papers:
-            shown_count = min(len(papers), 5)
-            self.overview_papers_status.setText(
-                f"Showing the top {shown_count} of {len(papers)} papers. "
-                "Open Papers from the sidebar for the full list and journal screening."
-            )
-        else:
-            self.overview_papers_status.setText(
-                "No academic papers were found for this research run."
-            )
 
     @staticmethod
     def _sinta_screening(paper):
@@ -9295,6 +8443,32 @@ class ResearchPage(QWidget):
             return other_status in {"PARTIAL", "FAILED"}
         if selected_status == "INDEX_NO_METADATA":
             return other_status == "NO_METADATA"
+        accreditation = paper.get("accreditation_screening", {}) if isinstance(paper, dict) else {}
+        if not isinstance(accreditation, dict):
+            accreditation = {}
+        assessments = accreditation.get("official_assessments", [])
+        assessments = [item for item in assessments if isinstance(item, dict)] if isinstance(assessments, list) else []
+        accreditation_status = str(accreditation.get("status") or "")
+        accreditation_system = str(accreditation.get("system") or "").upper()
+        if selected_status == "EXT_ASSESSMENT":
+            return bool(assessments) or accreditation_status in {
+                "HKDIR_L2", "HKDIR_L1", "ABDC_A_STAR", "ABDC_A", "ABDC_B", "ABDC_C", "ACCREDITED",
+            }
+        if selected_status == "EXT_ACCREDITATION":
+            return (
+                any(item.get("kind") == "ACCREDITATION" for item in assessments)
+                or accreditation_status in {"HKDIR_L2", "HKDIR_L1"}
+                or (
+                    accreditation_status == "ACCREDITED"
+                    and accreditation_system not in {"ABDC", "OPENALEX"}
+                )
+            )
+        if selected_status == "EXT_RATING":
+            return (
+                any(item.get("kind") == "RATING_OR_CLASSIFICATION" for item in assessments)
+                or accreditation_system == "ABDC"
+                or accreditation_status in {"ABDC_A_STAR", "ABDC_A", "ABDC_B", "ABDC_C"}
+            )
         status = str(screening.get("status") or "UNVERIFIED")
         lookup_status = str(screening.get("lookup_status") or "UNVERIFIED")
         if selected_status == "UNVERIFIED":
@@ -9316,9 +8490,19 @@ class ResearchPage(QWidget):
         lookup_status = str(screening.get("lookup_status") or "UNVERIFIED")
         system = str(screening.get("system") or "").upper()
         rank = str(screening.get("rank") or "").upper()
+        assessments = screening.get("official_assessments", [])
+        assessments = assessments if isinstance(assessments, list) else []
 
         if selected_status == "ACCREDITED":
-            return (status == "ACCREDITED" and lookup_status in {"VERIFIED", "MANUALLY_CONFIRMED"}) or status in {"HKDIR_L2", "HKDIR_L1", "ABDC_A_STAR", "ABDC_A", "ABDC_B", "ABDC_C"}
+            return (
+                any(item.get("kind") == "ACCREDITATION" for item in assessments if isinstance(item, dict))
+                or (
+                    status == "ACCREDITED"
+                    and lookup_status in {"VERIFIED", "MANUALLY_CONFIRMED", "OPENALEX_LISTED"}
+                    and system not in {"ABDC", "OPENALEX"}
+                )
+                or status in {"HKDIR_L2", "HKDIR_L1"}
+            )
         if selected_status == "HKDIR_L2":
             return (system in {"HKDIR", "HK-DIR"} and "LEVEL 2" in rank and lookup_status in {"VERIFIED", "MANUALLY_CONFIRMED"}) or status == "HKDIR_L2"
         if selected_status == "HKDIR_L1":
@@ -9352,6 +8536,23 @@ class ResearchPage(QWidget):
         lookup_status = str(screening.get("lookup_status") or "UNVERIFIED")
         rank = screening.get("rank")
         system = screening.get("system")
+        assessments = screening.get("official_assessments", [])
+        assessments = [item for item in assessments if isinstance(item, dict)] if isinstance(assessments, list) else []
+        if assessments:
+            kind_labels = {
+                "ACCREDITATION": "Akreditasi",
+                "RATING_OR_CLASSIFICATION": "Peringkat",
+                "DIRECTORY_OR_INDEX": "Direktori/indeks",
+            }
+            labels = []
+            for item in assessments:
+                kind = str(item.get("kind") or "").upper()
+                name = item.get("system_name") or item.get("rank") or item.get("list_id")
+                labels.append(f"{kind_labels.get(kind, 'Penilaian')}: {name}")
+            first = " · ".join(label for label in labels[:2] if label)
+            if len(labels) > 2:
+                first += f" +{len(labels) - 2}"
+            return first or "Ada penilaian non-SINTA"
 
         if lookup_status == "AMBIGUOUS" or screening.get("is_ambiguous"):
             return f"{rank} (Kandidat Ambigu)" if rank else "Kandidat Ambigu"
@@ -9366,7 +8567,17 @@ class ResearchPage(QWidget):
         if status == "NOT_ACCREDITED":
             return f"Tidak Terakreditasi ({rank})" if rank else "Tidak Terakreditasi"
         if status == "ACCREDITED" and rank:
-            return f"{system} {rank}" if system else str(rank)
+            if str(system or "").upper() == "ABDC":
+                return f"Peringkat ABDC {rank}"
+            return f"Akreditasi {system} {rank}" if system else f"Akreditasi {rank}"
+        if screening.get("official_assessments_status") == "PARTIAL":
+            return "Daftar penilaian diperiksa sebagian"
+        if screening.get("official_assessments_status") == "CHECKED":
+            return "Tidak ditemukan di daftar yang dicek"
+        if screening.get("official_assessments_status") == "FAILED":
+            return "Daftar penilaian belum dapat diperiksa"
+        if screening.get("official_assessments_status") == "NO_METADATA":
+            return "ISSN tidak tersedia untuk katalog eksternal"
         return "Belum Diperiksa"
 
     def _apply_paper_filter(self, *_):
@@ -9459,7 +8670,21 @@ class ResearchPage(QWidget):
             ]
 
             for column, value in enumerate(values):
-                item = QTableWidgetItem(value)
+                if column == 0:
+                    sort_key = row + 1
+                elif column == 2:
+                    try:
+                        sort_key = float(year)
+                    except (TypeError, ValueError):
+                        sort_key = float("-inf")
+                elif column == 6:
+                    try:
+                        sort_key = float(relevance)
+                    except (TypeError, ValueError):
+                        sort_key = float("-inf")
+                else:
+                    sort_key = value.casefold()
+                item = _ResearchPaperTableItem(value, sort_key)
 
                 if column == 0:
                     item.setData(Qt.UserRole, paper_index)
@@ -9519,6 +8744,7 @@ class ResearchPage(QWidget):
 
                 self.paper_table.setItem(row, column, item)
 
+        self.paper_table.setSortingEnabled(True)
         self.paper_table.setUpdatesEnabled(True)
         checked_states = {
             "VERIFIED", "MANUALLY_CONFIRMED", "FAILED", "NOT_FOUND", "NO_MATCH",
@@ -9541,8 +8767,12 @@ class ResearchPage(QWidget):
 
         if self.filtered_paper_indices:
             selected_row = 0
-            if selected_paper_index in self.filtered_paper_indices:
-                selected_row = self.filtered_paper_indices.index(selected_paper_index)
+            if selected_paper_index is not None:
+                for row in range(self.paper_table.rowCount()):
+                    item = self.paper_table.item(row, 0)
+                    if item is not None and item.data(Qt.UserRole) == selected_paper_index:
+                        selected_row = row
+                        break
             self.paper_table.selectRow(selected_row)
             # Rebuild the detail pane even when the same visual row stayed
             # selected while the filtered table contents changed.
@@ -9562,6 +8792,42 @@ class ResearchPage(QWidget):
             self.sinta_period_confirmed.setChecked(False)
             self.sinta_lookup_message.setText("Tidak ada artikel yang sesuai dengan filter saat ini.")
             self.sinta_lookup_message.setToolTip("")
+
+        papers_tool_page = getattr(self.main_window, "papers_tool_page", None)
+        if papers_tool_page is not None:
+            papers_tool_page.update_from_result(self.research_result)
+
+    def _open_paper_source_for_row(self, row, _column=0):
+        if row < 0 or row >= self.paper_table.rowCount():
+            return
+        item = self.paper_table.item(row, 0)
+        paper_index = item.data(Qt.UserRole) if item is not None else None
+        papers = self.research_result.get("papers", [])
+        if not isinstance(paper_index, int) or not isinstance(papers, list):
+            return
+        if paper_index < 0 or paper_index >= len(papers):
+            return
+
+        paper = papers[paper_index]
+        target_url = str(paper.get("url") or "").strip()
+        doi = str(paper.get("doi") or "").strip()
+        if not target_url and doi:
+            if doi[:4].lower() == "doi:":
+                doi = doi[4:].strip()
+            target_url = f"https://doi.org/{doi}"
+        if not target_url:
+            QMessageBox.information(
+                self,
+                "Sumber tidak tersedia",
+                "Artikel ini tidak menyediakan tautan sumber atau DOI.",
+            )
+            return
+        if not QDesktopServices.openUrl(QUrl(target_url)):
+            QMessageBox.warning(
+                self,
+                "Sumber tidak dapat dibuka",
+                "Windows tidak dapat membuka tautan sumber artikel ini.",
+            )
 
     # =========================================================
     # PAPER DETAIL
@@ -9943,9 +9209,6 @@ class ResearchPage(QWidget):
 
         if not tasks:
             self._render_filtered_papers()
-            papers_page = getattr(self.main_window, "papers_tool_page", None)
-            if papers_page is not None:
-                papers_page.update_from_result(self.research_result)
             metadata_missing = sum(
                 self._sinta_screening(paper).get("lookup_status") == "NO_METADATA"
                 for paper in self._all_papers
@@ -10103,9 +9366,6 @@ class ResearchPage(QWidget):
                 repository.save_research_result(project_id, self.research_result)
             except Exception as error:
                 print(f"Warning: hasil pemeriksaan indeks tidak dapat disimpan: {error}")
-        papers_page = getattr(self.main_window, "papers_tool_page", None)
-        if papers_page is not None:
-            papers_page.update_from_result(self.research_result)
         self._render_filtered_papers()
 
     @Slot(str)
@@ -10181,9 +9441,6 @@ class ResearchPage(QWidget):
                 repository.save_research_result(project_id, self.research_result)
             except Exception as error:
                 print(f"Warning: hasil batch SINTA tidak dapat disimpan: {error}")
-        papers_page = getattr(self.main_window, "papers_tool_page", None)
-        if papers_page is not None:
-            papers_page.update_from_result(self.research_result)
         self._render_filtered_papers()
 
     def _persist_sinta_screening(self, paper):
@@ -10459,7 +9716,6 @@ class ResearchPage(QWidget):
                 except Exception as error:
                     print(f"Warning: workflow riset tidak dapat disimpan: {error}")
 
-        self.main_window.papers_tool_page.update_from_result(self.research_result)
         self._apply_paper_filter()
         self._show_selected_paper()
 
@@ -10554,9 +9810,6 @@ class ResearchPage(QWidget):
             except Exception as error:
                 print(f"Warning: workflow riset tidak dapat disimpan: {error}")
 
-        papers_page = getattr(self.main_window, "papers_tool_page", None)
-        if papers_page is not None:
-            papers_page.update_from_result(self.research_result)
         self._apply_paper_filter()
         self._show_selected_paper()
 
@@ -10626,11 +9879,9 @@ class ResearchPage(QWidget):
         tasks = []
         for paper_index, paper in zip(self._all_paper_result_indices, self._all_papers):
             screening = paper.get("accreditation_screening") or {}
-            if str(screening.get("status") or "UNVERIFIED") != "UNVERIFIED":
-                continue
             checked_year = str(screening.get("checked_for_year") or "")
             same_year = checked_year == str(paper.get("year") or "")
-            if screening.get("found") and same_year and str(screening.get("lookup_status") or "") == "VERIFIED":
+            if same_year and screening.get("official_assessments_status") in {"CHECKED", "NO_METADATA"}:
                 continue
 
             issn_values = paper.get("issn", [])
@@ -10660,12 +9911,18 @@ class ResearchPage(QWidget):
 
         if not tasks:
             self._render_filtered_papers()
-            papers_page = getattr(self.main_window, "papers_tool_page", None)
-            if papers_page is not None:
-                papers_page.update_from_result(self.research_result)
             self.non_sinta_lookup_message.setText(
-                "Semua artikel sudah diperiksa pada direktori resmi HK-dir / ABDC."
+                "Semua artikel sudah diperiksa pada direktori dan daftar penilaian yang didukung."
             )
+            papers_tool_page = getattr(self.main_window, "papers_tool_page", None)
+            if papers_tool_page is not None:
+                checked_count = sum(
+                    1 for paper in self._all_papers
+                    if (paper.get("accreditation_screening") or {}).get("official_assessments_status") == "CHECKED"
+                )
+                papers_tool_page.set_assessment_lookup_status(
+                    checked_count, checked_count, finished=True
+                )
             return
 
         self._non_sinta_batch_found = 0
@@ -10677,6 +9934,9 @@ class ResearchPage(QWidget):
         self.non_sinta_lookup_progress.setValue(0)
         self.non_sinta_lookup_progress.setVisible(True)
         self.non_sinta_lookup_message.setText(f"Memeriksa akreditasi 0 dari {len(tasks)}...")
+        papers_tool_page = getattr(self.main_window, "papers_tool_page", None)
+        if papers_tool_page is not None:
+            papers_tool_page.set_assessment_lookup_status(0, len(tasks))
 
         self._non_sinta_thread = QThread(self)
         self._non_sinta_worker = NonSintaBatchLookupWorker(tasks)
@@ -10717,6 +9977,9 @@ class ResearchPage(QWidget):
             f"{current} dari {total} artikel | Memeriksa {journal} | "
             f"cocok {self._non_sinta_batch_found}, perlu ditinjau {self._non_sinta_batch_manual}"
         )
+        papers_tool_page = getattr(self.main_window, "papers_tool_page", None)
+        if papers_tool_page is not None:
+            papers_tool_page.set_assessment_lookup_status(current, total)
         refresh_timer = getattr(self, "_sinta_table_refresh_timer", None)
         if refresh_timer is None:
             self._render_filtered_papers()
@@ -10728,9 +9991,12 @@ class ResearchPage(QWidget):
         if hasattr(self, "_sinta_table_refresh_timer"):
             self._sinta_table_refresh_timer.stop()
         self.non_sinta_lookup_message.setText(
-            f"Pemeriksaan akreditasi non-SINTA selesai: cocok {self._non_sinta_batch_found} dari {total} artikel; "
+            f"Pemeriksaan direktori/penilaian jurnal selesai: cocok {self._non_sinta_batch_found} dari {total} artikel; "
             f"{self._non_sinta_batch_manual} perlu tinjauan/konfirmasi manual."
         )
+        papers_tool_page = getattr(self.main_window, "papers_tool_page", None)
+        if papers_tool_page is not None:
+            papers_tool_page.set_assessment_lookup_status(total, total, finished=True)
         project_id = getattr(self.main_window, "current_project_id", None)
         if project_id is not None:
             try:
@@ -10739,9 +10005,6 @@ class ResearchPage(QWidget):
                 repository.save_research_result(project_id, self.research_result)
             except Exception as error:
                 print(f"Warning: hasil batch non-SINTA tidak dapat disimpan: {error}")
-        papers_page = getattr(self.main_window, "papers_tool_page", None)
-        if papers_page is not None:
-            papers_page.update_from_result(self.research_result)
         self._render_filtered_papers()
 
     @Slot(str)
@@ -11008,7 +10271,25 @@ class PapersToolPage(QWidget):
         self.count_label.setObjectName("topbarStatus")
         header.addWidget(self.count_label)
 
+        self.accreditation_status_label = QLabel("Penilaian jurnal otomatis saat Run")
+        self.accreditation_status_label.setObjectName("topbarStatus")
+        self.accreditation_status_label.setWordWrap(True)
+        header.addWidget(self.accreditation_status_label)
+
+        self.run_research_button = QPushButton("Run Academic Research")
+        self.run_research_button.setObjectName("primaryButton")
+        self.run_research_button.setMinimumHeight(38)
+        self.run_research_button.clicked.connect(self._run_academic_research)
+        header.addWidget(self.run_research_button)
+
         root.addLayout(header)
+
+        self.research_progress = QProgressBar()
+        self.research_progress.setRange(0, 0)
+        self.research_progress.setMaximumHeight(6)
+        self.research_progress.setTextVisible(False)
+        self.research_progress.setVisible(False)
+        root.addWidget(self.research_progress)
 
         # -----------------------------------------------------
         # TOOLBAR
@@ -11048,6 +10329,10 @@ class PapersToolPage(QWidget):
         self.sinta_filter.addItem("Tidak ditemukan di indeks yang dicek", "INDEX_NOT_FOUND")
         self.sinta_filter.addItem("Pemeriksaan indeks parsial", "INDEX_PARTIAL")
         self.sinta_filter.addItem("Metadata ISSN tidak tersedia", "INDEX_NO_METADATA")
+        self.sinta_filter.insertSeparator(self.sinta_filter.count())
+        self.sinta_filter.addItem("Akreditasi eksternal ditemukan", "EXT_ACCREDITATION")
+        self.sinta_filter.addItem("Peringkat/klasifikasi eksternal", "EXT_RATING")
+        self.sinta_filter.addItem("Semua daftar penilaian eksternal", "EXT_ASSESSMENT")
         self.sinta_filter.currentIndexChanged.connect(self._apply_filter)
         toolbar.addWidget(self.sinta_filter)
 
@@ -11093,6 +10378,7 @@ class PapersToolPage(QWidget):
         self.sinta_scope_note = QLabel(
             "Daftar artikel berasal dari Academic Research. SINTA memeriksa akreditasi jurnal dan tahun berlakunya; "
             "DOI artikel dicocokkan langsung bila tercantum pada profil resmi. "
+            "Skor relevansi adalah penyaringan heuristik topik, bukan akurasi model atau bukti penggunaan dataset yang sama. "
             "Status SINTA berbeda dari indeks jurnal. DOAJ diperiksa otomatis; Scopus membutuhkan API Elsevier. "
             "DOAJ adalah direktori, bukan akreditasi. Status WoS dan Garuda belum diperiksa otomatis. "
             "Status dan cakupan jurnal dapat berubah; hasil pemeriksaan adalah snapshot."
@@ -11120,7 +10406,8 @@ class PapersToolPage(QWidget):
         table_layout.setSpacing(8)
 
         self.paper_table = QTableWidget()
-        self.paper_table.setColumnCount(8)
+        self.paper_table.setObjectName("rankedPapersTable")
+        self.paper_table.setColumnCount(9)
         self._paper_headers = [
             "#",
             "Judul Artikel",
@@ -11130,9 +10417,10 @@ class PapersToolPage(QWidget):
             "Sumber",
             "Relevansi",
             "SINTA / Indeks",
+            "Akreditasi / Penilaian Lain",
         ]
         self._paper_compact_headers = [
-            "#", "Artikel", "Thn", "Jurnal", "ISSN", "Sumber", "Skor", "SINTA/Indeks"
+            "#", "Artikel", "Thn", "Jurnal", "ISSN", "Sumber", "Skor", "SINTA/Indeks", "Akreditasi lain"
         ]
         self.paper_table.setHorizontalHeaderLabels(self._paper_headers)
         self.paper_table.setEditTriggers(QTableWidget.NoEditTriggers)
@@ -11156,9 +10444,14 @@ class PapersToolPage(QWidget):
         self.paper_table.setColumnWidth(6, 85)
         table_header.setSectionResizeMode(7, QHeaderView.Fixed)
         self.paper_table.setColumnWidth(7, 145)
+        table_header.setSectionResizeMode(8, QHeaderView.Fixed)
+        self.paper_table.setColumnWidth(8, 210)
 
         self.paper_table.setMinimumHeight(280)
-        self.paper_table.setShowGrid(False)
+        self.paper_table.setShowGrid(True)
+        self.paper_table.setSortingEnabled(True)
+        table_header.setSectionsClickable(True)
+        table_header.setSortIndicatorShown(True)
         self.paper_table.verticalHeader().setDefaultSectionSize(38)
         self.paper_table.verticalHeader().setVisible(False)
 
@@ -11212,7 +10505,36 @@ class PapersToolPage(QWidget):
         paper_splitter.setStretchFactor(1, 1)
         root.addWidget(paper_splitter, 1)
 
+        research_page = getattr(self.main_window, "research_page", None)
+        selection_panel = getattr(research_page, "paper_selection_panel", None)
+        if selection_panel is not None:
+            selection_panel.hide()
+
         self.show_empty_state()
+
+    def _run_academic_research(self):
+        research_page = getattr(self.main_window, "research_page", None)
+        if research_page is not None:
+            research_page.run_research()
+
+    def set_research_running(self, running):
+        self.research_progress.setVisible(bool(running))
+        self.run_research_button.setEnabled(not running)
+        self.run_research_button.setText(
+            "Researching..." if running else "Run Academic Research"
+        )
+
+    def set_assessment_lookup_status(self, current, total, finished=False):
+        if finished:
+            message = (
+                f"Penilaian jurnal selesai · {total:,} diperiksa"
+                if total else "Tidak ada ISSN jurnal yang dapat diperiksa"
+            )
+            self.accreditation_status_label.setText(message)
+        elif total:
+            self.accreditation_status_label.setText(
+                f"Memeriksa penilaian jurnal · {current:,}/{total:,}"
+            )
 
     # =====================================================
     # STATE
@@ -11230,6 +10552,7 @@ class PapersToolPage(QWidget):
             "Run Academic Research first to populate this tool."
         )
         self.count_label.setText("0 papers")
+        self.accreditation_status_label.setText("Penilaian jurnal otomatis saat Run")
         self.open_source_button.setEnabled(False)
         self.sinta_batch_button.setEnabled(False)
         self.other_index_button.setEnabled(False)
@@ -11237,6 +10560,7 @@ class PapersToolPage(QWidget):
         self.sinta_batch_status.setText(
             "Jalankan Academic Research terlebih dahulu untuk memeriksa jurnal di SINTA."
         )
+        self.set_research_running(False)
 
     def update_from_result(self, result):
         if not isinstance(result, dict):
@@ -11260,6 +10584,8 @@ class PapersToolPage(QWidget):
                 str(screening.get("rank") or ""),
                 str(screening.get("checked_at") or ""),
                 str(screening.get("other_indexes", {})),
+                str(screening.get("official_assessments_status") or ""),
+                str(screening.get("official_assessments", [])),
             ))
         signature = (id(result), tuple(paper_signatures))
         if signature == self._result_signature:
@@ -11490,6 +10816,7 @@ class PapersToolPage(QWidget):
             screening = ResearchPage._sinta_screening(paper)
             status = str(screening.get("status") or "UNVERIFIED")
             sinta_label = ResearchPage._sinta_table_status_label(paper)
+            other_assessment_label = ResearchPage._non_sinta_status_label(paper)
 
             relevance_str = f"{relevance:.1f}%" if isinstance(relevance, (int, float)) else "-"
 
@@ -11502,12 +10829,29 @@ class PapersToolPage(QWidget):
                 source_label,
                 relevance_str,
                 sinta_label,
+                other_assessment_label,
             ]
 
             for column, value in enumerate(values):
-                item = QTableWidgetItem(value)
+                if column == 0:
+                    sort_key = row + 1
+                elif column == 2:
+                    try:
+                        sort_key = float(year)
+                    except (TypeError, ValueError):
+                        sort_key = float("-inf")
+                elif column == 6:
+                    try:
+                        sort_key = float(relevance)
+                    except (TypeError, ValueError):
+                        sort_key = float("-inf")
+                else:
+                    sort_key = value.casefold()
+                item = _ResearchPaperTableItem(value, sort_key)
+                if column == 0:
+                    item.setData(Qt.UserRole, id(paper))
 
-                if column in {0, 2, 4, 5, 6, 7}:
+                if column in {0, 2, 4, 5, 6, 7, 8}:
                     item.setTextAlignment(Qt.AlignCenter)
                 else:
                     item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -11534,10 +10878,48 @@ class PapersToolPage(QWidget):
                         item.setForeground(QColor("#64748B"))
                         item.setBackground(QColor("#F1F5F9"))
                     item.setToolTip(_sinta_ui_note(screening) or sinta_label)
+                elif column == 8:
+                    accreditation = paper.get("accreditation_screening", {})
+                    accreditation = accreditation if isinstance(accreditation, dict) else {}
+                    assessments = accreditation.get("official_assessments", [])
+                    assessments = assessments if isinstance(assessments, list) else []
+                    lookup_status = str(accreditation.get("official_assessments_status") or "")
+                    if any(
+                        isinstance(value, dict) and value.get("kind") == "ACCREDITATION"
+                        for value in assessments
+                    ):
+                        item.setForeground(QColor("#0F766E"))
+                        item.setBackground(QColor("#F0FDF4"))
+                    elif assessments:
+                        item.setForeground(QColor("#1D4ED8"))
+                        item.setBackground(QColor("#EFF6FF"))
+                    elif lookup_status == "FAILED":
+                        item.setForeground(QColor("#B45309"))
+                        item.setBackground(QColor("#FFFBEB"))
+                    else:
+                        item.setForeground(QColor("#64748B"))
+                        item.setBackground(QColor("#F1F5F9"))
+                    assessment_notes = [
+                        f"{value.get('system_name') or value.get('list_id')}"
+                        + (f" | edisi {value.get('list_version')}" if value.get("list_version") else "")
+                        + (f" | {value.get('source_url')}" if value.get("source_url") else "")
+                        for value in assessments if isinstance(value, dict)
+                    ]
+                    if not assessment_notes:
+                        assessment_notes.append(
+                            "Tidak ditemukan di daftar eksternal yang terhubung; ini tidak membuktikan jurnal tidak terakreditasi."
+                            if lookup_status == "CHECKED"
+                            else "Sebagian ISSN belum dapat diperiksa; hasilnya belum lengkap."
+                            if lookup_status == "PARTIAL"
+                            else "Pencarian daftar penilaian jurnal belum berhasil."
+                            if lookup_status == "FAILED"
+                            else "Pemeriksaan otomatis berjalan setelah Academic Research."
+                        )
+                    item.setToolTip("\n".join(assessment_notes))
 
                 self.paper_table.setItem(row, column, item)
 
-        self.paper_table.setSortingEnabled(False)
+        self.paper_table.setSortingEnabled(True)
         self.paper_table.setUpdatesEnabled(True)
         self.count_label.setText(
             f"{len(self.filtered_papers)} dari {len(self.papers)} paper"
@@ -11566,12 +10948,9 @@ class PapersToolPage(QWidget):
             self.open_source_button.setEnabled(False)
             return
 
-        row = rows[0].row()
-
-        if row < 0 or row >= len(self.filtered_papers):
+        paper = self._paper_for_row(rows[0].row())
+        if paper is None:
             return
-
-        paper = self.filtered_papers[row]
 
         authors = paper.get("authors", [])
         authors_text = ", ".join(str(a) for a in authors) if isinstance(authors, list) else str(authors)
@@ -11609,6 +10988,47 @@ class PapersToolPage(QWidget):
             ),
             f"STATUS AKREDITASI SINTA\n{sinta_label}",
         ]
+
+        accreditation = paper.get("accreditation_screening", {})
+        accreditation = accreditation if isinstance(accreditation, dict) else {}
+        assessments = accreditation.get("official_assessments", [])
+        assessments = assessments if isinstance(assessments, list) else []
+        lines.append("PENILAIAN JURNAL DI LUAR SINTA")
+        if assessments:
+            for assessment in assessments:
+                if not isinstance(assessment, dict):
+                    continue
+                system = assessment.get("system_name") or assessment.get("list_id") or "Daftar jurnal"
+                maintainer = assessment.get("maintainer")
+                edition = assessment.get("list_version")
+                source_url = assessment.get("source_url")
+                kind = str(assessment.get("kind") or "").upper()
+                kind_label = {
+                    "ACCREDITATION": "Akreditasi",
+                    "RATING_OR_CLASSIFICATION": "Peringkat/klasifikasi",
+                    "DIRECTORY_OR_INDEX": "Direktori/indeks",
+                }.get(kind, "Penilaian eksternal")
+                details = [f"{kind_label}: {system}"]
+                if maintainer:
+                    details.append(f"pengelola: {maintainer}")
+                if edition:
+                    details.append(f"edisi: {edition}")
+                if source_url:
+                    details.append(f"sumber: {source_url}")
+                lines.append(" · ".join(details))
+            lines.append(
+                "Kecocokan ISSN berasal dari katalog OpenAlex yang memetakan daftar eksternal terbaru. Validasi status dan masa berlaku untuk tahun artikel pada sumber resmi."
+            )
+        elif accreditation.get("official_assessments_status") == "CHECKED":
+            lines.append(
+                "Tidak ditemukan pada daftar penilaian eksternal yang terhubung. Ini bukan bukti bahwa jurnal tidak terakreditasi di semua sistem."
+            )
+        elif accreditation.get("official_assessments_status") == "FAILED":
+            lines.append("Pencarian daftar penilaian eksternal gagal; coba lagi saat koneksi tersedia.")
+        elif accreditation.get("official_assessments_status") == "PARTIAL":
+            lines.append("Sebagian ISSN belum dapat diperiksa; hasil penilaian belum lengkap.")
+        else:
+            lines.append("Pemeriksaan otomatis dimulai setelah Academic Research selesai.")
 
         if screening.get("journal_name"):
             lines.append(f"JURNAL TERDAFTAR DI SINTA\n{screening.get('journal_name')}")
@@ -11666,21 +11086,24 @@ class PapersToolPage(QWidget):
         if not rows:
             return None
 
-        row = rows[0].row()
+        return self._paper_for_row(rows[0].row())
 
-        if row < 0 or row >= len(self.filtered_papers):
+    def _paper_for_row(self, row):
+        if row < 0 or row >= self.paper_table.rowCount():
             return None
+        item = self.paper_table.item(row, 0)
+        paper_identity = item.data(Qt.UserRole) if item is not None else None
+        for paper in self.filtered_papers:
+            if id(paper) == paper_identity:
+                return paper
+        return None
 
-        return self.filtered_papers[row]
 
     def _open_selected_source(self):
         self._open_paper_source(self._selected_paper())
 
     def _open_paper_source_for_row(self, row, _column=0):
-        if row < 0 or row >= len(self.filtered_papers):
-            return
-
-        self._open_paper_source(self.filtered_papers[row])
+        self._open_paper_source(self._paper_for_row(row))
 
     def _open_paper_source(self, paper):
         if not paper:
@@ -11731,8 +11154,9 @@ class PapersToolPage(QWidget):
             if header_item is not None:
                 header_item.setToolTip(full_label)
         compact_widths = (34, 52, 110, 68, 78, 68, 100)
-        standard_widths = (42, 64, 175, 105, 110, 85, 145)
-        for column, width in zip((0, 2, 3, 4, 5, 6, 7), compact_widths if compact else standard_widths):
+        standard_widths = (42, 64, 175, 105, 110, 85, 145, 210)
+        compact_widths = (34, 52, 110, 68, 78, 68, 100, 145)
+        for column, width in zip((0, 2, 3, 4, 5, 6, 7, 8), compact_widths if compact else standard_widths):
             self.paper_table.setColumnWidth(column, width)
         self._root_layout.setContentsMargins(
             16 if compact else 30,
@@ -11740,6 +11164,9 @@ class PapersToolPage(QWidget):
             16 if compact else 30,
             16 if compact else 25,
         )
+        research_page = getattr(self.main_window, "research_page", None)
+        if research_page is not None:
+            research_page._apply_responsive_layout(event.size().width())
 
 
 class ResearchLandscapeToolPage(QWidget):
@@ -13323,7 +12750,10 @@ class MainWindow(QMainWindow):
             ),
             "node_editor_page": ("thread",),
             "ml_page": ("_ml_thread",),
-            "research_page": ("_research_thread", "_sinta_thread", "_journal_index_thread"),
+            "research_page": (
+                "_research_thread", "_insights_thread", "_sinta_thread",
+                "_journal_index_thread", "_non_sinta_thread",
+            ),
             "gap_tool_page": ("_explanation_thread",),
             "report_tool_page": ("_report_thread",),
         }
@@ -13573,8 +13003,10 @@ class MainWindow(QMainWindow):
                     widget.minimumWidth(), widget.maximumWidth(),
                     widget.minimumHeight(), widget.maximumHeight(),
                 )
-                if hasattr(widget, "iconSize"):
-                    self._icon_scale_baselines[key] = widget.iconSize()
+                icon_size_getter = getattr(widget, "iconSize", None)
+                icon_size_setter = getattr(widget, "setIconSize", None)
+                if callable(icon_size_getter) and callable(icon_size_setter):
+                    self._icon_scale_baselines[key] = icon_size_getter()
                 if not widget.property("scaleStylesheetExternally"):
                     self._style_scale_baselines[key] = widget.styleSheet()
                 if widget.testAttribute(Qt.WA_SetFont):
@@ -13604,8 +13036,9 @@ class MainWindow(QMainWindow):
                     widget.setMaximumHeight(max(0, round(max_height * scale)))
 
             icon_size = self._icon_scale_baselines.get(key)
-            if icon_size is not None and not icon_size.isEmpty():
-                widget.setIconSize(
+            icon_size_setter = getattr(widget, "setIconSize", None)
+            if icon_size is not None and not icon_size.isEmpty() and callable(icon_size_setter):
+                icon_size_setter(
                     QSize(round(icon_size.width() * scale), round(icon_size.height() * scale))
                 )
             base_font = self._font_scale_baselines.get(key)
@@ -13877,6 +13310,7 @@ class MainWindow(QMainWindow):
         self.ml_page = MLIntelligencePage(self)
         self.research_page = ResearchPage(self)
         self.papers_tool_page = PapersToolPage(self)
+        self.research_page.hide()
         self.landscape_tool_page = ResearchLandscapeToolPage(self)
         self.gap_tool_page = ResearchGapToolPage(self)
         self.research_insights_page = ResearchInsightsPage(
@@ -13894,7 +13328,7 @@ class MainWindow(QMainWindow):
             "analysis": self.analysis_page,
             "editor_analysis": self.editor_analysis_page,
             "ml": self.ml_page,
-            "research": self.research_page,
+            "research": self.papers_tool_page,
             "papers": self.papers_tool_page,
             "insights": self.research_insights_page,
             # Landscape and gap are tabs inside Research Insights. Reusing
@@ -14060,10 +13494,8 @@ class MainWindow(QMainWindow):
         self._add_nav_section(layout, "RESEARCH TOOLS")
         layout.itemAt(layout.count() - 1).widget().setFixedHeight(32)
         layout.addSpacing(15)
-        self._add_nav_group(layout, 238, 6, 17, (
+        self._add_nav_group(layout, 152, 6, 17, (
             ("research", "academic-research.svg", "Academic Research"),
-            ("papers", "papers.svg", "Papers"),
-            ("landscape", "research-landscape.svg", "Research Landscape"),
             ("gap", "research-gap.svg", "Research Gap"),
             ("report", "research-report.svg", "Research Report"),
         ))
@@ -14260,12 +13692,15 @@ class MainWindow(QMainWindow):
             self._sync_page_chrome(size.width(), size.height())
 
     def eventFilter(self, watched, event):
+        watched_is_window_widget = isinstance(watched, QWidget) and (
+            watched is self or self.isAncestorOf(watched)
+        )
         if (
             event.type() == QEvent.ChildAdded
             and getattr(self, "_initial_widget_scale_applied", False)
             and isinstance(event.child(), QWidget)
             and isinstance(watched, QWidget)
-            and (watched is self or self.isAncestorOf(watched))
+            and watched_is_window_widget
             and not self._scale_refresh_scheduled
         ):
             self._pending_scale_roots.append(event.child())
@@ -14274,7 +13709,7 @@ class MainWindow(QMainWindow):
         if (
             event.type() == QEvent.Wheel
             and event.modifiers() & Qt.ControlModifier
-            and (watched is self or self.isAncestorOf(watched))
+            and watched_is_window_widget
         ):
             if event.angleDelta().y() > 0:
                 self.scale_manager.zoom_in()
@@ -14491,6 +13926,7 @@ class MainWindow(QMainWindow):
         self.research_insights_page._on_tab_changed(
             self.research_insights_page.tabs.currentIndex()
         )
+        self.research_page.ensure_insights()
 
     def open_landscape_tool(self):
         self.open_insights_page()
@@ -14512,6 +13948,14 @@ class MainWindow(QMainWindow):
         if not has_data:
             self.report_tool_page.show_empty_state()
         else:
+            research_result = getattr(self.research_page, "research_result", {}) or {}
+            if research_result.get("insights_status") == "NOT_COMPUTED":
+                self._show_page("report")
+                self.report_tool_page.status.setText(
+                    "Menyiapkan landscape dan research gap sebelum menyusun laporan..."
+                )
+                self.research_page.ensure_insights()
+                return
             self.report_tool_page.generate_preview()
         self._show_page("report")
 
@@ -14648,15 +14092,13 @@ class MainWindow(QMainWindow):
 
             research_result = state.get("research") or {}
             if research_result:
+                self.research_page._last_ml_result = dict(task_result or {})
                 self.research_page.restore_result(research_result)
-                self.dashboard.update_research_result(research_result)
-                self.papers_tool_page.update_from_result(research_result)
 
             self.dashboard.update_workflow_state(
                 has_dataset=True,
                 analysis_done=bool(self.analysis_result),
                 ml_done=bool(task_result and methods_result),
-                research_done=bool(research_result),
             )
 
             return
@@ -14688,7 +14130,6 @@ class MainWindow(QMainWindow):
 
         self.ml_page.show_empty_state()
         self.research_page.show_empty_state()
-        self.papers_tool_page.show_empty_state()
         self.landscape_tool_page.show_empty_state()
         self.gap_tool_page.show_empty_state()
         self.report_tool_page.show_empty_state()
@@ -14696,7 +14137,6 @@ class MainWindow(QMainWindow):
             has_dataset=self.current_dataset is not None,
             analysis_done=False,
             ml_done=False,
-            research_done=False,
         )
 
     def activate_dataset_version(self, version: int):
@@ -14782,7 +14222,7 @@ class MainWindow(QMainWindow):
         self.ml_page.show_ready_state()
         self.research_page.show_empty_state()
         self.dashboard.update_workflow_state(
-            has_dataset=True, analysis_done=True, ml_done=False, research_done=False
+            has_dataset=True, analysis_done=True, ml_done=False
         )
 
     def fail_dataset_analysis(self, duration_ms):

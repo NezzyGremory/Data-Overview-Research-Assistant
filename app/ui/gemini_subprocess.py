@@ -16,7 +16,9 @@ def main() -> int:
         analysis = pickle.load(sys.stdin.buffer)
         from app.ai.gemini_explainer import GeminiDatasetExplainer
 
-        result = GeminiDatasetExplainer().explain_with_source(analysis)
+        explainer = GeminiDatasetExplainer()
+        text, source = explainer.explain_with_source(analysis)
+        result = (text, source, explainer.last_error)
         pickle.dump(result, sys.stdout.buffer, protocol=pickle.HIGHEST_PROTOCOL)
         return 0
     except BaseException as error:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List
 
 from app.nlp.domain_detector import DomainDetector
@@ -87,6 +88,7 @@ class ResearchIntelligenceEngine:
         ml_result: Dict | None = None,
         search_limit: int = 20,
         max_queries: int = 5,
+        include_insights: bool = True,
     ) -> Dict:
         """Menjalankan seluruh pipeline research intelligence."""
 
@@ -281,12 +283,29 @@ class ResearchIntelligenceEngine:
 
         pipeline["academic_search"]["queries"] = len(queries)
 
-        for query in queries:
+        def search_query(query):
             try:
-                search_result = self._search(
-                    query=query,
-                    limit=search_limit,
-                )
+                return self._search(query=query, limit=search_limit)
+            except Exception as exc:
+                return {
+                    "status": "ERROR",
+                    "papers": [],
+                    "sources": [],
+                    "message": str(exc),
+                    "error": str(exc),
+                }
+
+        # Run a small number of independent query searches together. Each
+        # search already fans out to its providers, so keeping this at two
+        # avoids an unbounded burst of requests while reducing serial waits.
+        if len(queries) > 1:
+            with ThreadPoolExecutor(max_workers=min(2, len(queries))) as executor:
+                search_results = list(executor.map(search_query, queries))
+        else:
+            search_results = [search_query(query) for query in queries]
+
+        for query, search_result in zip(queries, search_results):
+            try:
 
                 if not isinstance(search_result, dict):
                     search_result = {
@@ -461,117 +480,49 @@ class ResearchIntelligenceEngine:
                 paper.setdefault("relevance_score", 0)
                 paper.setdefault("ranking_status", "FALLBACK")
 
-        # =====================================================
-        # 8. LANDSCAPE
-        # =====================================================
+        if include_insights:
+            try:
+                landscape = self.landscape_analyzer.analyze(papers=ranked_papers, ml_result=ml_result)
+                if not isinstance(landscape, dict):
+                    landscape = {"status": "SUCCESS", "result": landscape}
+                pipeline["landscape"] = {"status": "SUCCESS", "message": "Research landscape berhasil dianalisis."}
+            except Exception as exc:
+                pipeline["landscape"] = {"status": "ERROR", "message": str(exc)}
+                landscape = {"status": "ERROR", "error": str(exc), "summary": {}}
 
-        try:
-            landscape = self.landscape_analyzer.analyze(
-                papers=ranked_papers,
-                ml_result=ml_result,
-            )
+            try:
+                trend = self.trend_analyzer.analyze(papers=ranked_papers, landscape=landscape)
+                if not isinstance(trend, dict):
+                    trend = {"status": "SUCCESS", "result": trend}
+                pipeline["trend"] = {"status": "SUCCESS", "message": "Research trend berhasil dianalisis."}
+            except Exception as exc:
+                pipeline["trend"] = {"status": "ERROR", "message": str(exc)}
+                trend = {"status": "ERROR", "error": str(exc)}
 
-            if not isinstance(landscape, dict):
-                landscape = {
-                    "status": "SUCCESS",
-                    "result": landscape,
+            try:
+                gaps = self.gap_analyzer.analyze(papers=ranked_papers, ml_result=ml_result, landscape=landscape)
+                if not isinstance(gaps, dict):
+                    gaps = {"status": "SUCCESS", "result": gaps}
+                pipeline["gap_analysis"] = {"status": "SUCCESS", "message": "Potential research gap berhasil dianalisis."}
+            except Exception as exc:
+                pipeline["gap_analysis"] = {"status": "ERROR", "message": str(exc)}
+                gaps = {"status": "ERROR", "error": str(exc), "summary": {"gap_count": 0}}
+
+            summary = self._build_summary(ranked_papers, landscape, trend, gaps)
+            insights_status = "READY"
+        else:
+            for key, label in (("landscape", "Landscape"), ("trend", "Trend"), ("gap_analysis", "Research gap")):
+                pipeline[key] = {
+                    "status": "SKIPPED",
+                    "message": f"Dihitung saat halaman {label} dibuka.",
                 }
-
-            pipeline["landscape"] = {
-                "status": "SUCCESS",
-                "message": "Research landscape berhasil dianalisis.",
-            }
-
-        except Exception as exc:
-            pipeline["landscape"] = {
-                "status": "ERROR",
-                "message": str(exc),
-            }
-
-            landscape = {
-                "status": "ERROR",
-                "error": str(exc),
-                "summary": {},
-            }
-
-        # =====================================================
-        # 9. TREND
-        # =====================================================
-
-        try:
-            trend = self.trend_analyzer.analyze(
-                papers=ranked_papers,
-                landscape=landscape,
-            )
-
-            if not isinstance(trend, dict):
-                trend = {
-                    "status": "SUCCESS",
-                    "result": trend,
-                }
-
-            pipeline["trend"] = {
-                "status": "SUCCESS",
-                "message": "Research trend berhasil dianalisis.",
-            }
-
-        except Exception as exc:
-            pipeline["trend"] = {
-                "status": "ERROR",
-                "message": str(exc),
-            }
-
-            trend = {
-                "status": "ERROR",
-                "error": str(exc),
-            }
-
-        # =====================================================
-        # 10. GAP ANALYSIS
-        # =====================================================
-
-        try:
-            gaps = self.gap_analyzer.analyze(
-                papers=ranked_papers,
-                ml_result=ml_result,
-                landscape=landscape,
-            )
-
-            if not isinstance(gaps, dict):
-                gaps = {
-                    "status": "SUCCESS",
-                    "result": gaps,
-                }
-
-            pipeline["gap_analysis"] = {
-                "status": "SUCCESS",
-                "message": (
-                    "Potential research gap berhasil dianalisis."
-                ),
-            }
-
-        except Exception as exc:
-            pipeline["gap_analysis"] = {
-                "status": "ERROR",
-                "message": str(exc),
-            }
-
-            gaps = {
-                "status": "ERROR",
-                "error": str(exc),
-                "summary": {"gap_count": 0},
-            }
-
-        # =====================================================
-        # 11. SUMMARY
-        # =====================================================
-
-        summary = self._build_summary(
-            ranked_papers=ranked_papers,
-            landscape=landscape,
-            trend=trend,
-            gaps=gaps,
-        )
+            landscape = {"status": "SKIPPED", "summary": {}}
+            trend = {"status": "SKIPPED"}
+            gaps = {"status": "SKIPPED", "summary": {"gap_count": 0}}
+            summary = self._build_summary(ranked_papers, landscape, trend, gaps)
+            summary["potential_gap_count"] = None
+            summary["research_direction"] = "NOT_COMPUTED"
+            insights_status = "NOT_COMPUTED"
 
         # =====================================================
         # 12. OVERALL STATUS
@@ -603,6 +554,7 @@ class ResearchIntelligenceEngine:
             "gaps": gaps,
             "summary": summary,
             "pipeline": pipeline,
+            "insights_status": insights_status,
             "transparency": {
                 "keyword_extraction": "HEURISTIC",
                 "domain_detection": "ESTIMATION",
@@ -614,6 +566,54 @@ class ResearchIntelligenceEngine:
                 "research_gap": "POTENTIAL_GAP",
             },
         }
+
+    def analyze_insights(self, result: Dict[str, Any], ml_result: Dict | None = None) -> Dict[str, Any]:
+        """Compute landscape, trend and gap output on demand without searching again."""
+        if not isinstance(result, dict):
+            result = {}
+        papers = result.get("papers", [])
+        papers = papers if isinstance(papers, list) else []
+        pipeline = result.setdefault("pipeline", {})
+        if not isinstance(pipeline, dict):
+            pipeline = {}
+            result["pipeline"] = pipeline
+
+        try:
+            landscape = self.landscape_analyzer.analyze(papers=papers, ml_result=ml_result)
+            if not isinstance(landscape, dict):
+                landscape = {"status": "SUCCESS", "result": landscape}
+            pipeline["landscape"] = {"status": "SUCCESS", "message": "Research landscape berhasil dianalisis."}
+        except Exception as exc:
+            landscape = {"status": "ERROR", "error": str(exc), "summary": {}}
+            pipeline["landscape"] = {"status": "ERROR", "message": str(exc)}
+
+        try:
+            trend = self.trend_analyzer.analyze(papers=papers, landscape=landscape)
+            if not isinstance(trend, dict):
+                trend = {"status": "SUCCESS", "result": trend}
+            pipeline["trend"] = {"status": "SUCCESS", "message": "Research trend berhasil dianalisis."}
+        except Exception as exc:
+            trend = {"status": "ERROR", "error": str(exc)}
+            pipeline["trend"] = {"status": "ERROR", "message": str(exc)}
+
+        try:
+            gaps = self.gap_analyzer.analyze(papers=papers, ml_result=ml_result, landscape=landscape)
+            if not isinstance(gaps, dict):
+                gaps = {"status": "SUCCESS", "result": gaps}
+            pipeline["gap_analysis"] = {"status": "SUCCESS", "message": "Potential research gap berhasil dianalisis."}
+        except Exception as exc:
+            gaps = {"status": "ERROR", "error": str(exc), "summary": {"gap_count": 0}}
+            pipeline["gap_analysis"] = {"status": "ERROR", "message": str(exc)}
+
+        result.update({
+            "landscape": landscape,
+            "trend": trend,
+            "gaps": gaps,
+            "summary": self._build_summary(papers, landscape, trend, gaps),
+            "pipeline": pipeline,
+            "insights_status": "READY",
+        })
+        return result
 
     # =========================================================
     # KEYWORD ADAPTER

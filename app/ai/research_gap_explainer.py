@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from typing import Any
 
 import httpx
@@ -37,51 +38,81 @@ class ResearchGapExplainer:
 
         prompt = self._build_prompt(items)
         default_model = "gemini-3.8-flash"
-        models = [self.model or default_model]
-        # Keep one compatibility fallback for a stale model setting. Avoid
-        # cycling through a long model/key list after timeouts or server errors.
-        if models[0] != default_model:
-            models.append(default_model)
+        fallback_model = "gemini-3.5-flash"
+        models = []
+        for candidate in (self.model or default_model, default_model, fallback_model):
+            candidate = candidate.removeprefix("models/").strip()
+            if candidate and candidate not in models:
+                models.append(candidate)
 
         failures = []
+        # Bound total wait even when the provider is repeatedly unavailable.
+        deadline = time.monotonic() + 38.0
+        transient_statuses = {408, 429, 500, 502, 503, 504}
+        # Try at most two configured keys; additional keys rarely help an outage
+        # and would make the UI wait too long.
         for model in models:
-            try:
-                response = httpx.post(
-                    f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-                    headers={
-                        "x-goog-api-key": self.api_keys[0],
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                        "generationConfig": {
-                            "temperature": 0.2,
-                            "maxOutputTokens": 3072,
-                            **({"thinkingConfig": {"thinkingLevel": "low"}} if model.startswith("gemini-3") else {}),
-                        },
-                    },
-                    timeout=self.timeout,
-                )
-                if response.status_code == 200:
-                    text = self._extract_text(response.json())
-                    if len(text.strip()) > 80:
-                        return text.strip(), "gemini", ""
-                    failures.append("Gemini merespons tanpa teks penjelasan")
-                    break
+            for key in self.api_keys[:2]:
+                for attempt in range(2):
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    try:
+                        response = httpx.post(
+                            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+                            headers={
+                                "x-goog-api-key": key,
+                                "Content-Type": "application/json",
+                            },
+                            json={
+                                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                                "generationConfig": {
+                                    "temperature": 0.2,
+                                    "maxOutputTokens": 3072,
+                                    **({"thinkingConfig": {"thinkingLevel": "low"}} if model.startswith("gemini-3") else {}),
+                                },
+                            },
+                            timeout=min(self.timeout, remaining),
+                        )
+                        if response.status_code == 200:
+                            text = self._extract_text(response.json())
+                            if len(text.strip()) > 80:
+                                return text.strip(), "gemini", ""
+                            failures.append(f"{model}: respons tanpa teks penjelasan")
+                            break
 
-                failures.append(f"{model}: HTTP {response.status_code}")
-                # A second model only helps when the configured model is
-                # unknown/invalid. Retry delays on 429/5xx make the UI wait longer.
-                if response.status_code not in {400, 404}:
+                        status = response.status_code
+                        failures.append(f"{model}: HTTP {status}")
+                        if status in transient_statuses and attempt == 0:
+                            # Retry-After is advisory and is capped to preserve responsiveness.
+                            try:
+                                delay = min(max(float(response.headers.get("Retry-After", "0.6")), 0.2), 2.0)
+                            except (TypeError, ValueError):
+                                delay = 0.6
+                            if deadline - time.monotonic() > delay:
+                                time.sleep(delay)
+                                continue
+                        # Invalid model: next model. Auth/quota/provider errors:
+                        # try another configured key/model where available.
+                        break
+                    except httpx.TimeoutException:
+                        failures.append(f"{model}: koneksi timeout ({self.timeout:g} detik)")
+                        if attempt == 0 and deadline - time.monotonic() > 0.5:
+                            time.sleep(0.5)
+                            continue
+                        break
+                    except httpx.RequestError:
+                        failures.append(f"{model}: tidak dapat dijangkau")
+                        if attempt == 0 and deadline - time.monotonic() > 0.5:
+                            time.sleep(0.5)
+                            continue
+                        break
+                    except Exception:
+                        failures.append("respons Gemini tidak dapat dibaca")
+                        break
+                if time.monotonic() >= deadline:
                     break
-            except httpx.TimeoutException:
-                failures.append(f"{model}: koneksi timeout ({self.timeout:g} detik)")
-                break
-            except httpx.RequestError:
-                failures.append(f"{model}: tidak dapat dijangkau")
-                break
-            except Exception:
-                failures.append("respons Gemini tidak dapat dibaca")
+            if time.monotonic() >= deadline:
                 break
 
         reason = "Gemini belum berhasil memberi penjelasan (" + ", ".join(dict.fromkeys(failures)) + ")."

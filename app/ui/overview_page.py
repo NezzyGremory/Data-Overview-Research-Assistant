@@ -41,9 +41,7 @@ class DashboardPage(QWidget):
             "has_dataset": self._dataframe is not None,
             "analysis_done": False,
             "ml_done": False,
-            "research_done": False,
         }
-        self._research_result = {}
         self._build_ui()
         self.refresh_summary()
 
@@ -127,13 +125,13 @@ class DashboardPage(QWidget):
         pipeline_header = QHBoxLayout()
         pipeline_header.setContentsMargins(0, 0, 0, 0)
         pipeline_header.setSpacing(12)
-        pipeline_title = QLabel("Research pipeline")
+        pipeline_title = QLabel("Dataset workflow")
         pipeline_title.setObjectName("overviewPipelineTitle")
         pipeline_title.setFixedWidth(207)
         pipeline_header.addWidget(pipeline_title)
         self.pipeline_progress = QProgressBar()
         self.pipeline_progress.setObjectName("overviewPipelineProgress")
-        self.pipeline_progress.setRange(0, 7)
+        self.pipeline_progress.setRange(0, 3)
         self.pipeline_progress.setValue(0)
         self.pipeline_progress.setTextVisible(False)
         self.pipeline_progress.setFixedHeight(10)
@@ -145,10 +143,9 @@ class DashboardPage(QWidget):
         pipeline_layout.addLayout(pipeline_header)
 
         self.pipeline_stage_titles = (
-            "Dataset", "Analysis", "ML Intelligence", "Academic Research",
-            "Landscape", "Research Gap", "Report",
+            "Dataset", "Analysis", "ML Intelligence",
         )
-        self._pipeline_stage_weights = (166, 165, 223, 253, 182, 202, 140)
+        self._pipeline_stage_weights = (1, 1, 1)
         self.pipeline_stages = [
             self._make_pipeline_stage(index + 1, title)
             for index, title in enumerate(self.pipeline_stage_titles)
@@ -166,7 +163,6 @@ class DashboardPage(QWidget):
             self._make_dataset_card(),
             self._make_quality_card(),
             self._make_ml_card(),
-            self._make_gap_card(),
         ]
         self.summary_cards_layout = QGridLayout()
         self.summary_cards_layout.setContentsMargins(0, 0, 0, 0)
@@ -393,42 +389,6 @@ class DashboardPage(QWidget):
         layout.addWidget(self.ml_details_button, 0, Qt.AlignLeft)
         return card
 
-    def _make_gap_card(self):
-        card, layout = self._make_card("overviewGapCard")
-        heading, heading_layout = self._heading_row(
-            "Research Gap", "assets/icons/overview-research-gap.svg"
-        )
-        self.gap_badge = QLabel("Not analyzed")
-        self.gap_badge.setObjectName("overviewGapBadge")
-        heading_layout.addWidget(self.gap_badge, 0, Qt.AlignVCenter)
-        layout.addWidget(heading)
-
-        self.gap_count_line = QLabel("Potential gaps: —")
-        self.gap_count_line.setObjectName("overviewQualityLine")
-        self.gap_count_line.setWordWrap(True)
-        layout.addWidget(self.gap_count_line)
-        self.gap_papers_line = QLabel("Papers analyzed: —")
-        self.gap_papers_line.setObjectName("overviewQualityLine")
-        self.gap_papers_line.setWordWrap(True)
-        layout.addWidget(self.gap_papers_line)
-
-        candidate_title = QLabel("TOP POTENTIAL GAP")
-        candidate_title.setObjectName("overviewSmallHeading")
-        layout.addWidget(candidate_title)
-        self.gap_preview = QLabel(
-            "Run Academic Research to identify potential research gaps."
-        )
-        self.gap_preview.setObjectName("overviewMostMissing")
-        self.gap_preview.setWordWrap(True)
-        layout.addWidget(self.gap_preview)
-        layout.addStretch(1)
-
-        self.gap_details_button = self._make_details_button(
-            self.main_window.open_gap_tool
-        )
-        layout.addWidget(self.gap_details_button, 0, Qt.AlignLeft)
-        return card
-
     def _reflow_summary_cards(self, columns):
         while self.summary_cards_layout.count():
             self.summary_cards_layout.takeAt(0)
@@ -446,7 +406,7 @@ class DashboardPage(QWidget):
             self.pipeline_stage_layout.addWidget(stage, row, column)
             self.pipeline_stage_layout.setColumnStretch(
                 column,
-                self._pipeline_stage_weights[index] if columns == 7 else 1,
+                self._pipeline_stage_weights[index] if columns == len(self.pipeline_stages) else 1,
             )
 
     def _apply_responsive_layout(self, width):
@@ -458,7 +418,7 @@ class DashboardPage(QWidget):
         if self._summary_columns != summary_columns:
             self._summary_columns = summary_columns
             self._reflow_summary_cards(summary_columns)
-        pipeline_columns = 7 if logical_width >= 1360 else 4 if logical_width >= 900 else 2 if logical_width >= 560 else 1
+        pipeline_columns = 3 if logical_width >= 1100 else 2 if logical_width >= 620 else 1
         if self._pipeline_columns != pipeline_columns:
             self._pipeline_columns = pipeline_columns
             self._reflow_pipeline(pipeline_columns)
@@ -476,10 +436,10 @@ class DashboardPage(QWidget):
         else:
             self.report_button.setFixedSize(px(401), px(66))
             self.report_button.setIconSize(QSize(px(30), px(30)))
-        if pipeline_columns == 7:
+        if pipeline_columns == len(self.pipeline_stages):
             self.pipeline_card.setMinimumHeight(px(185))
         else:
-            rows = (7 + pipeline_columns - 1) // pipeline_columns
+            rows = (len(self.pipeline_stages) + pipeline_columns - 1) // pipeline_columns
             self.pipeline_card.setMinimumHeight(px(38 + rows * 81 + (rows - 1) * 9 + 26))
         for card in self.summary_cards:
             card.setMinimumHeight(px(258 if summary_columns == 3 else 240))
@@ -504,22 +464,16 @@ class DashboardPage(QWidget):
             return
         self._dataframe = dataframe
         self._filename = str(filename or "Dataset")
-        self._research_result = {}
         self._workflow["has_dataset"] = True
         self._workflow["analysis_done"] = bool(getattr(self.main_window, "analysis_result", {}))
         self.refresh_summary()
 
-    def update_workflow_state(self, has_dataset, analysis_done, ml_done, research_done):
+    def update_workflow_state(self, has_dataset, analysis_done, ml_done):
         self._workflow.update({
             "has_dataset": bool(has_dataset),
             "analysis_done": bool(analysis_done),
             "ml_done": bool(ml_done),
-            "research_done": bool(research_done),
         })
-        self.refresh_summary()
-
-    def update_research_result(self, result):
-        self._research_result = result if isinstance(result, dict) else {}
         self.refresh_summary()
 
     def _column_types(self, dataframe):
@@ -677,137 +631,49 @@ class DashboardPage(QWidget):
             progress.setValue(max(0, min(100, round(score))))
             value_label.setText(f"{score:.1f}%")
 
-    @staticmethod
-    def _research_gap_info(research):
-        if not isinstance(research, dict) or not research:
-            return 0, 0, "Run Academic Research to identify potential research gaps."
-
-        papers = research.get("papers", [])
-        papers = papers if isinstance(papers, list) else []
-        summary = research.get("summary", {})
-        summary = summary if isinstance(summary, dict) else {}
-        gaps = research.get("gaps", {})
-        gap_summary = gaps.get("summary", {}) if isinstance(gaps, dict) else {}
-        gap_summary = gap_summary if isinstance(gap_summary, dict) else {}
-        if isinstance(gaps, dict):
-            candidates = (
-                gaps.get("gaps")
-                or gaps.get("potential_gaps")
-                or gaps.get("items")
-                or []
-            )
-        elif isinstance(gaps, list):
-            candidates = gaps
-        else:
-            candidates = []
-        candidates = candidates if isinstance(candidates, list) else []
-
-        gap_count = summary.get("potential_gap_count")
-        if gap_count is None:
-            gap_count = gap_summary.get("gap_count", len(candidates))
-        try:
-            gap_count = max(0, int(gap_count or 0))
-        except (TypeError, ValueError):
-            gap_count = len(candidates)
-
-        paper_count = summary.get("papers_found", len(papers))
-        try:
-            paper_count = max(0, int(paper_count or 0))
-        except (TypeError, ValueError):
-            paper_count = len(papers)
-
-        preview = "No candidate gap is available yet."
-        if candidates:
-            first = candidates[0]
-            if isinstance(first, dict):
-                for key in (
-                    "title", "gap", "description", "statement",
-                    "research_question", "summary",
-                ):
-                    value = first.get(key)
-                    if value:
-                        preview = " ".join(str(value).split())
-                        break
-            elif isinstance(first, str):
-                preview = " ".join(first.split())
-            if preview == "No candidate gap is available yet.":
-                preview = "Open Research Gap to review the detected candidates."
-            if len(preview) > 180:
-                preview = preview[:177].rstrip() + "…"
-        elif gap_count:
-            preview = "Open Research Gap to review the detected candidates."
-        elif not papers:
-            preview = "No papers were available to identify research gaps."
-
-        return gap_count, paper_count, preview
-
-    def _update_gap_card(self, research):
-        if not isinstance(research, dict) or not research:
-            self.gap_badge.setText("Not analyzed")
-            self.gap_count_line.setText("Potential gaps: —")
-            self.gap_papers_line.setText("Papers analyzed: —")
-            self.gap_preview.setText(
-                "Run Academic Research to identify potential research gaps."
-            )
-            return
-
-        gap_count, paper_count, preview = self._research_gap_info(research)
-        self.gap_badge.setText(f"{gap_count:,} candidate" + ("s" if gap_count != 1 else ""))
-        self.gap_count_line.setText(f"Potential gaps: {gap_count:,}")
-        self.gap_papers_line.setText(f"Papers analyzed: {paper_count:,}")
-        self.gap_preview.setText(preview)
-
-    def _set_key_findings(self, analysis, research, paper_count, gap_count):
+    def _set_key_findings(self, analysis):
         dataframe = getattr(self.main_window, "current_dataset", None)
         if dataframe is None:
             dataframe = self._dataframe
         if dataframe is None:
-            self.key_findings_text.setText("<b>Key findings:</b> upload and analyze a dataset to see research findings here.")
+            self.key_findings_text.setText("<b>Key findings:</b> upload and analyze a dataset to see findings here.")
             return
         missing = analysis.get("missing_values", []) if isinstance(analysis, dict) else []
-        missing_count = sum(int(item.get("missing_count", 0) or 0) for item in missing if isinstance(item, dict)) if isinstance(missing, list) else 0
+        missing_count = sum(
+            int(item.get("missing_count", 0) or 0)
+            for item in missing if isinstance(item, dict)
+        ) if isinstance(missing, list) else 0
         ml_page = getattr(self.main_window, "ml_page", None)
         task_result = getattr(ml_page, "last_task_result", {}) if ml_page is not None else {}
         method_result = getattr(ml_page, "last_method_result", {}) if ml_page is not None else {}
         primary = task_result.get("primary_task", {}) if isinstance(task_result, dict) else {}
         recommendations = method_result.get("recommendations", []) if isinstance(method_result, dict) else []
         if isinstance(primary, dict) and primary:
-            task = primary.get("task") or primary.get("label") or "machine learning"
-            task = str(task).replace("_", " ").lower()
+            task = str(primary.get("task") or primary.get("label") or "machine learning").replace("_", " ").lower()
             model = recommendations[0] if isinstance(recommendations, list) and recommendations else {}
             model_name = model.get("method") or model.get("name") or "a recommended model"
             score = model.get("score", model.get("accuracy"))
             try:
-                if score is None:
-                    score_text = "—"
-                else:
-                    score_value = float(score)
-                    if score_value <= 1:
-                        score_value *= 100
-                    score_text = f"{score_value:.2f}%"
+                score_value = float(score)
+                score_text = f"{score_value * (100 if score_value <= 1 else 1):.2f}%"
             except (TypeError, ValueError):
-                score_text = "—"
-            model_display = str(model_name)
-            finding = f"your dataset suits <b>{task}</b> ({model_display} performs best, {score_text})."
+                score_text = "N/A"
+            finding = f"your dataset suits <b>{task}</b> ({model_name} performs best, {score_text})."
         else:
             finding = "ML Intelligence has not been run yet."
-        if research:
-            research_finding = f"{int(gap_count or 0)} potential research gaps found across {paper_count} papers"
-        else:
-            research_finding = "academic research has not been run yet"
         self.key_findings_text.setText(
-            f"<b>Key findings:</b> {finding} Fix {missing_count:,} missing value before modeling. {research_finding}"
+            f"<b>Key findings:</b> {finding} Fix {missing_count:,} missing values before modeling."
         )
 
     def _update_pipeline(self):
-        workflow = self._workflow
-        research_done = workflow["research_done"] or bool(self._research_result)
         completed = (
-            workflow["has_dataset"], workflow["analysis_done"], workflow["ml_done"],
-            research_done, research_done, research_done, workflow["has_dataset"],
+            self._workflow["has_dataset"],
+            self._workflow["analysis_done"],
+            self._workflow["ml_done"],
         )
-        count = sum(bool(value) for value in completed[:6])
-        self.pipeline_count.setText(f"{count} of 7 step completed")
+        count = sum(bool(value) for value in completed)
+        total = len(completed)
+        self.pipeline_count.setText(f"{count} of {total} steps completed")
         self.pipeline_progress.setValue(count)
         for stage, is_complete in zip(self.pipeline_stages, completed):
             stage.setProperty("state", "complete" if is_complete else "waiting")
@@ -824,23 +690,16 @@ class DashboardPage(QWidget):
         self._update_dataset_card()
         self._update_quality_card()
         self._update_ml_card()
-        research = self._research_result
-        if not research:
-            research = getattr(getattr(self.main_window, "research_page", None), "research_result", {}) or {}
-        gap_count, paper_count, _ = self._research_gap_info(research)
         analysis = getattr(self.main_window, "analysis_result", {}) or {}
-        self._update_gap_card(research)
-        self._set_key_findings(analysis, research, paper_count, gap_count)
+        self._set_key_findings(analysis)
         self._update_pipeline()
 
     def reset_dataset(self):
         self._dataframe = None
         self._filename = "Dataset"
-        self._research_result = {}
         self._workflow = {
             "has_dataset": False,
             "analysis_done": False,
             "ml_done": False,
-            "research_done": False,
         }
         self.refresh_summary()

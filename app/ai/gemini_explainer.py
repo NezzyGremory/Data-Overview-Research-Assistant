@@ -62,19 +62,20 @@ class GeminiDatasetExplainer:
     Hybrid Dataset Research Explainer:
     1. Menggunakan Cloud Google Gemini jika API key tersedia dan kuota aktif.
     2. Mendukung multi-key rotation (pisahkan dengan koma).
-    3. Caching berdasarkan fingerprint SHA-256 untuk menghemat kuota 90%.
+    3. Caching berdasarkan fingerprint SHA-256 selama proses aplikasi aktif.
     4. Otomatis fallback ke LocalAcademicExplainer jika terkena HTTP 429 (rate limit),
        kuota habis, offline, atau tanpa API key.
     """
 
-    DEFAULT_MODEL = "gemini-1.5-flash"
+    DEFAULT_MODEL = "gemini-3.8-flash"
     FALLBACK_MODELS = (
-        "gemini-1.5-flash",
-        "gemini-1.5-flash-8b",
-        "gemini-2.0-flash",
+        "gemini-3.8-flash",
+        "gemini-3.6-flash",
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite",
     )
 
-    RETRYABLE_STATUS_CODES = {429, 502, 503, 504}
+    RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
 
     def __init__(
         self,
@@ -95,13 +96,16 @@ class GeminiDatasetExplainer:
             self.DEFAULT_MODEL,
         )
 
-        self.timeout = float(
-            os.getenv("GEMINI_TIMEOUT", "30")
-        )
+        try:
+            configured_timeout = float(os.getenv("GEMINI_TIMEOUT", "15"))
+        except (TypeError, ValueError):
+            configured_timeout = 15.0
+        self.timeout = min(max(configured_timeout, 5.0), 30.0)
 
         self.retries_per_model = 2
         self.local_explainer = LocalAcademicExplainer()
         self.last_source: str = "local"
+        self.last_error: str = ""
 
     @property
     def enabled(self) -> bool:
@@ -131,8 +135,13 @@ class GeminiDatasetExplainer:
         fp_hash = fp.get("fingerprint") if isinstance(fp, dict) else None
         if fp_hash and fp_hash in _EXPLANATION_CACHE:
             cached_text, cached_source = _EXPLANATION_CACHE[fp_hash]
-            self.last_source = cached_source
-            return cached_text, cached_source
+            # Do not let an old local fallback hide a newly configured API key
+            # or prevent a retry after a temporary cloud outage.
+            if cached_source == "gemini" or not self.cloud_enabled:
+                self.last_source = cached_source
+                if cached_source == "local" and not self.cloud_enabled:
+                    self.last_error = "API key Gemini belum diatur."
+                return cached_text, cached_source
 
         # 2. Jika tidak ada API key -> langsung gunakan LocalAcademicExplainer
         if not self.cloud_enabled:
@@ -140,6 +149,7 @@ class GeminiDatasetExplainer:
             if fp_hash:
                 _EXPLANATION_CACHE[fp_hash] = (local_text, "local")
             self.last_source = "local"
+            self.last_error = "API key Gemini belum diatur."
             return local_text, "local"
 
         # 3. Ada API key -> coba panggil Gemini dengan multi-key dan model fallback
@@ -149,33 +159,38 @@ class GeminiDatasetExplainer:
 
         gemini_success = False
         gemini_text = ""
+        failures: List[str] = []
 
+        # Bound the optional cloud request so a bad key/network cannot leave the
+        # analysis worker waiting through every key/model/timeout combination.
+        deadline = time.monotonic() + 40.0
         for api_key in self.api_keys:
-            if gemini_success:
-                break
-
+            key_rejected = False
             for model_name in models:
-                if gemini_success:
+                if time.monotonic() >= deadline:
                     break
 
                 url = (
                     "https://generativelanguage.googleapis.com/"
                     f"v1beta/models/{model_name}:generateContent"
                 )
-
                 payload = {
-                    "contents": [
-                        {
-                            "role": "user",
-                            "parts": [{"text": prompt}],
-                        }
-                    ],
+                    "contents": [{"role": "user", "parts": [{"text": prompt}]}],
                     "generationConfig": {
                         "maxOutputTokens": 1000,
+                        **(
+                            {"thinkingConfig": {"thinkingLevel": "low"}}
+                            if model_name.startswith("gemini-3")
+                            else {}
+                        ),
                     },
                 }
 
                 for attempt in range(1, self.retries_per_model + 1):
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    request_timeout = min(self.timeout, remaining)
                     try:
                         response = httpx.post(
                             url,
@@ -184,49 +199,81 @@ class GeminiDatasetExplainer:
                                 "Content-Type": "application/json",
                             },
                             json=payload,
-                            timeout=self.timeout,
+                            timeout=httpx.Timeout(
+                                request_timeout,
+                                connect=min(8.0, request_timeout),
+                            ),
                         )
 
-                        if response.status_code in self.RETRYABLE_STATUS_CODES:
-                            # Jika 429 (rate limit), coba tunggu sebentar lalu coba key/model berikutnya
-                            if attempt < self.retries_per_model:
-                                time.sleep(1.0 * attempt)
-                                continue
-                            break
-
                         if response.status_code == 200:
-                            data = response.json()
-                            extracted = self._extract_text(data)
+                            extracted = self._extract_text(response.json())
                             if extracted and len(extracted.strip()) > 50:
                                 gemini_text = extracted.strip()
                                 gemini_success = True
-                                break
+                            else:
+                                failures.append(f"{model_name}: respons kosong")
+                            break
 
-                    except Exception:
-                        if attempt < self.retries_per_model:
-                            time.sleep(0.8 * attempt)
+                        if response.status_code in {401, 403}:
+                            failures.append(f"API key ditolak (HTTP {response.status_code})")
+                            # An authorization error is key-specific; try the next key.
+                            key_rejected = True
+                            break
+                        if response.status_code in {400, 404}:
+                            failures.append(f"{model_name}: HTTP {response.status_code}")
+                            # Usually a model/access or request incompatibility; move
+                            # to the next supported fallback without repeating it.
+                            break
+                        if (
+                            response.status_code in self.RETRYABLE_STATUS_CODES
+                            and attempt < self.retries_per_model
+                            and time.monotonic() < deadline
+                        ):
+                            failures.append(f"{model_name}: HTTP {response.status_code}")
+                            time.sleep(min(0.6 * attempt, max(0.0, deadline - time.monotonic())))
+                            continue
+                        failures.append(f"{model_name}: HTTP {response.status_code}")
+                        break
+                    except httpx.TimeoutException:
+                        failures.append("koneksi Gemini timeout")
+                        if attempt < self.retries_per_model and time.monotonic() < deadline:
+                            time.sleep(min(0.4 * attempt, max(0.0, deadline - time.monotonic())))
                             continue
                         break
+                    except httpx.RequestError:
+                        failures.append("layanan Gemini tidak dapat dijangkau")
+                        if attempt < self.retries_per_model and time.monotonic() < deadline:
+                            time.sleep(min(0.4 * attempt, max(0.0, deadline - time.monotonic())))
+                            continue
+                        break
+                    except Exception:
+                        break
+
+                if gemini_success or key_rejected:
+                    break
+
+            if gemini_success:
+                break
 
         # 4. Jika Gemini berhasil -> simpan cache dan kembalikan
         if gemini_success and gemini_text:
             if fp_hash:
                 _EXPLANATION_CACHE[fp_hash] = (gemini_text, "gemini")
             self.last_source = "gemini"
+            self.last_error = ""
             return gemini_text, "gemini"
 
         # 5. Jika Gemini gagal (limit 429, timeout, offline) -> Auto-Fallback Lokal
         local_text = self.local_explainer.explain(analysis)
-        if fp_hash:
-            _EXPLANATION_CACHE[fp_hash] = (local_text, "local")
         self.last_source = "local"
+        self.last_error = "; ".join(dict.fromkeys(failures)) or "Gemini tidak memberi respons."
         return local_text, "local"
 
     def _models_to_try(self) -> List[str]:
         """Daftar model resmi yang dicoba berurutan."""
         models: List[str] = []
         for name in (self.model, *self.FALLBACK_MODELS):
-            norm = str(name).strip()
+            norm = str(name).strip().removeprefix("models/")
             if norm and norm not in models:
                 models.append(norm)
         return models

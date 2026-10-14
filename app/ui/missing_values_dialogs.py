@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pandas as pd
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Slot
 from PySide6.QtWidgets import (
     QCheckBox,
     QApplication,
@@ -181,8 +181,12 @@ class DropMissingOptionsDialog(QDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Ok).setText("Lanjutkan")
         buttons.button(QDialogButtonBox.Cancel).setText("Batal")
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
+        buttons.accepted.connect(
+            lambda: self.done(QDialog.DialogCode.Accepted)
+        )
+        buttons.rejected.connect(
+            lambda: self.done(QDialog.DialogCode.Rejected)
+        )
         content_scroll.setWidget(content)
         dialog_layout.addWidget(content_scroll, 1)
         dialog_layout.addWidget(buttons)
@@ -212,12 +216,14 @@ class DropMissingOptionsDialog(QDialog):
             return False
         return bool(pd.to_numeric(present, errors="coerce").notna().all())
 
-    def _update_zero_visibility(self) -> None:
+    @Slot(int)
+    def _update_zero_visibility(self, _index: int = -1) -> None:
         mode = self.zero_mode_combo.currentData()
         self.zero_panel.setVisible(mode == "selective")
         self.strict_warning.setVisible(mode == "strict")
 
-    def _update_strategy_visibility(self) -> None:
+    @Slot(int)
+    def _update_strategy_visibility(self, _index: int = -1) -> None:
         strategy = self.strategy_combo.currentData()
         self.strategy_options.setVisible(strategy in {"drop_cols", "impute"})
         self.col_threshold.setVisible(strategy == "drop_cols")
@@ -312,8 +318,12 @@ class DropMissingPreviewDialog(QDialog):
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Ok).setText("Lanjutkan")
         buttons.button(QDialogButtonBox.Cancel).setText("Batal")
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
+        buttons.accepted.connect(
+            lambda: self.done(QDialog.DialogCode.Accepted)
+        )
+        buttons.rejected.connect(
+            lambda: self.done(QDialog.DialogCode.Rejected)
+        )
         content_scroll.setWidget(content)
         dialog_layout.addWidget(content_scroll, 1)
         dialog_layout.addWidget(buttons)

@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QBoxLayout,
     QFrame,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QMessageBox,
@@ -89,7 +90,7 @@ class DatasetSearchWorker(QObject):
 
 
 class DatasetDownloadWorker(QObject):
-    finished = Signal(str)
+    finished = Signal(object)
     failed = Signal(str)
 
     def __init__(
@@ -110,18 +111,19 @@ class DatasetDownloadWorker(QObject):
     def run(self):
         try:
             if self.dataset_id.startswith("kaggle:"):
-                path = self.kaggle_client.download_dataset(
+                paths = self.kaggle_client.download_dataset_files(
                     self.dataset_id,
                     self.destination,
                     filename=self.filename,
                 )
+                self.finished.emit([str(path) for path in paths])
             else:
                 path = self.hf_client.download_file(
                     self.dataset_id,
                     self.filename,
                     self.destination,
                 )
-            self.finished.emit(str(path))
+                self.finished.emit(str(path))
         except Exception as exc:
             self.failed.emit(str(exc))
 
@@ -692,29 +694,62 @@ class DatasetSearchPage(QWidget):
         self._download_worker.failed.connect(self._finish_download_thread)
         self._download_thread.start()
 
-    def _on_download_finished(self, file_path: str):
+    def _on_download_finished(self, download_result):
         self.search_button.setEnabled(True)
         self.progress.setVisible(False)
+        raw_paths = (
+            download_result
+            if isinstance(download_result, (list, tuple))
+            else [download_result]
+        )
+        downloaded_paths = [Path(path) for path in raw_paths]
+        if not downloaded_paths:
+            self._on_download_failed("Tidak ada file tabular yang berhasil diunduh.")
+            return
 
         if not self._pending_analyze:
+            file_list = "\n".join(str(path) for path in downloaded_paths)
             self.status_label.setText(
-                f"Dataset berhasil diunduh: {Path(file_path).name}"
+                f"{len(downloaded_paths)} file dataset berhasil diunduh."
             )
             QMessageBox.information(
                 self,
                 "Download Berhasil",
-                "Dataset berhasil disimpan di folder Downloads:\n\n"
-                f"{file_path}",
+                "File dataset disimpan di folder Downloads:\n\n"
+                f"{file_list}",
             )
             return
 
+        if len(downloaded_paths) == 1:
+            selected_path = downloaded_paths[0]
+        else:
+            labels = [
+                f"{path.name} ({path.stat().st_size / 1024:.1f} KB)"
+                for path in downloaded_paths
+            ]
+            selected_label, accepted = QInputDialog.getItem(
+                self,
+                "Pilih File untuk Analisis",
+                "Arsip berisi beberapa file. Pilih satu file untuk dianalisis:",
+                labels,
+                0,
+                False,
+            )
+            if not accepted:
+                self.status_label.setText(
+                    f"{len(downloaded_paths)} file berhasil diunduh; analisis dibatalkan."
+                )
+                return
+            selected_path = downloaded_paths[labels.index(selected_label)]
+
         try:
-            dataframe = self._load_downloaded_dataset(Path(file_path))
+            dataframe = self._load_downloaded_dataset(selected_path)
             self.main_window.current_dataset = dataframe
-            self.main_window.current_file_path = str(file_path)
+            self.main_window.current_file_path = str(selected_path)
             self.main_window.update_dataset_state()
             self.status_label.setText(
-                f"Dataset tersimpan di Downloads dan dimuat untuk analisis:\n{file_path}"
+                "Dataset tersimpan di Downloads dan dimuat untuk analisis:\n"
+                f"{selected_path}"
             )
             self.main_window.open_analysis_page()
             QTimer.singleShot(150, self.main_window.analysis_page.run_analysis)
@@ -748,11 +783,8 @@ class DatasetSearchPage(QWidget):
     def _load_downloaded_dataset(self, path: Path):
         suffix = path.suffix.lower()
 
-        if suffix == ".csv":
-            return self.main_window.loader.load_csv(str(path))
-
-        if suffix == ".tsv":
-            return pd.read_csv(path, sep="\t")
+        if suffix in {".csv", ".tsv"}:
+            return self.main_window.loader.load(str(path))
 
         if suffix == ".json":
             return pd.read_json(path)
