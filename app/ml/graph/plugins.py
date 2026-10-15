@@ -249,3 +249,4 @@ def _register_default_plugins() -> None:
 
 # Initialize default plugins on import
 _register_default_plugins()
+

@@ -171,10 +171,7 @@ class GraphEngine:
                     inputs.setdefault(input_name, []).append(value)
                     upstream_hashes.append(_stable_hash(value))
             normalized = {k: (v if any(p.name == k and p.multiple for p in spec.inputs) else v[0]) for k, v in inputs.items()}
-            if spec.id == "load_dataset":
-                context = {"dataframe": dataframe}
-            else:
-                context = {"dataframe": dataframe}
+            context = {"dataframe": dataframe, "engine": self}
             external_hash = _stable_hash(dataframe) if spec.id == "load_dataset" else ""
             key = hashlib.sha256((json.dumps(node.parameters, sort_keys=True, default=str) + "|" + external_hash + "|" + "|".join(upstream_hashes)).encode()).hexdigest()
             if node_id in self._cache and self._cache[node_id][0] == key:
@@ -196,11 +193,123 @@ class GraphEngine:
                 progress(node_id, node.status)
         return results
 
+    def detect_leakage(self) -> list[dict[str, Any]]:
+        """Detect data leakage where preprocessing or balancing occurs before train/test split."""
+        leakages = []
+        has_split = any(n.spec_id in {"split", "time_split"} for n in self.nodes.values())
+        for source, output, target, input_name in self.connections:
+            target_node = self.nodes.get(target)
+            source_node = self.nodes.get(source)
+            if not target_node or not source_node:
+                continue
+            target_spec = self.specs.get(target_node.spec_id)
+            if not target_spec:
+                continue
+
+            if source_node.spec_id in {"load_dataset", "select_target"}:
+                if target_spec.category == "Preprocessing":
+                    leakages.append({
+                        "node_id": target,
+                        "spec_id": target_node.spec_id,
+                        "name": target_spec.name,
+                        "category": target_spec.category,
+                        "message": (
+                            f"Node preprocessing '{target}' harus menerima data dari node Split Train/Test. "
+                            f"Data leakage terdeteksi: node '{target}' ({target_spec.name}) dipasang sebelum Split."
+                        ),
+                        "suggested_fix": "Pindahkan node setelah Split Train/Test (hubungkan ke port 'train').",
+                    })
+                elif has_split and (
+                    target_spec.category in {"Transformer", "Data Tidak Seimbang"}
+                    or any(t in target_spec.id for t in ("scale", "smote", "pca", "variance", "select_k", "outlier"))
+                ):
+                    leakages.append({
+                        "node_id": target,
+                        "spec_id": target_node.spec_id,
+                        "name": target_spec.name,
+                        "category": target_spec.category,
+                        "message": (
+                            f"Data leakage terdeteksi: node '{target}' ({target_spec.name}) dipasang sebelum Split Train/Test. "
+                            "Preprocessing dan balancing data harus menerima data dari node Split agar informasi data uji tidak bocor."
+                        ),
+                        "suggested_fix": "Pindahkan node setelah Split Train/Test (hubungkan ke port 'train').",
+                    })
+        return leakages
+
+    def auto_fix_leakage(self) -> int:
+        """Auto-fix data leakage by rewiring preprocessing/balancing nodes to receive data from split."""
+        leakages = self.detect_leakage()
+        if not leakages:
+            return 0
+        split_node_id = next((nid for nid, n in self.nodes.items() if n.spec_id in {"split", "time_split"}), None)
+        if not split_node_id:
+            return 0
+        fixes_applied = 0
+        for item in leakages:
+            target_id = item["node_id"]
+            self.connections = [
+                c for c in self.connections
+                if not (c[2] == target_id and self.nodes[c[0]].spec_id in {"load_dataset", "select_target"})
+            ]
+            target_spec = self.specs[self.nodes[target_id].spec_id]
+            input_names = [p.name for p in target_spec.inputs]
+            if "train" in input_names:
+                self.connect(split_node_id, "train", target_id, "train")
+            elif input_names:
+                self.connect(split_node_id, "train", target_id, input_names[0])
+
+            if "test" in input_names:
+                self.connect(split_node_id, "test", target_id, "test")
+
+            # Redirect downstream nodes connecting to split to now connect to target_id
+            target_out_names = [p.name for p in target_spec.outputs]
+            if "train" in target_out_names:
+                new_conns = []
+                for c in self.connections:
+                    if c[0] == split_node_id and c[1] == "train" and c[2] != target_id:
+                        new_conns.append([target_id, "train", c[2], c[3]])
+                    elif c[0] == split_node_id and c[1] == "test" and c[2] != target_id and "test" in target_out_names:
+                        new_conns.append([target_id, "test", c[2], c[3]])
+                    else:
+                        new_conns.append(c)
+                self.connections = new_conns
+
+            target_node = self.nodes[target_id]
+            if "target" not in target_node.parameters:
+                for other_n in self.nodes.values():
+                    if other_n.parameters.get("target"):
+                        target_node.parameters["target"] = other_n.parameters["target"]
+                        break
+
+            fixes_applied += 1
+        return fixes_applied
+
+    def validate_graph(self) -> dict[str, Any]:
+        """Validate graph topology, port types, and data leakage."""
+        errors = []
+        warnings = []
+        try:
+            self.topological_order()
+        except GraphError as ge:
+            errors.append(str(ge))
+
+        leakages = self.detect_leakage()
+        for leak in leakages:
+            warnings.append(leak["message"])
+
+        return {
+            "valid": len(errors) == 0,
+            "errors": errors,
+            "warnings": warnings,
+            "leakages": leakages,
+        }
+
     def _validate_preprocessing_order(self) -> None:
-        for source, _, target, _ in self.connections:
-            target_spec = self.specs[self.nodes[target].spec_id]
-            if target_spec.category == "Preprocessing" and self.nodes[source].spec_id not in {"split", "time_split"}:
-                raise GraphError("Preprocessing harus menerima data dari node Split Train/Test.")
+        leakages = self.detect_leakage()
+        self.last_warnings = [item["message"] for item in leakages]
+        for leak in leakages:
+            if leak.get("category") == "Preprocessing" or getattr(self, "strict_leakage", False):
+                raise GraphError(leak["message"])
 
     def to_dict(self) -> dict[str, Any]:
         return {"version": 1, "nodes": [{"id": n.id, "spec_id": n.spec_id, "parameters": n.parameters, "position": n.position} for n in self.nodes.values()], "connections": self.connections}
@@ -252,10 +361,18 @@ def _preprocess(inputs, params, context):
     from sklearn.impute import SimpleImputer
     from sklearn.pipeline import Pipeline
     from sklearn.preprocessing import OneHotEncoder, StandardScaler, MinMaxScaler, RobustScaler
-    train, test = inputs["train"].copy(), inputs["test"].copy()
+    train = inputs["train"].copy()
+    test = inputs.get("test")
+    if test is not None:
+        test = test.copy()
     target = params.get("target")
-    y_train = train.pop(target) if target in train.columns else None
-    y_test = test.pop(target) if target in test.columns else None
+    if not target and context and "engine" in context:
+        for other in context["engine"].nodes.values():
+            if other.parameters.get("target"):
+                target = other.parameters.get("target")
+                break
+    y_train = train.pop(target) if target and target in train.columns else None
+    y_test = test.pop(target) if test is not None and target and target in test.columns else None
     numeric = train.select_dtypes(include="number").columns.tolist()
     categorical = [c for c in train.columns if c not in numeric]
     scaler = {"standard": StandardScaler, "minmax": MinMaxScaler, "robust": RobustScaler}.get(params.get("scaler", "standard"), StandardScaler)
@@ -263,13 +380,18 @@ def _preprocess(inputs, params, context):
     cat_pipe = Pipeline([("imputer", SimpleImputer(strategy="most_frequent")), ("encoder", OneHotEncoder(handle_unknown="ignore", sparse_output=False))])
     transformer = ColumnTransformer([("num", num_pipe, numeric), ("cat", cat_pipe, categorical)])
     a = transformer.fit_transform(train)
-    b = transformer.transform(test)
     cols = [f"fitur_{i}" for i in range(a.shape[1])]
     train_out = pd.DataFrame(a, columns=cols, index=train.index)
-    test_out = pd.DataFrame(b, columns=cols, index=test.index)
     if y_train is not None:
         train_out[target] = y_train
-        test_out[target] = y_test
+
+    if test is not None:
+        b = transformer.transform(test)
+        test_out = pd.DataFrame(b, columns=cols, index=test.index)
+        if y_test is not None:
+            test_out[target] = y_test
+    else:
+        test_out = None
     return {"train": train_out, "test": test_out}
 
 
@@ -303,27 +425,77 @@ def _train(inputs, params, context):
 
 def _evaluate(inputs, params, context):
     import numpy as np
-    from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, mean_absolute_error, mean_squared_error, r2_score, silhouette_score, calinski_harabasz_score, davies_bouldin_score
+    from sklearn.metrics import (
+        accuracy_score, f1_score, precision_score, recall_score,
+        mean_absolute_error, mean_squared_error, r2_score,
+        silhouette_score, calinski_harabasz_score, davies_bouldin_score,
+        balanced_accuracy_score, confusion_matrix,
+    )
     model, frame = inputs["model"], inputs["test"]
     target = params.get("target") or model.get("target")
     task = params.get("task", model.get("task", "classification"))
+    random_state = int(params.get("random_state", 42))
+
     if task in {"clustering", "anomaly", "anomaly_detection"}:
         X = frame.drop(columns=[target]) if target and target in frame else frame
         estimator = model["estimator"]
         labels = estimator.predict(X) if hasattr(estimator, "predict") else estimator.fit_predict(X)
         unique = set(labels)
-        metrics = {"cluster_count": len(unique), "noise_count": int(sum(label == -1 for label in labels))}
+        metrics = {
+            "cluster_count": len(unique),
+            "noise_count": int(sum(label == -1 for label in labels)),
+            "random_state": random_state,
+        }
         if 1 < len(unique) < len(labels):
-            metrics.update({"silhouette": silhouette_score(X, labels), "calinski_harabasz": calinski_harabasz_score(X, labels), "davies_bouldin": davies_bouldin_score(X, labels)})
+            metrics.update({
+                "silhouette": float(silhouette_score(X, labels)),
+                "calinski_harabasz": float(calinski_harabasz_score(X, labels)),
+                "davies_bouldin": float(davies_bouldin_score(X, labels)),
+            })
         return {"metrics": {"model": str(estimator), "metrics": metrics}}
+
     if not target or target not in frame:
         raise ValueError(f"Target '{target}' tidak ditemukan pada data test.")
     X, y = frame.drop(columns=[target]), frame[target]
     pred = model["estimator"].predict(X)
+
     if task == "regression":
-        metrics = {"mae": mean_absolute_error(y, pred), "rmse": float(np.sqrt(mean_squared_error(y, pred))), "r2": r2_score(y, pred)}
+        metrics = {
+            "mae": float(mean_absolute_error(y, pred)),
+            "rmse": float(np.sqrt(mean_squared_error(y, pred))),
+            "r2": float(r2_score(y, pred)),
+            "random_state": random_state,
+        }
     else:
-        metrics = {"accuracy": accuracy_score(y, pred), "f1": f1_score(y, pred, average="weighted", zero_division=0), "precision": precision_score(y, pred, average="weighted", zero_division=0), "recall": recall_score(y, pred, average="weighted", zero_division=0)}
+        # Detect class imbalance
+        y_counts = y.value_counts()
+        imbalance_ratio = float(y_counts.min() / y_counts.max()) if len(y_counts) > 1 and y_counts.max() > 0 else 1.0
+        is_imbalanced = imbalance_ratio < 0.35
+
+        f1_m = float(f1_score(y, pred, average="macro", zero_division=0))
+        f1_w = float(f1_score(y, pred, average="weighted", zero_division=0))
+        acc = float(accuracy_score(y, pred))
+        bal_acc = float(balanced_accuracy_score(y, pred))
+
+        try:
+            cm = confusion_matrix(y, pred).tolist()
+        except Exception:
+            cm = []
+
+        metrics = {
+            "accuracy": acc,
+            "f1": f1_m if is_imbalanced else f1_w,
+            "f1_macro": f1_m,
+            "f1_weighted": f1_w,
+            "balanced_accuracy": bal_acc,
+            "precision": float(precision_score(y, pred, average="macro" if is_imbalanced else "weighted", zero_division=0)),
+            "recall": float(recall_score(y, pred, average="macro" if is_imbalanced else "weighted", zero_division=0)),
+            "is_imbalanced": is_imbalanced,
+            "imbalance_ratio": round(imbalance_ratio, 3),
+            "confusion_matrix": cm,
+            "random_state": random_state,
+        }
+
     return {"metrics": {"model": str(model["estimator"]), "metrics": metrics}}
 
 

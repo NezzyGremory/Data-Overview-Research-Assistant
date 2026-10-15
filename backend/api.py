@@ -15,7 +15,10 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from backend.graph_api import router as graph_router
+
 app = FastAPI(title="Dataset Research Usage API", docs_url=None, redoc_url=None)
+app.include_router(graph_router)
 logger = logging.getLogger("dataset_research.telemetry_api")
 # Local development convenience: load backend/.env when present. Existing process
 # environment (e.g. production secret injection) always takes precedence.

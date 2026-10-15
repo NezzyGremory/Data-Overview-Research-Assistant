@@ -127,3 +127,4 @@ def test_registry_summary_serializable():
     assert "category" in first
     assert "params" in first
     assert "requires" in first
+

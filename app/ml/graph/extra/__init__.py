@@ -60,14 +60,40 @@ def _smote(inputs, params, context):
 
 
 def _cross_validate(inputs, params, context):
-    from sklearn.model_selection import cross_validate
+    from sklearn.model_selection import cross_validate, StratifiedKFold, KFold
     frame, estimator = inputs["table"], inputs["estimator"]
     target = params.get("target")
     if target not in frame:
         raise ValueError("Target tidak ditemukan.")
-    scoring = params.get("scoring", "accuracy")
-    result = cross_validate(clone(estimator), frame.drop(columns=[target]), frame[target], cv=int(params.get("cv", 3)), scoring=scoring, return_train_score=False)
-    return {"metrics": {"model": str(estimator), "metrics": {"mean_score": float(result["test_score"].mean()), "std_score": float(result["test_score"].std())}}}
+    random_state = int(params.get("random_state", 42))
+    cv_folds = int(params.get("cv", 5))
+
+    y = frame[target]
+    is_classification = str(params.get("task", "classification")).endswith("classification") or (y.nunique() < 20 and y.dtype.kind not in "fc")
+    if is_classification:
+        counts = y.value_counts()
+        is_imbalanced = (counts.min() / counts.max()) < 0.35 if len(counts) > 1 and counts.max() > 0 else False
+        default_scoring = "f1_macro" if is_imbalanced else "accuracy"
+        cv = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=random_state)
+    else:
+        is_imbalanced = False
+        default_scoring = "r2"
+        cv = KFold(n_splits=cv_folds, shuffle=True, random_state=random_state)
+
+    scoring = params.get("scoring") or default_scoring
+    result = cross_validate(clone(estimator), frame.drop(columns=[target]), y, cv=cv, scoring=scoring, return_train_score=False)
+    return {
+        "metrics": {
+            "model": str(estimator),
+            "metrics": {
+                "mean_score": float(result["test_score"].mean()),
+                "std_score": float(result["test_score"].std()),
+                "scoring": scoring,
+                "is_imbalanced": is_imbalanced,
+                "random_state": random_state,
+            }
+        }
+    }
 
 
 def _search(inputs, params, context):

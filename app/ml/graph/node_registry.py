@@ -140,6 +140,25 @@ def _format_class_name(class_name: str) -> str:
     return spaced.strip()
 
 
+import math
+
+
+def _sanitize_default(val: Any) -> Any:
+    if val is None or isinstance(val, (int, str, bool)):
+        return val
+    if isinstance(val, float):
+        if math.isnan(val) or math.isinf(val):
+            return None
+        return val
+    if isinstance(val, (list, tuple)):
+        return [_sanitize_default(x) for x in val]
+    if isinstance(val, dict):
+        return {str(k): _sanitize_default(v) for k, v in val.items()}
+    if callable(val) or hasattr(val, "__name__"):
+        return getattr(val, "__name__", str(val))
+    return str(val)
+
+
 def _extract_parameters(cls: Type) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Any]]:
     """Extract parameters, types, and defaults from an estimator class __init__."""
     params_meta: Dict[str, Dict[str, Any]] = {}
@@ -156,8 +175,9 @@ def _extract_parameters(cls: Type) -> Tuple[Dict[str, Dict[str, Any]], Dict[str,
         if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
             continue
 
-        default_val = None if param.default is inspect.Parameter.empty else param.default
-        param_type = _infer_type(param.name, default_val)
+        raw_default = None if param.default is inspect.Parameter.empty else param.default
+        default_val = _sanitize_default(raw_default)
+        param_type = _infer_type(param.name, raw_default)
 
         meta = ParameterDef(
             name=param.name,
