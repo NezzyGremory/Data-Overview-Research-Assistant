@@ -205,3 +205,66 @@ def install_missing_package(req: InstallRequest):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
+class TaskDetectRequest(BaseModel):
+    dataframe: Optional[List[Dict[str, Any]]] = None
+    csv_content: Optional[str] = None
+    target_column: Optional[str] = None
+
+
+class CustomTemplateRequest(BaseModel):
+    name: str
+    description: str = ""
+    graph: GraphDefinition
+
+
+@router.post("/task/detect")
+def detect_dataset_task(req: TaskDetectRequest):
+    """Detect task type and profile dataset."""
+    from app.ml.graph.task_detector import detect_task
+    df = None
+    if req.dataframe is not None:
+        df = pd.DataFrame(req.dataframe)
+    elif req.csv_content is not None:
+        df = pd.read_csv(io.StringIO(req.csv_content))
+    else:
+        raise HTTPException(status_code=400, detail="Dataframe atau csv_content wajib disertakan.")
+    return detect_task(df, req.target_column)
+
+
+@router.post("/task/templates")
+def get_task_templates(req: TaskDetectRequest):
+    """Generate dynamic, ready-to-run template graphs for dataset."""
+    from app.ml.graph.task_detector import generate_template_graphs
+    df = None
+    if req.dataframe is not None:
+        df = pd.DataFrame(req.dataframe)
+    elif req.csv_content is not None:
+        df = pd.read_csv(io.StringIO(req.csv_content))
+    else:
+        raise HTTPException(status_code=400, detail="Dataframe atau csv_content wajib disertakan.")
+    return {"templates": generate_template_graphs(df, req.target_column)}
+
+
+@router.get("/templates/custom")
+def list_saved_templates():
+    from app.ml.graph.task_detector import list_custom_templates
+    return {"custom_templates": list_custom_templates()}
+
+
+@router.post("/templates/custom")
+def save_new_custom_template(req: CustomTemplateRequest):
+    from app.ml.graph.task_detector import save_custom_template
+    graph_dict = req.graph.model_dump()
+    return save_custom_template(req.name, graph_dict, req.description)
+
+
+@router.delete("/templates/custom/{template_id}")
+def delete_saved_template(template_id: str):
+    from app.ml.graph.task_detector import delete_custom_template
+    deleted = delete_custom_template(template_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Template tidak ditemukan.")
+    return {"success": True}
+
+
+
