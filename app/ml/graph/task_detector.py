@@ -99,8 +99,44 @@ def profile_dataset(df: pd.DataFrame, target_column: Optional[str] = None) -> Di
     }
 
 
-def detect_task(df: pd.DataFrame, target_column: Optional[str] = None) -> Dict[str, Any]:
+def guess_target_column(df: pd.DataFrame) -> Optional[str]:
+    """Smart heuristic to identify candidate target column in a dataframe."""
+    if df.empty or len(df.columns) == 0:
+        return None
+
+    # 1. Look for obvious target names
+    target_keywords = (
+        "target", "label", "class", "survived", "y", "outcome",
+        "churn", "status", "price", "diagnosis", "response",
+        "default", "approved", "revenue", "salary"
+    )
+    for col in df.columns:
+        if str(col).lower().strip() in target_keywords:
+            return str(col)
+
+    for col in df.columns:
+        col_str = str(col).lower()
+        if any(kw in col_str for kw in ("target", "label", "class")):
+            return str(col)
+
+    # 2. Check the last column (standard convention), avoiding monotonic IDs
+    last_col = df.columns[-1]
+    if len(df) > 5 and df[last_col].nunique() == len(df) and pd.api.types.is_numeric_dtype(df[last_col]):
+        for col in reversed(df.columns[:-1]):
+            if df[col].nunique() < len(df):
+                return str(col)
+    return str(last_col)
+
+
+def detect_task(
+    df: pd.DataFrame,
+    target_column: Optional[str] = None,
+    auto_guess_target: bool = False,
+) -> Dict[str, Any]:
     """Automatically deduce ML task type from dataset profile and target column."""
+    if not target_column and auto_guess_target and not df.empty and len(df.columns) > 1:
+        target_column = guess_target_column(df)
+
     profile = profile_dataset(df, target_column)
 
     if not target_column:
@@ -111,6 +147,7 @@ def detect_task(df: pd.DataFrame, target_column: Optional[str] = None) -> Dict[s
             "reason": "Tidak ada target yang ditentukan; task otomatis diarahkan ke Unsupervised Clustering.",
             "profile": profile,
         }
+
 
     target_info = profile["target_info"]
     has_datetime = len(profile["datetime_cols"]) > 0
@@ -156,7 +193,10 @@ def generate_template_graphs(df: pd.DataFrame, target_column: Optional[str] = No
     Generate 3 to 5 candidate ready-to-run template graphs customized dynamically
     to dataset characteristics (missing values, class imbalance, feature counts).
     """
+    if not target_column and not df.empty and len(df.columns) > 1:
+        target_column = guess_target_column(df)
     detection = detect_task(df, target_column)
+    target_column = detection.get("target_column")
     task_type = detection["task_type"]
     profile = detection["profile"]
     has_missing = profile["has_missing_values"]
@@ -405,3 +445,4 @@ def delete_custom_template(template_id: str) -> bool:
         _CUSTOM_TEMPLATES_FILE.write_text(json.dumps(filtered, indent=2, ensure_ascii=False), encoding="utf-8")
         return True
     return False
+

@@ -807,14 +807,43 @@ class NodeEditorPage(QWidget):
         task = self.task_filter.currentData() if hasattr(self, "task_filter") else "all"
         query = self.search.text().casefold() if hasattr(self, "search") else ""
         for spec_id, spec in self.engine.specs.items():
-            task_match = task in spec.task_types or "all" in spec.task_types
-            if task == "classification":
-                task_match = task_match or any(t.endswith("_classification") for t in spec.task_types)
-            if task == "anomaly":
-                task_match = task_match or "anomaly_detection" in spec.task_types
-            if task != "all" and not task_match:
-                continue
-            if query and query not in spec.name.casefold():
+            if task != "all":
+                if task == "classification":
+                    is_match = (
+                        spec.category in ("Classification", "Data Tidak Seimbang", "Ensemble")
+                        or any(t.endswith("classification") for t in spec.task_types)
+                        or spec_id in ("load_dataset", "select_target", "split", "preprocess", "train", "evaluate", "compare", "cross_validate")
+                    )
+                elif task == "regression":
+                    is_match = (
+                        spec.category in ("Regression", "Ensemble")
+                        or "regression" in spec.task_types
+                        or spec_id in ("load_dataset", "select_target", "split", "preprocess", "train", "evaluate", "compare", "cross_validate")
+                    )
+                elif task == "clustering":
+                    is_match = (
+                        spec.category == "Clustering"
+                        or "clustering" in spec.task_types
+                        or spec_id in ("load_dataset", "preprocess", "train", "evaluate", "compare")
+                    )
+                elif task == "time_series":
+                    is_match = (
+                        spec.category in ("Forecasting", "Regression")
+                        or any(t in ("time_series", "forecasting") for t in spec.task_types)
+                        or spec_id in ("load_dataset", "time_split", "forecast", "train", "evaluate", "compare")
+                    )
+                elif task == "anomaly":
+                    is_match = (
+                        spec.category == "Anomaly Detection"
+                        or any("anomaly" in t for t in spec.task_types)
+                        or spec_id in ("load_dataset", "preprocess", "train", "evaluate", "compare")
+                    )
+                else:
+                    is_match = task in spec.task_types or "all" in spec.task_types
+                if not is_match:
+                    continue
+
+            if query and query not in spec.name.casefold() and query not in spec.category.casefold():
                 continue
             category = CATEGORY_TRANSLATIONS.get(spec.category, spec.category)
             label = f"{category} · {spec.name}"
@@ -912,11 +941,62 @@ class NodeEditorPage(QWidget):
                 node.status = "menunggu"
                 if node_id in self.items:
                     self.items[node_id].set_status(node.status)
-        self.dataset_status.setText(f"Dataset aktif | {rows:,} rows x {columns:,} cols")
+        # 1. Identify target from existing nodes if configured
+        target_col = None
+        for node in self.engine.nodes.values():
+            if node.parameters.get("target"):
+                target_col = node.parameters["target"]
+                break
+
+        # 2. Automated Task Detection
+        from app.ml.graph.task_detector import detect_task, generate_template_graphs
+        detection = detect_task(dataframe, target_column=target_col, auto_guess_target=True)
+        self.detected_task = detection
+        task_type = detection["task_type"]
+        detected_target = detection.get("target_column")
+
+        task_label = {
+            "binary_classification": "Klasifikasi Biner",
+            "multiclass_classification": "Klasifikasi Multikelas",
+            "regression": "Regresi",
+            "clustering": "Pengelompokan (Clustering)",
+            "time_series": "Rangkaian Waktu",
+        }.get(task_type, task_type.capitalize())
+        target_desc = f" ({detected_target})" if detected_target else ""
+        self.dataset_status.setText(f"Dataset aktif | {rows:,} baris x {columns:,} kolom  •  🎯 {task_label}{target_desc}")
+
         filename = "Dataset"
         if self.main_window is not None:
             filename = self.main_window._current_filename()
-        self.dataset_status.setToolTip(filename)
+        self.dataset_status.setToolTip(
+            f"{filename}\n\nTask Terdeteksi: {task_label}\nTarget: {detected_target or 'Tidak ada'}\nAlasan: {detection['reason']}"
+        )
+
+        # 3. Automatically set task filter to match detected task
+        filter_key = (
+            "classification" if "classification" in task_type
+            else ("regression" if task_type == "regression"
+            else ("clustering" if task_type == "clustering"
+            else ("time_series" if task_type == "time_series" else "all")))
+        )
+        if hasattr(self, "task_filter"):
+            idx = self.task_filter.findData(filter_key)
+            if idx >= 0 and self.task_filter.currentIndex() != idx:
+                self.task_filter.blockSignals(True)
+                self.task_filter.setCurrentIndex(idx)
+                self.task_filter.blockSignals(False)
+                self.refresh_palette()
+
+        # 4. Dynamically adapt template dropdown to task
+        if hasattr(self, "template_combo") and (previous_token != self._active_dataset_token or not getattr(self, "_templates_initialized", False)):
+            self._templates_initialized = True
+            self.current_templates = generate_template_graphs(dataframe, detected_target)
+            self.template_combo.blockSignals(True)
+            self.template_combo.clear()
+            self.template_combo.addItem(f"Template ({task_label})…", None)
+            for tmpl in self.current_templates:
+                self.template_combo.addItem(f"⚡ {tmpl['name']}", tmpl)
+            self.template_combo.blockSignals(False)
 
         source_nodes = [node for node in self.engine.nodes.values() if node.spec_id == "load_dataset"]
         if not source_nodes and self._suppressed_source_dataset_id != self._active_dataset_token:
@@ -1167,10 +1247,21 @@ class NodeEditorPage(QWidget):
 
     def run_graph(self):
         frame = getattr(self.main_window, "current_dataset", None)
-        if frame is None:
-            QMessageBox.information(self, "Dataset belum tersedia", "Muat dataset terlebih dahulu sebelum menjalankan graf.")
-            return
         self.sync_dataset()
+        leakages = self.engine.detect_leakage()
+        if leakages:
+            reply = QMessageBox.question(
+                self,
+                "Data Leakage Terdeteksi",
+                f"{leakages[0]['message']}\n\nApakah Anda ingin memperbaiki sambungan secara otomatis sebelum menjalankan?",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            if reply == QMessageBox.Yes:
+                self.engine.auto_fix_leakage()
+                self.redraw_cables()
+            else:
+                return
+
         packages = self._missing_graph_packages()
         package_target = self._package_target_path()
         self._clear_results()
@@ -1384,8 +1475,35 @@ class NodeEditorPage(QWidget):
                 QMessageBox.critical(self, "Graf tidak dapat dimuat", str(exc))
 
     def load_template(self, index):
-        names = ["", "Klasifikasi cepat", "Regresi cepat", "Ensemble klasifikasi", "Imbalanced klasifikasi", "Forecasting cepat"]
         if index <= 0:
+            return
+        tmpl_data = self.template_combo.itemData(index) if hasattr(self, "template_combo") else None
+        if tmpl_data and isinstance(tmpl_data, dict) and "graph" in tmpl_data:
+            graph_def = tmpl_data["graph"]
+            graph = GraphEngine()
+            for n in graph_def.get("nodes", []):
+                graph.add_node(n["spec_id"], n["id"], n.get("parameters"), tuple(n.get("position", (0, 0))))
+            for edge in graph_def.get("connections", []):
+                graph.connect(*edge)
+            self.engine = graph
+            self._clear_results()
+            self.cancel_connection()
+            self.scene.clear()
+            self.items.clear()
+            self.cables.clear()
+            for node in graph.nodes.values():
+                item = GraphNodeItem(self, node, *node.position)
+                self.items[node.id] = item
+                self.scene.addItem(item)
+            self.redraw_cables()
+            self.template_combo.setCurrentIndex(0)
+            self.refresh_palette()
+            self.sync_dataset()
+            QTimer.singleShot(0, self.fit_graph)
+            return
+
+        names = ["", "Klasifikasi cepat", "Regresi cepat", "Ensemble klasifikasi", "Imbalanced klasifikasi", "Forecasting cepat"]
+        if index >= len(names):
             return
         name = names[index]
         graph = GraphEngine()

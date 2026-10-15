@@ -108,3 +108,26 @@ def test_custom_templates_lifecycle():
 
     deleted = delete_custom_template(saved["id"])
     assert deleted is True
+
+
+def test_auto_guess_target_and_adapt_templates():
+    # Synthetic titanic-like dataframe
+    df = pd.DataFrame({
+        "pclass": [1, 2, 3, 1, 3],
+        "fare": [71.28, 7.25, 8.05, 53.1, 8.45],
+        "survived": [1, 0, 0, 1, 0],
+    })
+    detection = detect_task(df, auto_guess_target=True)
+    assert detection["task_type"] == "binary_classification"
+    assert detection["target_column"] == "survived"
+
+    # Generated templates automatically pick up target='survived'
+    templates = generate_template_graphs(df)
+    assert len(templates) >= 2
+    for tmpl in templates:
+        assert tmpl["task_type"] == "binary_classification"
+        train_node = next((n for n in tmpl["graph"]["nodes"] if n["id"] == "train"), None)
+        if train_node:
+            assert train_node["parameters"]["target"] == "survived"
+
+
