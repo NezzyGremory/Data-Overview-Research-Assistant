@@ -267,4 +267,29 @@ def delete_saved_template(template_id: str):
     return {"success": True}
 
 
+class ExportPythonRequest(BaseModel):
+    graph: GraphDefinition
+    target_column: str = "target"
+    task: str = "classification"
+
+
+@router.post("/export/python")
+def export_python_code(req: ExportPythonRequest):
+    """Generate standalone executable Python script reproducing the ML graph."""
+    from app.ml.graph.exporter import export_python_script
+    graph_dict = req.graph.model_dump()
+    code = export_python_script(graph_dict, req.target_column, req.task)
+    return {"script": code}
+
+
+@router.post("/export/notebook")
+def export_notebook(req: ExportPythonRequest):
+    """Generate Jupyter Notebook (.ipynb) with explanations for each pipeline step."""
+    from app.ml.graph.exporter import export_jupyter_notebook
+    graph_dict = req.graph.model_dump()
+    nb = export_jupyter_notebook(graph_dict, req.target_column, req.task)
+    return {"notebook": nb}
+
+
+
 
