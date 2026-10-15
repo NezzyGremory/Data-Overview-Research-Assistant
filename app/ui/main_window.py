@@ -103,7 +103,7 @@ from app.telemetry import get_telemetry
 
 
 # Set to True to restore the Node Editor page and its navigation entry.
-NODE_EDITOR_UI_ENABLED = False
+NODE_EDITOR_UI_ENABLED = True
 
 
 def _resource_path(relative_path: str | Path) -> Path:
@@ -209,6 +209,17 @@ class DatasetAnalysisWorker(QObject):
                         result[name] = future.result()
                     except Exception as error:
                         raise RuntimeError(f"{name} analysis failed: {error}") from error
+
+            # Profiling already scans the frame for duplicate rows. Reuse that
+            # count instead of running the same full-frame duplicate check again.
+            duplicate_count = int((result.get("profile") or {}).get("duplicate_rows", 0))
+            row_count = len(self.dataframe)
+            result["duplicates"] = {
+                "duplicate_count": duplicate_count,
+                "duplicate_percentage": (
+                    duplicate_count / row_count * 100 if row_count > 0 else 0
+                ),
+            }
 
             try:
                 result["data_quality"] = self.quality_diagnoser.diagnose(
@@ -2623,7 +2634,6 @@ class AnalysisPage(QWidget):
             "profile": self.main_window.profiler.profile,
             "statistics": self.main_window.statistics.analyze,
             "missing_values": self.main_window.missing_analyzer.analyze,
-            "duplicates": self.main_window.duplicate_analyzer.analyze,
             "outliers": self.main_window.outlier_analyzer.analyze,
             "correlations": self.main_window.correlation_analyzer.analyze,
             "fingerprint": self.main_window.fingerprint_analyzer.generate,

@@ -48,31 +48,34 @@ class DatasetStatistics:
                 )
 
             elif pd.api.types.is_numeric_dtype(series):
+                # Reuse the filtered series for every statistic. Repeated
+                # dropna() calls each allocate and scan a copy of this column.
+                non_missing = series.dropna()
                 result.update(
                     {
-                        "mean": float(series.mean())
-                        if not series.dropna().empty
+                        "mean": float(non_missing.mean())
+                        if not non_missing.empty
                         else None,
-                        "median": float(series.median())
-                        if not series.dropna().empty
+                        "median": float(non_missing.median())
+                        if not non_missing.empty
                         else None,
-                        "std": float(series.std())
-                        if not series.dropna().empty
+                        "std": float(non_missing.std())
+                        if not non_missing.empty
                         else None,
-                        "min": float(series.min())
-                        if not series.dropna().empty
+                        "min": float(non_missing.min())
+                        if not non_missing.empty
                         else None,
-                        "max": float(series.max())
-                        if not series.dropna().empty
+                        "max": float(non_missing.max())
+                        if not non_missing.empty
                         else None,
-                        "q1": float(series.quantile(0.25))
-                        if not series.dropna().empty
+                        "q1": float(non_missing.quantile(0.25))
+                        if not non_missing.empty
                         else None,
-                        "q3": float(series.quantile(0.75))
-                        if not series.dropna().empty
+                        "q3": float(non_missing.quantile(0.75))
+                        if not non_missing.empty
                         else None,
-                        "skewness": float(series.skew())
-                        if not series.dropna().empty
+                        "skewness": float(non_missing.skew())
+                        if not non_missing.empty
                         else None,
                     }
                 )

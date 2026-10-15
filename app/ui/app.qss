@@ -198,6 +198,48 @@ QWidget {
     font-weight: 700;
 }
 
+#nodeEditorCanvas {
+    background: #F1F7FF;
+    border: @px(1) solid #DCE8F7;
+    border-radius: @px(12);
+}
+
+QSplitter#nodeEditorSplitter::handle {
+    background: #E8EFF8;
+    width: @px(5);
+}
+
+QSplitter#nodeEditorSplitter::handle:hover {
+    background: #9BC6F3;
+}
+
+#nodeEditorZoomControls {
+    background: #FFFFFF;
+    border: @px(1) solid #DCE8F7;
+    border-radius: @px(9);
+}
+
+#nodeEditorZoomControls QPushButton {
+    background: #F7FAFE;
+    border: @px(1) solid #DCE8F7;
+    border-radius: @px(7);
+    color: #245B8F;
+    font-size: @px(16);
+    font-weight: 700;
+    padding: 0;
+}
+
+#nodeEditorZoomControls QPushButton:hover:!disabled {
+    background: #EDF6FF;
+    border-color: #AFCFF2;
+}
+
+#nodeEditorZoomControls QLabel {
+    color: #526579;
+    font-size: @px(10);
+    font-weight: 700;
+}
+
 #sectionTitle {
     color: #122033;
     font-size: @px(16);

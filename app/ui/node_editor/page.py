@@ -15,11 +15,11 @@ from pathlib import Path
 import pandas as pd
 
 from PySide6.QtCore import QMimeData, QObject, QPointF, QRectF, QStandardPaths, Qt, QThread, QTimer, Signal, Slot
-from PySide6.QtGui import QBrush, QColor, QDrag, QPainter, QPainterPath, QPen, QTextCursor
+from PySide6.QtGui import QBrush, QColor, QDrag, QPainter, QPainterPath, QPen, QPolygonF, QTextCursor
 from PySide6.QtWidgets import (
     QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout, QFrame, QGraphicsEllipseItem,
-    QGraphicsItem, QGraphicsPathItem, QGraphicsRectItem, QGraphicsScene, QGraphicsTextItem,
-    QGraphicsView, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QSplitter,
+    QGraphicsItem, QGraphicsPathItem, QGraphicsPolygonItem, QGraphicsRectItem, QGraphicsScene, QGraphicsTextItem,
+    QGraphicsView, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QSplitter,
     QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget, QSpinBox, QCheckBox, QScrollArea, QProgressBar,
     QPlainTextEdit,
     QListWidget, QListWidgetItem, QSizePolicy, QTabWidget,
@@ -71,12 +71,21 @@ class GraphNodeItem(QGraphicsRectItem):
         self.setPen(QColor("#B7D5F3"))
         self.setZValue(1)
         self.title = QGraphicsTextItem(page.engine.specs[node.spec_id].name, self)
-        self.title.setDefaultTextColor("#173B5C")
+        self.title.setDefaultTextColor("#172033")
+        title_font = self.title.font()
+        title_font.setBold(True)
+        title_font.setPointSize(9)
+        self.title.setFont(title_font)
         self.title.setPos(12, 8)
         self.title.setTextWidth(self.W - 24)
         self.title.setAcceptedMouseButtons(Qt.NoButton)
         self.port_items = {}
         spec = page.engine.specs[node.spec_id]
+        self._accent = (
+            QColor(PORT_COLORS.get(spec.outputs[0].type, "#0878D1"))
+            if spec.outputs
+            else QColor("#0878D1")
+        )
         for side, ports, xx in (("in", spec.inputs, 0), ("out", spec.outputs, self.W)):
             for index, port in enumerate(ports):
                 yy = 44 + index * 23
@@ -101,10 +110,23 @@ class GraphNodeItem(QGraphicsRectItem):
         self.status.setTextWidth(self.W - 24)
         self.status.setAcceptedMouseButtons(Qt.NoButton)
 
+    def paint(self, painter, option, widget=None):
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(self.pen())
+        painter.setBrush(self.brush())
+        painter.drawRoundedRect(self.rect(), 9, 9)
+        painter.setPen(QPen(QColor("#EAF1F9"), 1))
+        painter.drawLine(QPointF(10, 34), QPointF(self.W - 10, 34))
+        painter.setPen(QPen(Qt.NoPen))
+        painter.setBrush(self._accent)
+        painter.drawRoundedRect(QRectF(1, 10, 3, 18), 1.5, 1.5)
+        painter.restore()
+
     def itemChange(self, change, value):
         result = super().itemChange(change, value)
         if change == QGraphicsItem.ItemPositionHasChanged:
-            self.page.redraw_cables()
+            self.page.update_node_cables(self.node_id)
             self.page.engine.nodes[self.node_id].position = (self.pos().x(), self.pos().y())
         elif change == QGraphicsItem.ItemSelectedHasChanged:
             self.setPen(QPen(QColor("#0878D1" if value else "#B7D5F3"), 2 if value else 1))
@@ -194,9 +216,15 @@ class NodePalette(QListWidget):
 
 
 class GraphView(QGraphicsView):
+    MIN_ZOOM = 0.35
+    MAX_ZOOM = 1.8
+    ZOOM_STEP = 1.15
+
     def __init__(self, scene, page):
         super().__init__(scene)
         self.page, self._pan = page, False
+        self._pan_button = None
+        self._space_held = False
         self._connecting = False
         self.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
         self.setDragMode(QGraphicsView.RubberBandDrag)
@@ -209,7 +237,52 @@ class GraphView(QGraphicsView):
         self.setAcceptDrops(True)
 
     def wheelEvent(self, event):
-        self.scale(1.12, 1.12) if event.angleDelta().y() > 0 else self.scale(.89, .89)
+        if event.modifiers() & Qt.ControlModifier:
+            delta = event.angleDelta().y()
+            if not delta:
+                delta = event.pixelDelta().y()
+                steps = delta / 120 if delta else 0
+            else:
+                steps = delta / 120
+            if steps:
+                self.zoom_by(self.ZOOM_STEP ** steps)
+                event.accept()
+                return
+        super().wheelEvent(event)
+
+    def set_zoom(self, value):
+        value = max(self.MIN_ZOOM, min(self.MAX_ZOOM, float(value)))
+        current = self.transform().m11()
+        if current > 0 and not math.isclose(current, value, rel_tol=1e-4):
+            self.scale(value / current, value / current)
+        self.sync_zoom_label()
+
+    def sync_zoom_label(self):
+        value = self.transform().m11()
+        self.page.zoom_label.setText(f"{round(value * 100)}%")
+
+    def zoom_by(self, factor):
+        self.set_zoom(self.transform().m11() * factor)
+
+    def _node_item_at(self, position):
+        item = self.itemAt(position)
+        while item is not None:
+            if isinstance(item, GraphNodeItem):
+                return item
+            item = item.parentItem()
+        return None
+
+    def _begin_pan(self, event):
+        self._pan = True
+        self._pan_button = event.button()
+        self._last = event.position().toPoint()
+        self.setCursor(Qt.ClosedHandCursor)
+        self.setFocus(Qt.MouseFocusReason)
+
+    def _end_pan(self):
+        self._pan = False
+        self._pan_button = None
+        self.setCursor(Qt.ArrowCursor)
 
     def drawBackground(self, painter, rect):
         super().drawBackground(painter, rect)
@@ -246,10 +319,8 @@ class GraphView(QGraphicsView):
         self.page.remove_connection_preview()
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.MiddleButton:
-            self._pan = True
-            self._last = event.position().toPoint()
-            self.setCursor(Qt.ClosedHandCursor)
+        if event.button() == Qt.MiddleButton and self.page.connection_start is None:
+            self._begin_pan(event)
             event.accept()
             return
         if event.button() == Qt.LeftButton:
@@ -268,6 +339,14 @@ class GraphView(QGraphicsView):
                     self._connecting = False
                 event.accept()
                 return
+            if (
+                self._space_held
+                and self.page.connection_start is None
+                and not self._node_item_at(event.position().toPoint())
+            ):
+                self._begin_pan(event)
+                event.accept()
+                return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
@@ -284,9 +363,9 @@ class GraphView(QGraphicsView):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
-        if self._pan:
-            self._pan = False
-            self.setCursor(Qt.ArrowCursor)
+        if self._pan and event.button() == self._pan_button:
+            self._end_pan()
+            event.accept()
             return
         if self._connecting:
             self._finish_or_cancel_connection(event.position().toPoint())
@@ -295,6 +374,10 @@ class GraphView(QGraphicsView):
         super().mouseReleaseEvent(event)
 
     def keyPressEvent(self, event):
+        if event.key() == Qt.Key_Space and not event.isAutoRepeat():
+            self._space_held = True
+            event.accept()
+            return
         if event.key() in (Qt.Key_Delete, Qt.Key_Backspace):
             self.page.delete_selected_nodes()
             event.accept()
@@ -305,6 +388,19 @@ class GraphView(QGraphicsView):
             event.accept()
             return
         super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event):
+        if event.key() == Qt.Key_Space and not event.isAutoRepeat():
+            self._space_held = False
+            event.accept()
+            return
+        super().keyReleaseEvent(event)
+
+    def focusOutEvent(self, event):
+        self._space_held = False
+        if self._pan:
+            self._end_pan()
+        super().focusOutEvent(event)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasFormat(NodePalette.MIME_TYPE):
@@ -496,7 +592,8 @@ class NodeEditorPage(QWidget):
         self.main_window = main_window
         self.engine = GraphEngine()
         self.items = {}
-        self.cables = []
+        self.cables = {}
+        self._node_connections = {}
         self.connection_start = None
         self.connection_preview = None
         self._active_dataset_token = None
@@ -520,7 +617,7 @@ class NodeEditorPage(QWidget):
         root.setContentsMargins(22, 18, 22, 16)
         title = QLabel("Node Editor")
         title.setObjectName("pageTitle")
-        subtitle = QLabel("Dataset aktif masuk otomatis. Seret node ke kanvas, lalu hubungkan port dengan garis.")
+        subtitle = QLabel("Dataset aktif masuk otomatis. Hubungkan port dengan garis, lalu geser kanvas memakai tombol tengah atau tahan Space sambil menyeret.")
         subtitle.setObjectName("pageSubtitle")
         subtitle.setWordWrap(True)
         root.addWidget(title)
@@ -540,6 +637,8 @@ class NodeEditorPage(QWidget):
         self.dataset_status = QLabel("Dataset belum dimuat")
         self.dataset_status.setObjectName("nodeEditorDatasetStatus")
         self.dataset_status.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.dataset_status.setMinimumWidth(0)
+        self.dataset_status.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         toolbar.addWidget(self.dataset_status, 1)
         root.addLayout(toolbar)
 
@@ -553,6 +652,8 @@ class NodeEditorPage(QWidget):
         self.template_combo = QComboBox()
         self.template_combo.addItems(["Template…", "Klasifikasi cepat", "Regresi cepat", "Ensemble klasifikasi", "Imbalanced klasifikasi", "Forecasting cepat"])
         self.template_combo.activated.connect(self.load_template)
+        self.template_combo.setMinimumWidth(0)
+        self.template_combo.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
         file_toolbar.addWidget(self.template_combo)
         file_toolbar.addStretch(1)
         root.addLayout(file_toolbar)
@@ -587,17 +688,49 @@ class NodeEditorPage(QWidget):
         self._run_node_count = 0
 
         self.splitter = QSplitter(Qt.Horizontal)
-        self.splitter.setChildrenCollapsible(False)
+        self.splitter.setObjectName("nodeEditorSplitter")
+        self.splitter.setChildrenCollapsible(True)
         self.splitter.addWidget(self._build_palette())
         self.scene = QGraphicsScene(self)
         self.scene.setSceneRect(-1000, -600, 3000, 2200)
         self.view = GraphView(self.scene, self)
-        self.splitter.addWidget(self.view)
+        self.view.setFrameShape(QFrame.NoFrame)
+        self.view.setToolTip("Geser dengan tombol tengah atau tahan Space sambil menyeret. Ctrl + roda mouse untuk zoom.")
+        self.canvas = QFrame()
+        self.canvas.setObjectName("nodeEditorCanvas")
+        canvas_layout = QGridLayout(self.canvas)
+        canvas_layout.setContentsMargins(0, 0, 0, 0)
+        canvas_layout.addWidget(self.view, 0, 0)
+        zoom_controls = QFrame(self.canvas)
+        zoom_controls.setObjectName("nodeEditorZoomControls")
+        zoom_layout = QHBoxLayout(zoom_controls)
+        zoom_layout.setContentsMargins(6, 4, 6, 4)
+        zoom_layout.setSpacing(4)
+        zoom_out = QPushButton("−")
+        zoom_out.setToolTip("Perkecil kanvas")
+        zoom_out.setFixedSize(32, 30)
+        zoom_out.clicked.connect(lambda: self.view.zoom_by(1 / GraphView.ZOOM_STEP))
+        zoom_layout.addWidget(zoom_out)
+        self.zoom_label = QLabel("100%")
+        self.zoom_label.setMinimumWidth(48)
+        self.zoom_label.setAlignment(Qt.AlignCenter)
+        zoom_layout.addWidget(self.zoom_label)
+        zoom_in = QPushButton("+")
+        zoom_in.setToolTip("Perbesar kanvas")
+        zoom_in.setFixedSize(32, 30)
+        zoom_in.clicked.connect(lambda: self.view.zoom_by(GraphView.ZOOM_STEP))
+        zoom_layout.addWidget(zoom_in)
+        canvas_layout.addWidget(zoom_controls, 0, 0, Qt.AlignTop | Qt.AlignRight)
+        self.splitter.addWidget(self.canvas)
         self.splitter.addWidget(self._build_parameters())
+        self.splitter.setCollapsible(0, True)
+        self.splitter.setCollapsible(2, True)
         self.splitter.setStretchFactor(0, 0)
         self.splitter.setStretchFactor(1, 1)
         self.splitter.setStretchFactor(2, 0)
-        self.splitter.setSizes([230, 760, 275])
+        self.splitter.setSizes([205, 1000, 250])
+        self.splitter.handle(1).setToolTip("Seret untuk menyesuaikan atau tutup panel Palet Node")
+        self.splitter.handle(2).setToolTip("Seret untuk menyesuaikan atau tutup panel Parameter")
         root.addWidget(self.splitter, 1)
         self.results = QTableWidget(0, 0)
         self.results.setMaximumHeight(185)
@@ -803,6 +936,7 @@ class NodeEditorPage(QWidget):
         scale = self.view.transform().m11()
         if scale > 1.25:
             self.view.scale(1.25 / scale, 1.25 / scale)
+        self.view.sync_zoom_label()
 
     def _update_delete_button(self):
         self.delete_button.setEnabled(any(isinstance(item, GraphNodeItem) for item in self.scene.selectedItems()))
@@ -882,23 +1016,69 @@ class NodeEditorPage(QWidget):
             QMessageBox.warning(self, "Koneksi tidak valid", str(exc))
 
     def redraw_cables(self):
-        for cable in self.cables:
-            self.scene.removeItem(cable)
-        self.cables.clear()
-        for source, output, target, input_name in self.engine.connections:
-            source_item, target_item = self.items[source], self.items[target]
-            a = source_item.port_items[("out", output)].mapToScene(QPointF(0, 0))
-            b = target_item.port_items[("in", input_name)].mapToScene(QPointF(0, 0))
-            path = QPainterPath(a)
-            direction = 1 if b.x() >= a.x() else -1
-            bend = max(48, abs(b.x() - a.x()) * .45)
-            path.cubicTo(QPointF(a.x() + direction * bend, a.y()), QPointF(b.x() - direction * bend, b.y()), b)
-            cable = QGraphicsPathItem(path)
-            port_type = next(p.type for p in self.engine.specs[self.engine.nodes[source].spec_id].outputs if p.name == output)
-            cable.setPen(QPen(QColor(PORT_COLORS.get(port_type, "#0071C2")), 2.4, Qt.SolidLine))
+        connections = list(self.engine.connections)
+        active = set(connections)
+        for edge, (cable, arrow) in list(self.cables.items()):
+            if edge not in active:
+                self.scene.removeItem(cable)
+                self.scene.removeItem(arrow)
+                del self.cables[edge]
+        self._node_connections = {}
+        for edge in connections:
+            self._node_connections.setdefault(edge[0], []).append(edge)
+            self._node_connections.setdefault(edge[2], []).append(edge)
+            self._update_cable(edge)
+
+    def update_node_cables(self, node_id):
+        for edge in self._node_connections.get(node_id, ()):
+            self._update_cable(edge)
+
+    def _update_cable(self, edge):
+        source, output, target, input_name = edge
+        source_item, target_item = self.items.get(source), self.items.get(target)
+        if source_item is None or target_item is None:
+            return
+        start_port = source_item.port_items.get(("out", output))
+        end_port = target_item.port_items.get(("in", input_name))
+        if start_port is None or end_port is None:
+            return
+        a = start_port.mapToScene(QPointF(0, 0))
+        b = end_port.mapToScene(QPointF(0, 0))
+        direction = 1 if b.x() >= a.x() else -1
+        bend = max(48, abs(b.x() - a.x()) * 0.45)
+        path = QPainterPath(a)
+        path.cubicTo(
+            QPointF(a.x() + direction * bend, a.y()),
+            QPointF(b.x() - direction * bend, b.y()),
+            b,
+        )
+        port_type = next(
+            port.type
+            for port in self.engine.specs[self.engine.nodes[source].spec_id].outputs
+            if port.name == output
+        )
+        color = QColor(PORT_COLORS.get(port_type, "#0071C2"))
+        cable, arrow = self.cables.get(edge, (None, None))
+        if cable is None:
+            cable = QGraphicsPathItem()
             cable.setZValue(0)
+            arrow = QGraphicsPolygonItem()
+            arrow.setPen(QPen(Qt.NoPen))
+            arrow.setZValue(0.2)
             self.scene.addItem(cable)
-            self.cables.append(cable)
+            self.scene.addItem(arrow)
+            self.cables[edge] = (cable, arrow)
+        cable.setPath(path)
+        pen = QPen(color, 2.6, Qt.SolidLine)
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        cable.setPen(pen)
+        arrow.setBrush(color)
+        arrow.setPolygon(QPolygonF((
+            QPointF(b.x() - direction * 3, b.y()),
+            QPointF(b.x() - direction * 14, b.y() - 5),
+            QPointF(b.x() - direction * 14, b.y() + 5),
+        )))
 
     def show_parameters(self):
         while self.parameter_form.rowCount():

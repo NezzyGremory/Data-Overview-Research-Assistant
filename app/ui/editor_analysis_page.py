@@ -1366,15 +1366,13 @@ plt.tight_layout()
     def _execution_interpreter(self) -> Path:
         if getattr(sys, "frozen", False):
             return Path(sys.executable)
-        if self._project_environment is None:
-            raise RuntimeError("Lingkungan Python proyek belum disiapkan.")
-        if os.name == "nt":
-            return self._project_environment / "Scripts" / "python.exe"
-        return self._project_environment / "bin" / "python"
+        # Reuse the application's already-loaded Python environment. Creating a
+        # fresh venv on the first Run adds a large, unnecessary startup delay.
+        return Path(sys.executable)
 
     def _environment_site_packages(self) -> Path:
         if self._project_environment is None:
-            raise RuntimeError("Lingkungan Python proyek belum disiapkan.")
+            raise RuntimeError("Workspace proyek belum disiapkan.")
         if os.name == "nt":
             return self._project_environment / "Lib" / "site-packages"
         return self._project_environment / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
@@ -1383,24 +1381,7 @@ plt.tight_layout()
         if self._project_environment is None:
             self.execution_note.setText("Lingkungan proyek belum tersedia.")
             return
-        if self._execution_interpreter().exists():
-            callback()
-            return
-        if self._environment_process is not None:
-            return
-        self._environment_callback = callback
-        self._project_environment.parent.mkdir(parents=True, exist_ok=True)
-        process = QProcess(self)
-        self._environment_process = process
-        process.setProgram(sys.executable)
-        process.setArguments(["-m", "venv", str(self._project_environment)])
-        process.setWorkingDirectory(str(self._project_workspace))
-        process.setProcessChannelMode(QProcess.MergedChannels)
-        process.readyReadStandardOutput.connect(self._read_environment_output)
-        process.finished.connect(self._environment_finished)
-        process.errorOccurred.connect(self._environment_error)
-        process.start()
-        self.execution_note.setText("Menyiapkan lingkungan Python khusus proyek...")
+        callback()
 
     def _read_environment_output(self):
         process = self._environment_process
@@ -1503,17 +1484,15 @@ plt.tight_layout()
             ])
         else:
             process.setArguments([
+                "-I",
                 str(worker_path),
                 str(site_packages),
                 str(dataset_path),
                 str(self._project_workspace),
+                sysconfig.get_paths().get("purelib", ""),
             ])
         process.setWorkingDirectory(str(self._project_workspace))
         environment = QProcessEnvironment.systemEnvironment()
-        app_site_packages = "" if getattr(sys, "frozen", False) else sysconfig.get_paths().get("purelib", "")
-        existing_pythonpath = environment.value("PYTHONPATH")
-        pythonpath = [path for path in (app_site_packages, existing_pythonpath) if path]
-        environment.insert("PYTHONPATH", os.pathsep.join(pythonpath))
         environment.insert("PYTHONUTF8", "1")
         environment.insert("MPLBACKEND", "Agg")
         environment.insert("MPLCONFIGDIR", str(self._project_workspace / "matplotlib"))
@@ -1665,6 +1644,8 @@ plt.tight_layout()
             self._running_step_index = -1
             self._run_timeout.stop()
             self._finish_execution(False)
+        else:
+            self._finish_execution(exit_code == 0 and not self._queue_had_error)
 
     def _on_run_timeout(self):
         index = self._running_step_index

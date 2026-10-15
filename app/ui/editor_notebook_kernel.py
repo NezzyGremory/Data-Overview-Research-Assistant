@@ -76,16 +76,19 @@ def _write_message(message: dict):
 
 
 def main():
-    if len(sys.argv) != 4:
-        raise SystemExit("Usage: editor_notebook_kernel.py <project_site_packages> <dataset_pickle> <workdir>")
+    if len(sys.argv) not in (4, 5):
+        raise SystemExit("Usage: editor_notebook_kernel.py <project_site_packages> <dataset_pickle> <workdir> [app_site_packages]")
 
     packages_path = Path(sys.argv[1]).resolve()
     dataset_path = Path(sys.argv[2]).resolve()
     workdir = Path(sys.argv[3]).resolve()
+    app_site_packages = Path(sys.argv[4]).resolve() if len(sys.argv) == 5 and sys.argv[4] else None
     packages_path.mkdir(parents=True, exist_ok=True)
     workdir.mkdir(parents=True, exist_ok=True)
     os.chdir(workdir)
     sys.path.insert(0, str(packages_path))
+    if app_site_packages is not None:
+        sys.path.insert(1, str(app_site_packages))
     os.environ.setdefault("MPLBACKEND", "Agg")
     os.environ.setdefault("MPLCONFIGDIR", str(workdir / "matplotlib"))
 
