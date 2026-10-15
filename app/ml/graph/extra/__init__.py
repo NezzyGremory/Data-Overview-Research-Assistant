@@ -51,7 +51,9 @@ def _smote(inputs, params, context):
     target = params.get("target")
     if not target or target not in frame:
         raise ValueError("SMOTE membutuhkan target di data train.")
-    X, y = SMOTE(random_state=int(params.get("random_state", 42))).fit_resample(frame.drop(columns=[target]), frame[target])
+    min_samples = frame[target].value_counts().min()
+    k_neighbors = min(int(params.get("k_neighbors", 5)), max(1, min_samples - 1))
+    X, y = SMOTE(k_neighbors=k_neighbors, random_state=int(params.get("random_state", 42))).fit_resample(frame.drop(columns=[target]), frame[target])
     result = pd.DataFrame(X, columns=frame.drop(columns=[target]).columns)
     result[target] = y
     return {"train": result}

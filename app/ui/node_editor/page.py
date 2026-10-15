@@ -31,9 +31,9 @@ from app.ml.graph import GraphEngine, GraphError
 PORT_COLORS = {"table": "#0071C2", "estimator": "#8B5CF6", "model": "#098E00", "metrics": "#E09A00"}
 RESULT_PREVIEW_ROWS = 200
 RESULT_PREVIEW_COLUMNS = 50
-PACKAGE_DISTRIBUTIONS = {"imblearn": "imbalanced-learn"}
+PACKAGE_DISTRIBUTIONS = {"imblearn": "imbalanced-learn", "xgboost": "xgboost", "lightgbm": "lightgbm"}
 TASKS = [("Semua", "all"), ("Klasifikasi", "classification"), ("Regresi", "regression"), ("Pengelompokan", "clustering"), ("Anomali", "anomaly"), ("Rangkaian Waktu", "time_series")]
-CATEGORY_TRANSLATIONS = {"Data": "Data", "Classification": "Klasifikasi", "Regression": "Regresi", "Clustering": "Clustering", "Anomaly Detection": "Deteksi Anomali", "Validation": "Validasi", "Preprocessing": "Pra-pemrosesan", "Model": "Model", "Ensemble": "Ensemble", "Evaluation": "Evaluasi", "Tuning": "Penyetelan", "Forecasting": "Peramalan", "Data Tidak Seimbang": "Data Tidak Seimbang"}
+CATEGORY_TRANSLATIONS = {"Data": "Data", "Classification": "Klasifikasi", "Regression": "Regresi", "Clustering": "Clustering", "Anomaly Detection": "Deteksi Anomali", "Validation": "Validasi", "Preprocessing": "Pra-pemrosesan", "Model": "Model", "Ensemble": "Ensemble", "Evaluation": "Evaluasi", "Tuning": "Penyetelan", "Forecasting": "Peramalan", "Data Tidak Seimbang": "Data Tidak Seimbang", "Transformer": "Transformer"}
 
 
 def _read_graph_record(stream):
@@ -628,10 +628,12 @@ class NodeEditorPage(QWidget):
         self.run_button.clicked.connect(self.run_graph)
         toolbar.addWidget(self.run_button)
         self.delete_button = QPushButton("Hapus Node")
+        self.delete_button.setObjectName("secondaryButton")
         self.delete_button.setEnabled(False)
         self.delete_button.clicked.connect(self.delete_selected_nodes)
         toolbar.addWidget(self.delete_button)
         self.fit_button = QPushButton("Sesuaikan Tampilan")
+        self.fit_button.setObjectName("secondaryButton")
         self.fit_button.clicked.connect(self.fit_graph)
         toolbar.addWidget(self.fit_button)
         self.dataset_status = QLabel("Dataset belum dimuat")
@@ -644,16 +646,19 @@ class NodeEditorPage(QWidget):
 
         file_toolbar = QHBoxLayout()
         self.save_button = QPushButton("Simpan Graf")
+        self.save_button.setObjectName("secondaryButton")
         self.save_button.clicked.connect(self.save_graph)
         file_toolbar.addWidget(self.save_button)
         self.load_button = QPushButton("Muat Graf")
+        self.load_button.setObjectName("secondaryButton")
         self.load_button.clicked.connect(self.load_graph)
         file_toolbar.addWidget(self.load_button)
         self.template_combo = QComboBox()
         self.template_combo.addItems(["Template…", "Klasifikasi cepat", "Regresi cepat", "Ensemble klasifikasi", "Imbalanced klasifikasi", "Forecasting cepat"])
         self.template_combo.activated.connect(self.load_template)
-        self.template_combo.setMinimumWidth(0)
-        self.template_combo.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self.template_combo.setObjectName("nodeEditorTemplateCombo")
+        self.template_combo.setMinimumWidth(136)
+        self.template_combo.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         file_toolbar.addWidget(self.template_combo)
         file_toolbar.addStretch(1)
         root.addLayout(file_toolbar)
@@ -773,6 +778,7 @@ class NodeEditorPage(QWidget):
         self.node_palette.setMinimumHeight(180)
         layout.addWidget(self.node_palette)
         button = QPushButton("Tambah Node")
+        button.setObjectName("secondaryButton")
         button.clicked.connect(self.add_palette_node)
         self.add_node_button = button
         layout.addWidget(button)

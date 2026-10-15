@@ -37,6 +37,7 @@ class NodeSpec:
     check_package: str | None = None
     requires_scaling: bool = False
     max_recommended_rows: int = 100_000
+    requires: list[dict[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -82,6 +83,13 @@ class GraphEngine:
         self.register(NodeSpec("ensemble:bagging", "Bagging", "Ensemble", ["classification", "regression"], [PortSpec("estimators", "estimator", True)], [PortSpec("estimator", "estimator")], _ensemble, {"kind": "bagging"}))
         from app.ml.graph.extra import register_extra
         register_extra(self)
+        try:
+            from app.ml.graph.node_registry import get_node_registry
+            for spec_id, entry in get_node_registry().items():
+                if spec_id not in self.specs:
+                    self.register(entry.to_node_spec())
+        except Exception as exc:
+            pass
 
     def add_node(self, spec_id: str, node_id: str | None = None, parameters: dict[str, Any] | None = None, position=(0.0, 0.0)) -> Node:
         if spec_id not in self.specs:
