@@ -177,3 +177,31 @@ def execute_graph(req: GraphRunRequest):
         "duration_ms": duration_ms,
     }
 
+
+class InstallRequest(BaseModel):
+    package_name: str
+    user_confirmed: bool = False
+
+
+@router.post("/dependencies/preflight")
+def check_dependencies(definition: GraphDefinition):
+    """Preflight check: verify that all packages required by graph nodes are installed."""
+    from app.ml.graph.dependencies import preflight_check
+    engine = GraphEngine()
+    nodes = [n.model_dump() for n in definition.nodes]
+    return preflight_check(nodes, engine.specs)
+
+
+@router.post("/dependencies/install")
+def install_missing_package(req: InstallRequest):
+    """Safely install a whitelisted package into the active .venv with user confirmation."""
+    from app.ml.graph.dependencies import install_package
+    try:
+        res = install_package(req.package_name, user_confirmed=req.user_confirmed)
+        return res
+    except PermissionError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
