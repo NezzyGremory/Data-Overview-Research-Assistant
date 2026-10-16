@@ -24,17 +24,14 @@ class ResearchGapExplainer:
             configured_timeout = 15.0
         self.timeout = min(max(configured_timeout, 5.0), 18.0)
 
-    def explain(self, gaps: Any) -> tuple[str, str, str]:
-        items = self._safe_gaps(gaps)
+    def explain(self, research: Any) -> tuple[str, str, str]:
+        context = self._safe_context(research)
+        items = self._safe_gaps(context.get("gaps"))
         if not items:
-            return (
-                "## Belum ada kandidat yang dapat dijelaskan\n\nJalankan Academic Research dan pastikan paper ditemukan.",
-                "local",
-                "Tidak ada kandidat gap pada hasil Academic Research.",
-            )
+            return self.explain_local(research)
         if not self.api_keys:
             reason = "API key Gemini tidak ditemukan di pengaturan aplikasi atau environment."
-            return self._local_explanation(items), "local", reason
+            return self._local_explanation(items, context), "local", reason
 
         prompt = self._build_prompt(items)
         default_model = "gemini-3.8-flash"
@@ -47,10 +44,11 @@ class ResearchGapExplainer:
 
         failures = []
         # Bound total wait even when the provider is repeatedly unavailable.
-        deadline = time.monotonic() + 38.0
+        deadline = time.monotonic() + 20.0
         transient_statuses = {408, 429, 500, 502, 503, 504}
         # Try at most two configured keys; additional keys rarely help an outage
         # and would make the UI wait too long.
+        quota_limited = False
         for model in models:
             for key in self.api_keys[:2]:
                 for attempt in range(2):
@@ -83,6 +81,16 @@ class ResearchGapExplainer:
 
                         status = response.status_code
                         failures.append(f"{model}: HTTP {status}")
+                        response_detail = str(response.text or "").lower()
+                        quota_error = status == 429 or (
+                            status == 403
+                            and any(marker in response_detail for marker in ("quota", "resource_exhausted", "rate limit"))
+                        )
+                        if quota_error:
+                            # A rate limit is normally shared by the project;
+                            # trying more models and keys only delays local output.
+                            quota_limited = True
+                            break
                         if status in transient_statuses and attempt == 0:
                             # Retry-After is advisory and is capped to preserve responsiveness.
                             try:
@@ -112,11 +120,60 @@ class ResearchGapExplainer:
                         break
                 if time.monotonic() >= deadline:
                     break
+                if quota_limited:
+                    break
             if time.monotonic() >= deadline:
                 break
+            if quota_limited:
+                break
 
-        reason = "Gemini belum berhasil memberi penjelasan (" + ", ".join(dict.fromkeys(failures)) + ")."
-        return self._local_explanation(items), "local", reason
+        if quota_limited:
+            reason = "Kuota atau batas permintaan Gemini tercapai; hasil ini dijelaskan secara lokal."
+        else:
+            reason = "Gemini belum berhasil memberi penjelasan (" + ", ".join(dict.fromkeys(failures)) + ")."
+        return self._local_explanation(items, context), "local", reason
+
+    def explain_local(self, research: Any, reason: str | None = None) -> tuple[str, str, str]:
+        """Build a deterministic explanation without making a network request."""
+        context = self._safe_context(research)
+        items = self._safe_gaps(context.get("gaps"))
+        detail = reason or (
+            self._no_candidate_reason(context)
+            if not items
+            else "Penjelasan lokal digunakan tanpa memanggil Gemini."
+        )
+        return self._local_explanation(items, context), "local", detail
+
+    @staticmethod
+    def _safe_context(research: Any) -> dict[str, Any]:
+        """Keep the research facts needed for a useful local synthesis."""
+        if not isinstance(research, dict):
+            return {"gaps": research}
+        looks_like_result = any(
+            key in research for key in ("papers", "queries", "search", "landscape", "trend")
+        )
+        if not looks_like_result:
+            return {"gaps": research}
+        return {
+            "gaps": research.get("gaps"),
+            "papers": research.get("papers") if isinstance(research.get("papers"), list) else [],
+            "queries": research.get("queries"),
+            "keywords": research.get("keywords"),
+            "landscape": research.get("landscape"),
+            "trend": research.get("trend"),
+        }
+
+    @staticmethod
+    def _no_candidate_reason(context: dict[str, Any]) -> str:
+        gaps = context.get("gaps")
+        status = gaps.get("status") if isinstance(gaps, dict) else ""
+        if status == "ERROR":
+            return "Analisis kandidat gap mengalami kendala; ringkasan lokal menjelaskan status dan data yang tersedia."
+        if status == "SKIPPED":
+            return "Analisis kandidat gap belum dijalankan; penjelasan lokal memakai jumlah paper dan konteks pencarian yang tersedia."
+        if not context.get("papers"):
+            return "Belum ada paper yang dapat dianalisis untuk menyimpulkan kandidat gap."
+        return "Tidak ada kandidat gap heuristik yang terdeteksi; hasil lokal menjelaskan cakupan dan batas kesimpulannya."
 
     @staticmethod
     def _safe_gaps(gaps: Any) -> list[dict[str, Any]]:
@@ -176,7 +233,15 @@ KANDIDAT GAP DAN BUKTI:
         return text or "(tidak tersedia)"
 
     @classmethod
-    def _local_explanation(cls, items: list[dict[str, Any]]) -> str:
+    def _local_explanation(
+        cls,
+        items: list[dict[str, Any]],
+        context: dict[str, Any] | None = None,
+    ) -> str:
+        context = context if isinstance(context, dict) else {}
+        gaps = context.get("gaps")
+        gaps = gaps if isinstance(gaps, dict) else {}
+        papers = context.get("papers") if isinstance(context.get("papers"), list) else []
         type_names = {
             "METHOD_DISTRIBUTION": "Perbedaan penggunaan metode",
             "UNDERUSED_RECOMMENDED_METHOD": "Metode yang belum banyak terlihat",
@@ -184,9 +249,18 @@ KANDIDAT GAP DAN BUKTI:
             "DATASET_CONCENTRATION": "Paper terkonsentrasi pada dataset tertentu",
             "TOPIC_DIVERSITY": "Konsep yang jarang dibahas",
         }
-        sections = [
-            "## Ringkasan\n\nBerikut penjelasan awal dari paper yang ditemukan. Ini adalah petunjuk untuk diteliti, bukan bukti bahwa topik tersebut belum pernah diteliti. Angka hanya menggambarkan hasil pencarian aplikasi.",
-        ]
+        if items:
+            if papers:
+                scope = f"Analisis lokal merangkum {len(papers)} paper yang berhasil dikumpulkan. "
+            else:
+                scope = "Analisis lokal memakai kandidat dan bukti yang tersimpan pada hasil Research Gap. "
+            scope += (
+                "Kandidat berikut adalah sinyal heuristik untuk ditinjau, bukan bukti bahwa topik tersebut "
+                "belum pernah diteliti. Angka hanya menggambarkan literatur yang berhasil ditemukan aplikasi."
+            )
+            sections = ["## Ringkasan\n\n" + scope]
+        else:
+            sections = [cls._explain_no_candidates(context, gaps, papers)]
         for index, item in enumerate(items, 1):
             kind = str(item.get("type") or "")
             title = type_names.get(kind) or cls._clean(item.get("title") or "Kandidat celah riset")
@@ -244,11 +318,126 @@ KANDIDAT GAP DAN BUKTI:
                 f"**Saran penelitian berikutnya**\n\n{recommendation}\n\n"
                 f"**Contoh pertanyaan penelitian**\n\n{question}"
             )
+        if items:
+            sections.append(
+                "## Langkah berikutnya\n\n"
+                "1. Buka paper sumber dan periksa metode serta keterbatasannya.\n"
+                "2. Ulangi pencarian dengan kata kunci dan rentang tahun yang lebih luas.\n"
+                "3. Setelah kebaruan terverifikasi, tetapkan pertanyaan, data, metode pembanding, dan ukuran evaluasi."
+            )
+        return "\n\n---\n\n".join(sections)
+
+    @classmethod
+    def _explain_no_candidates(
+        cls,
+        context: dict[str, Any],
+        gaps: dict[str, Any],
+        papers: list[Any],
+    ) -> str:
+        count = len(papers)
+        status = str(gaps.get("status") or "").upper()
+        summary = gaps.get("summary") if isinstance(gaps.get("summary"), dict) else {}
+        queries = context.get("queries")
+        if isinstance(queries, dict):
+            queries = queries.get("queries") or queries.get("items") or []
+        if isinstance(queries, str):
+            queries = [queries]
+        query_text = ""
+        if isinstance(queries, (list, tuple)):
+            clean_queries = [str(query).strip() for query in queries if str(query).strip()]
+            if clean_queries:
+                query_text = " Kata kunci pencarian yang tercatat: " + "; ".join(clean_queries[:3]) + "."
+
+        if status == "SKIPPED":
+            headline = "Analisis kandidat gap belum dijalankan"
+            explanation = (
+                "Hasil Research Gap belum memiliki keluaran analisis, jadi kondisi ini belum berarti bahwa "
+                "literatur tidak memiliki celah. Buka atau jalankan tahap analisis Research Gap terlebih dahulu."
+            )
+        elif status == "ERROR":
+            detail = str(gaps.get("error") or "rincian kesalahan tidak tersedia")
+            headline = "Analisis kandidat gap belum selesai"
+            explanation = (
+                f"Pemeriksaan heuristik tidak berhasil diselesaikan ({cls._clean(detail)}). "
+                "Karena itu, belum ada dasar untuk menyatakan kandidat gap terdeteksi atau tidak terdeteksi."
+            )
+        elif count == 0:
+            headline = "Belum ada paper untuk dianalisis"
+            explanation = (
+                "Academic Research belum menyediakan paper yang dapat dibandingkan. Tanpa paper, sistem belum "
+                "bisa menyimpulkan pola metode, dataset, tren waktu, atau topik yang kurang dibahas."
+            )
+        else:
+            analyzed_count = summary.get("papers_analyzed", count)
+            headline = "Belum ditemukan sinyal gap yang cukup kuat"
+            explanation = (
+                f"Pemeriksaan lokal membandingkan {analyzed_count} paper yang dianalisis, tetapi aturan heuristik "
+                "tidak menandai pola yang cukup kuat sebagai kandidat gap. Pemeriksaan ini melihat perbedaan "
+                "metode, metode yang belum banyak digunakan, tahun publikasi, konsentrasi dataset, dan variasi topik. "
+                "Hasil kosong bukan bukti bahwa gap tidak ada; sampel paper dan kata kunci pencarian dapat membatasi temuan."
+            )
+
+        sections = [f"## {headline}\n\n{explanation}{query_text}"]
+        landscape = context.get("landscape")
+        landscape = landscape if isinstance(landscape, dict) else {}
+        landscape_summary = landscape.get("summary")
+        landscape_summary = landscape_summary if isinstance(landscape_summary, dict) else {}
+        observations = []
+        dominant_method = landscape_summary.get("dominant_method")
+        if not dominant_method:
+            methods = landscape.get("methods")
+            if isinstance(methods, list) and methods and isinstance(methods[0], dict):
+                dominant_method = methods[0].get("name")
+        if dominant_method:
+            method_count = landscape_summary.get("method_count")
+            method_detail = f" ({method_count} metode teridentifikasi)" if method_count else ""
+            observations.append(f"Metode yang paling sering terlihat: {dominant_method}{method_detail}.")
+        latest_year = landscape_summary.get("latest_publication_year")
+        if latest_year:
+            observations.append(f"Tahun publikasi terbaru pada hasil pencarian: {latest_year}.")
+
+        trend = context.get("trend")
+        trend = trend if isinstance(trend, dict) else {}
+        direction = str(trend.get("recent_direction") or "").upper()
+        direction_names = {
+            "INCREASING": "jumlah paper pada data terbaru cenderung meningkat",
+            "DECREASING": "jumlah paper pada data terbaru cenderung menurun",
+            "STABLE": "jumlah paper pada data terbaru cenderung stabil",
+            "INSUFFICIENT_DATA": "jumlah tahun yang tersedia belum cukup untuk membaca tren",
+        }
+        if direction in direction_names:
+            observations.append(f"Tren publikasi: {direction_names[direction]}.")
+        if observations:
+            sections.append(
+                "## Ringkasan hasil yang tersedia\n\n"
+                + "\n".join(f"- {observation}" for observation in observations)
+                + "\n\nRingkasan ini berasal dari paper yang ditemukan aplikasi dan tetap perlu diperiksa pada sumber aslinya."
+            )
+
+        if count:
+            years = []
+            for paper in papers:
+                if not isinstance(paper, dict):
+                    continue
+                try:
+                    year = int(paper.get("year"))
+                except (TypeError, ValueError):
+                    continue
+                if 1900 <= year <= 2100:
+                    years.append(year)
+            if years:
+                sections.append(
+                    "## Cakupan data literatur\n\n"
+                    f"Rentang tahun pada paper yang ditemukan adalah {min(years)}–{max(years)} "
+                    f"({len(set(years))} tahun publikasi berbeda). Angka ini menjelaskan sampel hasil pencarian, "
+                    "bukan seluruh publikasi pada bidang tersebut."
+                )
+
         sections.append(
-            "## Langkah berikutnya\n\n"
-            "1. Buka paper sumber dan periksa metode serta keterbatasannya.\n"
-            "2. Ulangi pencarian dengan kata kunci dan rentang tahun yang lebih luas.\n"
-            "3. Setelah kebaruan terverifikasi, tetapkan pertanyaan, data, metode pembanding, dan ukuran evaluasi."
+            "## Cara menindaklanjuti\n\n"
+            "1. Periksa abstrak dan bagian keterbatasan paper yang paling relevan untuk menemukan masalah yang belum terjawab.\n"
+            "2. Ulangi pencarian dengan sinonim, istilah metode, dan rentang tahun yang lebih luas.\n"
+            "3. Bandingkan metode, data, populasi, serta ukuran evaluasi sebelum menyatakan kebaruan penelitian."
         )
         return "\n\n---\n\n".join(sections)
 

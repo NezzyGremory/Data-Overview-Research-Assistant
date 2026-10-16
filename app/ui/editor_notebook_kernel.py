@@ -13,21 +13,61 @@ import traceback
 from pathlib import Path
 
 
-def _format_value(value, output: io.StringIO):
+def _format_value(value, output: io.StringIO, rich_outputs: list[dict] | None = None):
     if value is None:
         return
     if hasattr(value, "to_string"):
-        output.write(value.to_string())
+        plain = value.to_string()
+    else:
+        plain = repr(value)
+    if rich_outputs is None:
+        output.write(plain)
         output.write("\n")
         return
-    output.write(repr(value))
+    html_value = None
+    renderer = getattr(value, "to_html", None)
+    if callable(renderer):
+        try:
+            html_value = renderer(max_rows=50, max_cols=20, border=0)
+        except TypeError:
+            try:
+                html_value = renderer(max_rows=50, border=0)
+            except TypeError:
+                try:
+                    html_value = renderer()
+                except Exception:
+                    html_value = None
+            except Exception:
+                html_value = None
+        except Exception:
+            html_value = None
+    if not html_value:
+        html_renderer = getattr(value, "_repr_html_", None)
+        if callable(html_renderer):
+            try:
+                html_value = html_renderer()
+            except Exception:
+                html_value = None
+    if isinstance(html_value, str) and html_value and len(html_value) <= 1_500_000:
+        rich_outputs.append({
+            "data": {"text/plain": plain, "text/html": html_value},
+            "metadata": {},
+        })
+        return
+    output.write(plain)
     output.write("\n")
 
 
 def _execute(request: dict, namespace: dict, pyplot):
     output = io.StringIO()
+    rich_outputs = []
     error = False
     source = str(request.get("code", ""))
+    original_display = namespace.get("display")
+
+    def capture_display(value):
+        _format_value(value, output, rich_outputs)
+
     try:
         tree = ast.parse(source, filename="<DORA Editor Analysis>", mode="exec")
         trailing_expression = tree.body[-1] if tree.body and isinstance(tree.body[-1], ast.Expr) else None
@@ -37,6 +77,7 @@ def _execute(request: dict, namespace: dict, pyplot):
             ast.fix_missing_locations(body)
         else:
             body = None
+        namespace["display"] = capture_display
         with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
             if body is not None:
                 exec(compile(body, "<DORA Editor Analysis>", "exec"), namespace)
@@ -44,11 +85,13 @@ def _execute(request: dict, namespace: dict, pyplot):
                 expression = ast.Expression(body=trailing_expression.value)
                 ast.fix_missing_locations(expression)
                 value = eval(compile(expression, "<DORA Editor Analysis>", "eval"), namespace)
-                _format_value(value, output)
+                _format_value(value, output, rich_outputs)
     except BaseException:
         error = True
         with contextlib.redirect_stderr(output):
             traceback.print_exc()
+    finally:
+        namespace["display"] = original_display
 
     charts = []
     for figure_number in pyplot.get_fignums()[:8]:
@@ -65,6 +108,7 @@ def _execute(request: dict, namespace: dict, pyplot):
         "id": request.get("id"),
         "output": output.getvalue(),
         "charts": charts,
+        "rich_outputs": rich_outputs,
         "error": error,
     }
 

@@ -7,7 +7,6 @@ from pathlib import Path
 import re
 import os
 import pickle
-import shutil
 import subprocess
 import textwrap
 from types import SimpleNamespace
@@ -805,16 +804,23 @@ class ResearchGapExplanationWorker(QObject):
     finished = Signal(str, str, str)
     failed = Signal(str)
 
-    def __init__(self, gaps):
+    def __init__(self, research):
         super().__init__()
-        self.gaps = gaps
+        self.research = research
 
     def run(self):
         try:
-            explanation, source, reason = ResearchGapExplainer().explain(self.gaps)
+            explanation, source, reason = ResearchGapExplainer().explain(self.research)
             self.finished.emit(explanation, source, reason)
         except Exception as error:
-            self.failed.emit(str(error))
+            try:
+                explanation, source, reason = ResearchGapExplainer().explain_local(
+                    self.research,
+                    f"Penjelasan lokal digunakan setelah proses Gemini mengalami kendala ({type(error).__name__}).",
+                )
+                self.finished.emit(explanation, source, reason)
+            except Exception as local_error:
+                self.failed.emit(str(local_error))
 
 
 class ReportGenerationWorker(QObject):
@@ -11703,7 +11709,7 @@ class ResearchGapToolPage(QWidget):
         title_box.addWidget(title)
         title_box.addWidget(subtitle)
         header.addLayout(title_box, 1)
-        self.explain_button = QPushButton("Jelaskan dengan Gemini")
+        self.explain_button = QPushButton("Buat penjelasan")
         self.explain_button.setObjectName("primaryButton")
         self.explain_button.setMinimumHeight(40)
         self.explain_button.clicked.connect(self.explain_gaps)
@@ -11831,7 +11837,7 @@ class ResearchGapToolPage(QWidget):
             items = gaps
         if not isinstance(items, list):
             items = []
-        self.explain_button.setEnabled(bool(items) and self._explanation_thread is None)
+        self.explain_button.setEnabled(bool(self.research_result) and self._explanation_thread is None)
         self.status.setText(f"{len(self.research_result.get('papers', []))} paper dianalisis; {len(items)} kandidat gap terdeteksi.")
         self.clear_content()
 
@@ -11845,13 +11851,13 @@ class ResearchGapToolPage(QWidget):
             "Gemini" if explanation_source == "gemini"
             else ("Gagal" if explanation_source == "error" else ("Lokal" if explanation else "Belum dibuat"))
         )
-        metrics.addWidget(InfoCard("Penjelasan", explanation_status, "Memakai key Gemini tersimpan bila tersedia"))
+        metrics.addWidget(InfoCard("Penjelasan", explanation_status, "Gemini opsional; otomatis beralih ke analisis lokal"))
         self.content.addLayout(metrics)
 
         if self._explanation_thread is not None:
             self.content.addWidget(LoadingCard(
-                "Menjelaskan kandidat gap",
-                "Gemini sedang menyusun penjelasan sederhana dan rekomendasi penelitian berdasarkan temuan ini.",
+                "Menyusun penjelasan Research Gap",
+                "Menganalisis bukti dan batas hasil. Jika Gemini tidak tersedia atau kuotanya habis, penjelasan lokal tetap dibuat.",
                 self.container,
             ))
         elif isinstance(explanation, dict) and explanation.get("text"):
@@ -11861,7 +11867,7 @@ class ResearchGapToolPage(QWidget):
             )
         else:
             self._add_explanation_card(
-                "Tekan tombol Jelaskan dengan Gemini untuk memahami arti temuan, bukti dan batasannya, serta saran penelitian lanjutan.",
+                "Tekan Buat penjelasan untuk memahami hasil analisis, bukti dan batasannya, serta saran penelitian lanjutan.",
                 "menunggu",
             )
 
@@ -11869,7 +11875,16 @@ class ResearchGapToolPage(QWidget):
         heading.setObjectName("sectionTitle")
         self.content.addWidget(heading)
         if not items:
-            empty = QLabel("Belum ada kandidat gap yang terdeteksi. Periksa kembali jumlah dan kecocokan paper yang ditemukan.")
+            gap_status = str(gaps.get("status") or "").upper() if isinstance(gaps, dict) else ""
+            if gap_status == "ERROR":
+                empty_text = "Analisis kandidat gap belum selesai. Lihat penjelasan lokal untuk status dan langkah pemeriksaannya."
+            elif gap_status == "SKIPPED":
+                empty_text = "Analisis kandidat gap belum dijalankan. Buka tab Research Gap untuk menghitungnya."
+            elif self.research_result.get("papers"):
+                empty_text = "Tidak ada sinyal gap heuristik yang cukup kuat pada paper yang dianalisis. Ini belum membuktikan bahwa gap tidak ada; batas pencarian dijelaskan di atas."
+            else:
+                empty_text = "Belum ada paper yang dapat dibandingkan. Perluas kata kunci atau jalankan Academic Research terlebih dahulu."
+            empty = QLabel(empty_text)
             empty.setObjectName("emptyState")
             empty.setWordWrap(True)
             self.content.addWidget(empty)
@@ -11894,7 +11909,7 @@ class ResearchGapToolPage(QWidget):
         title.setObjectName("sectionTitle")
         source_names = {
             "gemini": "Gemini menggunakan API key tersimpan",
-            "local": "Penjelasan lokal (Gemini tidak tersedia)",
+            "local": "Penjelasan lokal",
             "error": "Penjelasan belum berhasil dibuat",
             "menunggu": "Belum dibuat",
         }
@@ -11950,23 +11965,18 @@ class ResearchGapToolPage(QWidget):
 
     def ensure_explanation(self):
         explanation = self.research_result.get("gap_explanation", {})
-        has_key = bool(get_saved_api_key())
         needs_generation = not isinstance(explanation, dict) or not explanation.get("text")
         needs_generation = needs_generation or explanation.get("source") == "error"
-        needs_generation = needs_generation or (
-            explanation.get("source") == "local" and has_key
-        )
         if self.research_result and needs_generation and not self._attempted_explanation_this_session:
             self.explain_gaps()
 
     def explain_gaps(self):
-        gaps = self.research_result.get("gaps", {})
         if not self.research_result or self._explanation_thread is not None:
             return
         self._attempted_explanation_this_session = True
         self.explain_button.setEnabled(False)
         self._explanation_thread = QThread(self)
-        self._explanation_worker = ResearchGapExplanationWorker(gaps)
+        self._explanation_worker = ResearchGapExplanationWorker(self.research_result)
         self._explanation_worker.moveToThread(self._explanation_thread)
         self._explanation_thread.started.connect(self._explanation_worker.run)
         self._explanation_worker.finished.connect(self._on_explanation_finished)
@@ -12000,12 +12010,7 @@ class ResearchGapToolPage(QWidget):
     def _cleanup_explanation_worker(self):
         self._explanation_worker = None
         self._explanation_thread = None
-        gaps = self.research_result.get("gaps", {})
-        if isinstance(gaps, dict):
-            items = gaps.get("gaps") or gaps.get("potential_gaps") or gaps.get("items") or []
-        else:
-            items = gaps if isinstance(gaps, list) else []
-        self.explain_button.setEnabled(bool(items))
+        self.explain_button.setEnabled(bool(self.research_result))
         if self.research_result:
             self.update_from_result(self.research_result)
 
@@ -12715,7 +12720,8 @@ class MainWindow(QMainWindow):
         self.analysis_result = {}
         self._shutdown_pending = False
         self._shutdown_idle_checks = 0
-        self._session_data_cleaned = False
+        self._session_data_saved = False
+        self._startup_restore_complete = False
         self._shutdown_timer = QTimer(self)
         self._shutdown_timer.setInterval(50)
         self._shutdown_timer.timeout.connect(self._poll_shutdown)
@@ -12745,6 +12751,8 @@ class MainWindow(QMainWindow):
         self._initial_widget_scale_applied = True
         self._restore_latest_project()
         self._restore_window_geometry()
+        self._restore_last_page()
+        self._startup_restore_complete = True
         get_telemetry().track("app_open", status="started")
 
     def _active_worker_threads(self):
@@ -12782,7 +12790,7 @@ class MainWindow(QMainWindow):
         if self._active_worker_threads():
             self._shutdown_idle_checks = 0
             self.statusBar().showMessage(
-                "Menunggu proses yang sedang berjalan sebelum menghapus data sesi…"
+                "Menunggu proses selesai agar progres tersimpan…"
             )
             return
 
@@ -12793,7 +12801,7 @@ class MainWindow(QMainWindow):
 
         self._shutdown_timer.stop()
         try:
-            self._clear_session_workspace()
+            self._save_application_progress()
         except Exception as error:
             self._shutdown_pending = False
             self._shutdown_idle_checks = 0
@@ -12803,52 +12811,52 @@ class MainWindow(QMainWindow):
             self.statusBar().clearMessage()
             QMessageBox.warning(
                 self,
-                "Data sesi belum terhapus",
-                "Aplikasi tidak jadi ditutup karena data sesi lokal belum dapat "
-                f"dibersihkan. Periksa penyimpanan lalu coba tutup kembali.\n\n{error}",
+                "Progres belum tersimpan",
+                "Aplikasi tetap dibuka karena progres lokal belum berhasil disimpan. "
+                f"Periksa penyimpanan lalu coba tutup kembali.\n\n{error}",
             )
             return
 
+        self._session_data_saved = True
         self.close()
 
-    def _clear_session_workspace(self):
-        """Delete app-managed project copies/results while preserving user files and settings."""
-        report_page = getattr(self, "report_tool_page", None)
-        if report_page is not None:
-            report_tempdir = getattr(report_page, "_chart_tempdir", None)
-            if report_tempdir is not None:
-                report_tempdir.cleanup()
-            report_page._chart_tempdir = None
-            report_page.chart_dir = None
-            report_page.current_html = ""
-            report_page._preview_signature = None
-            report_page._workflow_source_objects = ()
-            report_page._generating_report_signature = None
+    def _save_application_progress(self):
+        """Save recoverable application state before closing without deleting projects."""
+        settings = self.scale_manager.settings
+        settings.setValue("last_page_key", getattr(self, "_current_page_key", "dashboard"))
+        settings.setValue("active_project_id", self.current_project_id)
+        self._save_window_geometry()
 
-        data_root = Path(self.version_manager.data_dir).resolve()
-        projects_path = data_root / "projects"
-        if projects_path.is_symlink():
-            raise RuntimeError("Folder proyek tidak boleh berupa symbolic link saat pembersihan sesi.")
-        projects_root = projects_path.resolve()
-        if projects_root.exists():
-            if projects_root.parent != data_root or projects_root.name != "projects":
-                raise RuntimeError("Lokasi data proyek berada di luar folder kerja aplikasi.")
-            # All dataset-version files live in this app-managed directory.
-            # One guarded recursive removal avoids one database lookup and path
-            # validation per project while still keeping user source files safe.
-            shutil.rmtree(projects_root)
+        editor_page = getattr(self, "editor_analysis_page", None)
+        if editor_page is not None and not editor_page._save_autosave_on_exit():
+            raise OSError("Autosave Editor Analysis gagal ditulis ke penyimpanan lokal.")
+        node_page = getattr(self, "node_editor_page", None)
+        if node_page is not None and not node_page.save_session_graph():
+            raise OSError("Autosave Node Editor gagal ditulis ke penyimpanan lokal.")
 
-        # Cascades clear each project's workflow/results; journal screening is cleared too.
-        self.database.clear_session_data()
+        if self.current_dataset is not None:
+            project_id = self._ensure_current_project()
+            settings.setValue("active_project_id", project_id)
+            if project_id is not None:
+                workflow_sections = {
+                    "analysis": self.analysis_result,
+                    "ml_task": getattr(self.ml_page, "last_task_result", {}),
+                    "research": getattr(self.research_page, "research_result", {}),
+                }
+                methods = dict(getattr(self.ml_page, "last_method_result", {}) or {})
+                intelligence = getattr(self.ml_page, "last_intelligence_result", {}) or {}
+                if intelligence:
+                    methods["_intelligence_result"] = intelligence
+                if methods:
+                    workflow_sections["ml_methods"] = methods
+                for section, value in workflow_sections.items():
+                    if value:
+                        self.repository.save_workflow_section(project_id, section, value)
 
-        self.current_dataset = None
-        self.current_file_path = None
-        self.current_project_id = None
-        self.analysis_result = {}
-        self._session_data_cleaned = True
+        settings.sync()
 
     def closeEvent(self, event):
-        if self._session_data_cleaned:
+        if self._session_data_saved:
             self._save_window_geometry()
             event.accept()
             return
@@ -12863,7 +12871,7 @@ class MainWindow(QMainWindow):
         if self.centralWidget() is not None:
             self.centralWidget().setEnabled(False)
         self.statusBar().showMessage(
-            "Menyelesaikan proses dan menghapus dataset serta hasil kerja sesi…"
+            "Menyelesaikan proses dan menyimpan progres…"
         )
         self._shutdown_timer.start()
 
@@ -13490,6 +13498,15 @@ class MainWindow(QMainWindow):
             ("dashboard", "overview.svg", "Overview"),
         ))
         layout.addSpacing(8)
+        self._add_nav_section(layout, "RESEARCH TOOLS")
+        layout.itemAt(layout.count() - 1).widget().setFixedHeight(32)
+        layout.addSpacing(15)
+        self._add_nav_group(layout, 152, 6, 17, (
+            ("research", "academic-research.svg", "Academic Research"),
+            ("gap", "research-gap.svg", "Research Gap"),
+            ("report", "research-report.svg", "Research Report"),
+        ))
+        layout.addSpacing(11)
         self._add_nav_section(layout, "OPTIONAL TOOLS")
         layout.itemAt(layout.count() - 1).widget().setFixedHeight(32)
         layout.addSpacing(2)
@@ -13500,15 +13517,6 @@ class MainWindow(QMainWindow):
             optional_tools.append(("node_editor", "node-editor.svg", "Node Editor"))
         optional_tools_height = 104 if NODE_EDITOR_UI_ENABLED else 62
         self._add_nav_group(layout, optional_tools_height, 8, 8, optional_tools)
-        layout.addSpacing(11)
-        self._add_nav_section(layout, "RESEARCH TOOLS")
-        layout.itemAt(layout.count() - 1).widget().setFixedHeight(32)
-        layout.addSpacing(15)
-        self._add_nav_group(layout, 152, 6, 17, (
-            ("research", "academic-research.svg", "Academic Research"),
-            ("gap", "research-gap.svg", "Research Gap"),
-            ("report", "research-report.svg", "Research Report"),
-        ))
         layout.addStretch()
 
         footer = QWidget()
@@ -13855,6 +13863,8 @@ class MainWindow(QMainWindow):
         page = self.pages[key]
         self.page_stack.setCurrentWidget(self.page_hosts.get(id(page), page))
         self._current_page_key = key
+        if getattr(self, "_startup_restore_complete", False):
+            self.scale_manager.settings.setValue("last_page_key", key)
         self.page_title.setText(self._page_titles[key])
         self.set_active_button("dashboard" if key == "about" else key)
         self._sync_page_chrome(self.width(), self.height())
@@ -13877,6 +13887,8 @@ class MainWindow(QMainWindow):
                 self.current_dataset,
                 self._current_filename(),
             )
+            if self.analysis_result:
+                self.analysis_page.display_results(self.analysis_result)
         self._show_page("analysis")
 
     def open_editor_analysis_page(self):
@@ -14036,6 +14048,14 @@ class MainWindow(QMainWindow):
             and self._normalized_dataset_path(project.get("dataset_path"))
             == self._normalized_dataset_path(dataset_path)
         )
+        if project and not same_dataset:
+            current_version = self.version_manager.get_current_version(self.current_project_id)
+            same_dataset = bool(
+                current_version
+                and current_version.file_path
+                and self._normalized_dataset_path(current_version.file_path)
+                == self._normalized_dataset_path(dataset_path)
+            )
         if not same_dataset:
             filename = Path(dataset_path).name if dataset_path != "in-memory" else "Dataset"
             self.current_project_id = self.repository.create_project(
@@ -14055,11 +14075,19 @@ class MainWindow(QMainWindow):
                     self.current_project_id,
                     dataframe=dataframe,
                 )
+        self.scale_manager.settings.setValue("active_project_id", self.current_project_id)
         return self.current_project_id
 
     def _restore_latest_project(self):
         """Restore the newest usable local project and its completed features."""
-        for project in self.repository.list_projects():
+        projects = self.repository.list_projects()
+        try:
+            preferred_project_id = int(self.scale_manager.settings.value("active_project_id", 0) or 0)
+        except (TypeError, ValueError):
+            preferred_project_id = 0
+        if preferred_project_id:
+            projects.sort(key=lambda project: project.get("id") != preferred_project_id)
+        for project in projects:
             project_id = project.get("id")
             if project_id is None or not self.version_manager.has_versions(project_id):
                 continue
@@ -14086,6 +14114,8 @@ class MainWindow(QMainWindow):
             self.dashboard.update_dataset(dataframe, filename)
             self.dataset_preview_page.update_dataset(dataframe, filename)
             self.analysis_page.update_dataset(dataframe, filename)
+            if self.analysis_result:
+                self.analysis_page.display_results(self.analysis_result)
 
             task_result = state.get("ml_task") or {}
             methods_result = state.get("ml_methods") or {}
@@ -14110,8 +14140,37 @@ class MainWindow(QMainWindow):
                 analysis_done=bool(self.analysis_result),
                 ml_done=bool(task_result and methods_result),
             )
+            self.scale_manager.settings.setValue("active_project_id", project_id)
 
             return
+
+    def _restore_last_page(self):
+        key = str(self.scale_manager.settings.value("last_page_key", "dashboard") or "dashboard")
+        if key not in self.pages:
+            key = "dashboard"
+        page_openers = {
+            "dashboard": self.open_dashboard,
+            "dataset": self.open_datasets_page,
+            "dataset_search": self.open_dataset_search_page,
+            "analysis": self.open_analysis_page,
+            "editor_analysis": self.open_editor_analysis_page,
+            "node_editor": self.open_node_editor_page,
+            "ml": self.open_ml_page,
+            "research": self.open_research_page,
+            "papers": self.open_papers_tool,
+            "insights": self.open_insights_page,
+            "landscape": self.open_landscape_tool,
+            "gap": self.open_gap_tool,
+            "report": self.open_report_tool,
+            "about": self.open_about,
+            "copyright": self.open_copyright,
+            "help": self.open_help,
+        }
+        try:
+            page_openers.get(key, self.open_dashboard)()
+        except Exception as error:
+            print(f"Warning: could not restore page {key!r}: {error}")
+            self.open_dashboard()
 
     def update_dataset_state(self):
         self.analysis_result = {}

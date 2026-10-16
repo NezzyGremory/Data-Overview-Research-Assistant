@@ -147,3 +147,4 @@ def test_graph_history_stack_undo_redo():
     # Redo to s2
     redo2 = stack.redo()
     assert redo2 == s2
+

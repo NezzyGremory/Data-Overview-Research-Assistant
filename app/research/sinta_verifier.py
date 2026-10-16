@@ -227,6 +227,7 @@ class SintaVerifier:
         self._search_cache: Dict[str, str] = {}
         self._profile_cache: Dict[str, str] = {}
         self._gemini_candidate_cache: Dict[str, Optional[Dict[str, str]]] = {}
+        self._gemini_candidate_failure_cache: Dict[str, tuple[str, float]] = {}
         self._client: Optional[httpx.Client] = None
 
     def close(self):
@@ -826,6 +827,12 @@ class SintaVerifier:
             if self.normalize_issn(value)
         ))
         cache_key = "|".join((";".join(normalized_issns), self.normalize_name(journal_name)))
+        cached_failure = self._gemini_candidate_failure_cache.get(cache_key)
+        if cached_failure:
+            note, retry_after = cached_failure
+            if time.monotonic() < retry_after:
+                return None, note
+            self._gemini_candidate_failure_cache.pop(cache_key, None)
         if cache_key in self._gemini_candidate_cache:
             cached = self._gemini_candidate_cache[cache_key]
             return cached, "" if cached else "Gemini belum menemukan profil resmi yang dapat dicocokkan."
@@ -864,7 +871,8 @@ class SintaVerifier:
                 "propertyOrdering": ["profile_url", "journal_name", "matched_issn", "evidence"],
             }
             response = None
-            deadline = time.monotonic() + 35.0
+            deadline = time.monotonic() + 20.0
+            quota_limited = False
             for model in models:
                 next_model = False
                 for key in keys:
@@ -906,6 +914,16 @@ class SintaVerifier:
                             next_model = True
                             break
                         if response.status_code in {401, 403}:
+                            response_detail = str(response.text or "").lower()
+                            if response.status_code == 403 and any(
+                                marker in response_detail
+                                for marker in ("quota", "resource_exhausted", "rate limit")
+                            ):
+                                quota_limited = True
+                                break
+                            break
+                        if response.status_code == 429:
+                            quota_limited = True
                             break
                         if response.status_code in {408, 429, 500, 502, 503, 504} and attempt < 2:
                             time.sleep(min(0.4 * attempt, max(0.0, deadline - time.monotonic())))
@@ -913,12 +931,19 @@ class SintaVerifier:
                         break
                     if response is not None and response.status_code == 200:
                         break
-                    if next_model or time.monotonic() >= deadline:
+                    if next_model or quota_limited or time.monotonic() >= deadline:
                         break
                 if response is not None and response.status_code == 200:
                     break
-                if time.monotonic() >= deadline:
+                if quota_limited or time.monotonic() >= deadline:
                     break
+            if quota_limited:
+                note = (
+                    "Batas permintaan Gemini tercapai. Bantuan Gemini dilewati untuk jurnal ini; "
+                    "hasil tetap hanya ditentukan dari pemeriksaan sumber resmi SINTA."
+                )
+                self._gemini_candidate_failure_cache[cache_key] = (note, time.monotonic() + 60.0)
+                return None, note
             if response is None:
                 return None, "Gemini belum dapat menemukan profil; pemeriksaan dapat dicoba kembali."
             response.raise_for_status()

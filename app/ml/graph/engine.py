@@ -407,6 +407,7 @@ def _make_estimator(method_id, params):
 
 def _train(inputs, params, context):
     from sklearn.base import clone
+    from sklearn.pipeline import Pipeline
     frame, estimator = inputs["train"], inputs["estimator"]
     task = params.get("task", "classification")
     target = params.get("target")
@@ -419,7 +420,31 @@ def _train(inputs, params, context):
     if target not in frame.columns:
         raise ValueError(f"Target '{target}' tidak ditemukan pada data train.")
     model = clone(estimator)
-    model.fit(frame.drop(columns=[target]), frame[target])
+    features = frame.drop(columns=[target])
+    labels = frame[target]
+    categorical = features.select_dtypes(exclude="number").columns.tolist()
+    if categorical and task in {"classification", "regression"} and not isinstance(model, Pipeline):
+        from sklearn.compose import ColumnTransformer
+        from sklearn.impute import SimpleImputer
+        from sklearn.preprocessing import OneHotEncoder
+
+        numeric = features.select_dtypes(include="number").columns.tolist()
+        transformers = []
+        if numeric:
+            numeric_pipe = Pipeline([
+                ("imputer", SimpleImputer(strategy="median")),
+            ])
+            transformers.append(("numeric", numeric_pipe, numeric))
+        categorical_pipe = Pipeline([
+            ("imputer", SimpleImputer(strategy="most_frequent")),
+            ("encoder", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
+        ])
+        transformers.append(("categorical", categorical_pipe, categorical))
+        model = Pipeline([
+            ("preprocessor", ColumnTransformer(transformers)),
+            ("estimator", model),
+        ])
+    model.fit(features, labels)
     return {"model": {"estimator": model, "target": target, "task": task}}
 
 

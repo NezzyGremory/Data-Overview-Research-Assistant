@@ -183,9 +183,19 @@ QWidget {
 
 #nodeEditorDatasetStatus {
     color: #2563A8;
-    font-size: @px(10);
+    font-size: @px(11);
     font-weight: 700;
-    padding: @px(4) @px(8);
+    padding: @px(3) @px(2);
+}
+
+#nodeEditorTaskStatus {
+    background: #EAF4FF;
+    border: @px(1) solid #C7DFF8;
+    border-radius: @px(7);
+    color: #245B8F;
+    font-size: @px(11);
+    font-weight: 700;
+    padding: @px(5) @px(10);
 }
 
 #nodeEditorRunStatus {
@@ -239,6 +249,83 @@ QSplitter#nodeEditorSplitter::handle:hover {
     font-size: @px(10);
     font-weight: 700;
 }
+
+QSplitter#nodeEditorWorkspaceSplitter::handle {
+    background: #E8EFF8;
+    height: @px(6);
+}
+QSplitter#nodeEditorWorkspaceSplitter::handle:hover {
+    background: #9BC6F3;
+}
+#nodeEditorHelp {
+    background: #F7FAFE;
+    border: @px(1) solid #E3ECF7;
+    border-radius: @px(8);
+    color: #526579;
+    font-size: @px(10);
+    padding: @px(10);
+}
+#nodeEditorPreviewCombo {
+    min-height: @px(30);
+}
+#nodeEditorTemplateCombo,
+#nodeEditorWorkflowFilter,
+#nodeEditorMetricModel,
+#nodeEditorDatasetScope {
+    min-height: @px(30);
+}
+#nodeEditorMetricCard {
+    background: #F7FAFE;
+    border: @px(1) solid #DCE8F7;
+    border-radius: @px(8);
+}
+#nodeEditorMetricLabel {
+    color: #64748B;
+    font-size: @px(10);
+    font-weight: 600;
+}
+#nodeEditorMetricValue {
+    color: #145B9B;
+    font-size: @px(17);
+    font-weight: 700;
+}
+#nodeEditorSectionTitle {
+    color: #26364A;
+    font-size: @px(12);
+    font-weight: 700;
+}
+#nodeEditorEmptyState {
+    color: #64748B;
+    padding: @px(8);
+}
+#nodeEditorTable {
+    background: #FFFFFF;
+    alternate-background-color: #F7FAFE;
+    border: @px(1) solid #DCE8F7;
+    border-radius: @px(8);
+    color: #26364A;
+    gridline-color: #E8EEF6;
+    selection-background-color: #DCEAFF;
+    selection-color: #172033;
+}
+#nodeEditorTable::item { padding: @px(4) @px(7); }
+#nodeEditorTable QHeaderView::section {
+    background: #F1F6FC;
+    border: none;
+    border-bottom: @px(1) solid #DCE8F7;
+    border-right: @px(1) solid #E5ECF5;
+    color: #42546B;
+    font-size: @px(10);
+    font-weight: 600;
+    padding: @px(6) @px(8);
+}
+#nodeEditorProblems {
+    background: #FFFFFF;
+    border: @px(1) solid #DCE8F7;
+    border-radius: @px(8);
+    padding: @px(4);
+}
+#nodeEditorProblems::item { padding: @px(7) @px(8); }
 
 #sectionTitle {
     color: #122033;

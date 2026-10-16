@@ -38,6 +38,13 @@ PACKAGE_WHITELIST: Dict[str, Dict[str, Any]] = {
         "category": "Imbalanced Data",
         "import_name": "imblearn",
     },
+    "optuna": {
+        "pip_name": "optuna",
+        "pinned": "optuna>=3.6.0",
+        "est_size_mb": 20,
+        "category": "Hyperparameter Tuning",
+        "import_name": "optuna",
+    },
     "shap": {
         "pip_name": "shap",
         "pinned": "shap>=0.44.0",

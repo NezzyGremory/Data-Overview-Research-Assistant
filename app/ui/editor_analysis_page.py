@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import base64
+import copy
 import hashlib
+import html
 import json
 import os
 import re
 import shlex
 import sys
 import sysconfig
+import uuid
 from pathlib import Path
 
 from app.ui.scale import logical_width
@@ -48,10 +51,12 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
     QPlainTextEdit,
+    QTextBrowser,
     QTextEdit,
     QTabWidget,
     QVBoxLayout,
@@ -107,6 +112,7 @@ class PythonCodeHighlighter(QSyntaxHighlighter):
 
 class PythonCodeEditor(QPlainTextEdit):
     runRequested = Signal()
+    runAndAdvanceRequested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -178,6 +184,10 @@ class PythonCodeEditor(QPlainTextEdit):
         )
 
     def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter) and event.modifiers() & Qt.ShiftModifier:
+            self.runAndAdvanceRequested.emit()
+            event.accept()
+            return
         if event.key() in (Qt.Key_Return, Qt.Key_Enter) and event.modifiers() & Qt.ControlModifier:
             self.runRequested.emit()
             event.accept()
@@ -329,7 +339,13 @@ X_train, X_test, y_train, y_test = train_test_split(
 )
 model = RandomForestClassifier(n_estimators=200, random_state=42, class_weight="balanced")
 model.fit(X_train, y_train)
-print(classification_report(y_test, model.predict(X_test)))
+report = pd.DataFrame(classification_report(
+    y_test, model.predict(X_test), output_dict=True, zero_division=0
+)).T
+for metric in ("precision", "recall", "f1-score"):
+    if metric in report:
+        report[metric] = report[metric].map(lambda score: f"{score:.1%}" if pd.notna(score) else "")
+display(report)
 ''',
         "Gradient Boosting": '''# Template ensemble: Gradient Boosting untuk klasifikasi
 # Pastikan fitur sudah numerik dan tentukan kolom target yang benar.
@@ -345,7 +361,13 @@ X_train, X_test, y_train, y_test = train_test_split(
 )
 model = HistGradientBoostingClassifier(max_iter=150, random_state=42)
 model.fit(X_train, y_train)
-print(classification_report(y_test, model.predict(X_test)))
+report = pd.DataFrame(classification_report(
+    y_test, model.predict(X_test), output_dict=True, zero_division=0
+)).T
+for metric in ("precision", "recall", "f1-score"):
+    if metric in report:
+        report[metric] = report[metric].map(lambda score: f"{score:.1%}" if pd.notna(score) else "")
+display(report)
 ''',
         "XGBoost": '''# Template ensemble: XGBoost untuk klasifikasi
 # XGBoost harus dipasang terpisah dan fitur kategorikal perlu di-encode.
@@ -362,16 +384,35 @@ X_train, X_test, y_train, y_test = train_test_split(
 )
 model = XGBClassifier(n_estimators=200, learning_rate=0.05, max_depth=5, eval_metric="logloss")
 model.fit(X_train, y_train)
-print(classification_report(y_test, model.predict(X_test)))
+report = pd.DataFrame(classification_report(
+    y_test, model.predict(X_test), output_dict=True, zero_division=0
+)).T
+for metric in ("precision", "recall", "f1-score"):
+    if metric in report:
+        report[metric] = report[metric].map(lambda score: f"{score:.1%}" if pd.notna(score) else "")
+display(report)
 ''',
         "Evaluasi Model": '''# Evaluasi klasifikasi pada data uji
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report
 
 y_pred = model.predict(X_test)
-print(f"Accuracy : {accuracy_score(y_test, y_pred):.3f}")
-print(f"Precision: {precision_score(y_test, y_pred, average='weighted', zero_division=0):.3f}")
-print(f"Recall   : {recall_score(y_test, y_pred, average='weighted', zero_division=0):.3f}")
-print(f"F1-score : {f1_score(y_test, y_pred, average='weighted', zero_division=0):.3f}")
+print(f"Accuracy : {accuracy_score(y_test, y_pred):.1%}")
+print(f"Precision: {precision_score(y_test, y_pred, average='weighted', zero_division=0):.1%}")
+print(f"Recall   : {recall_score(y_test, y_pred, average='weighted', zero_division=0):.1%}")
+print(f"F1-score : {f1_score(y_test, y_pred, average='weighted', zero_division=0):.1%}")
+report = pd.DataFrame(classification_report(
+    y_test, y_pred, output_dict=True, zero_division=0
+)).T
+for metric in ("precision", "recall", "f1-score"):
+    if metric in report:
+        report[metric] = report[metric].map(
+            lambda score: f"{score:.1%}" if pd.notna(score) else ""
+        )
+if "support" in report:
+    report["support"] = report["support"].map(
+        lambda count: f"{count:,.0f}" if pd.notna(count) else ""
+    )
+display(report)
 ''',
     }
 
@@ -578,7 +619,13 @@ plt.tight_layout()
         "Evaluasi Model": {
             "Evaluasi klasifikasi + confusion matrix": '''# Memerlukan y_test dan y_pred dari model klasifikasi
 from sklearn.metrics import classification_report, ConfusionMatrixDisplay
-print(classification_report(y_test, y_pred, zero_division=0))
+report = pd.DataFrame(classification_report(
+    y_test, y_pred, output_dict=True, zero_division=0
+)).T
+for metric in ("precision", "recall", "f1-score"):
+    if metric in report:
+        report[metric] = report[metric].map(lambda score: f"{score:.1%}" if pd.notna(score) else "")
+display(report)
 ConfusionMatrixDisplay.from_predictions(y_test, y_pred, cmap="Blues", xticks_rotation=45)
 plt.title("Confusion matrix")
 plt.tight_layout()
@@ -610,10 +657,15 @@ print(f"Rata-rata: {scores.mean():.3f} ± {scores.std():.3f}")
     def __init__(self, parent=None):
         super().__init__(parent)
         self._main_window = parent
-        self._steps: list[dict[str, str]] = []
+        self._steps: list[dict] = []
         self._selected_step = -1
         self._dataframe = None
         self._dataset_name = ""
+        self._dataset_scope = "workspace"
+        self._workspace_dataframe = None
+        self._workspace_dataset_name = ""
+        self._custom_dataframe = None
+        self._custom_dataset_path = ""
         self._project_key = ""
         self._project_workspace: Path | None = None
         self._project_environment: Path | None = None
@@ -630,10 +682,22 @@ print(f"Rata-rata: {scores.mean():.3f} ± {scores.std():.3f}")
         self._execution_completed = 0
         self._running_step_index = -1
         self._queue_had_error = False
+        self._advance_after_run = False
+        self._execution_controls_locked = False
         self._package_process: QProcess | None = None
         self._package_log = ""
         self._installing_packages: list[str] = []
         self._notebook_path: Path | None = None
+        self._notebook_metadata: dict = {}
+        self._notebook_minor = 5
+        self._notebook_dirty = False
+        self._autosave_restored = False
+        self._autosave_project_key = ""
+        self._autosave_timer = QTimer(self)
+        self._autosave_timer.setSingleShot(True)
+        self._autosave_timer.setInterval(700)
+        self._autosave_timer.timeout.connect(self._save_autosave_state)
+        self._initializing = True
         self._run_timeout = QTimer(self)
         self._run_timeout.setSingleShot(True)
         self._run_timeout.timeout.connect(self._on_run_timeout)
@@ -641,6 +705,7 @@ print(f"Rata-rata: {scores.mean():.3f} ± {scores.std():.3f}")
         self.template_groups = self._build_template_groups()
         application = QApplication.instance()
         if application is not None:
+            application.aboutToQuit.connect(self._save_autosave_on_exit)
             application.aboutToQuit.connect(self._terminate_process_on_exit)
 
         outer = QVBoxLayout(self)
@@ -671,6 +736,19 @@ print(f"Rata-rata: {scores.mean():.3f} ± {scores.std():.3f}")
         title_block.addWidget(title)
         title_block.addWidget(subtitle)
         header.addLayout(title_block, 1)
+        self.dataset_scope_combo = QComboBox()
+        self.dataset_scope_combo.setObjectName("editorAnalysisDatasetScope")
+        self.dataset_scope_combo.addItem("Ikuti Workspace", "workspace")
+        self.dataset_scope_combo.addItem("Dataset notebook", "custom")
+        self.dataset_scope_combo.setToolTip(
+            "Pilih dataset Workspace atau file dataset khusus notebook ini."
+        )
+        self.dataset_scope_combo.currentIndexChanged.connect(self._dataset_scope_changed)
+        header.addWidget(self.dataset_scope_combo, 0, Qt.AlignTop)
+        self.choose_dataset_button = QPushButton("Pilih dataset")
+        self.choose_dataset_button.setObjectName("secondaryButton")
+        self.choose_dataset_button.clicked.connect(self._choose_notebook_dataset)
+        header.addWidget(self.choose_dataset_button, 0, Qt.AlignTop)
         self.dataset_badge = QLabel("Dataset belum dimuat")
         self.dataset_badge.setObjectName("editorAnalysisDatasetBadge")
         header.addWidget(self.dataset_badge, 0, Qt.AlignTop)
@@ -701,18 +779,24 @@ print(f"Rata-rata: {scores.mean():.3f} ± {scores.std():.3f}")
                 "description": description,
                 "category": self.STEP_CATEGORIES.get(index, "Data Profiling"),
                 "template": self.STEP_TEMPLATES.get(index, "Data Understanding"),
+                "cell_type": "code",
+                "cell_id": uuid.uuid4().hex[:8],
                 "code": self.template_groups[
                     self.STEP_CATEGORIES.get(index, "Data Profiling")
                 ][self.STEP_TEMPLATES.get(index, "Ringkasan dataset")],
                 "output": "",
                 "charts": [],
+                "rich_outputs": [],
                 "execution_count": None,
+                "notebook_outputs": None,
+                "notebook_metadata": {},
             }
             for index, (title, description) in enumerate(self.STEPS)
         ]
         self._populate_step_list()
         self.step_list.setCurrentRow(0)
         self.set_dataset(None, "")
+        self._initializing = False
         self._apply_responsive_layout(self.width())
 
     def _build_template_groups(self):
@@ -808,9 +892,21 @@ if hasattr(model.named_steps["model"], "n_neighbors"):
     model.set_params(model__n_neighbors=min(model.named_steps["model"].n_neighbors, len(X_train)))
 model.fit(X_train, y_train)
 y_pred = model.predict(X_test)
-print(f"Accuracy: {{accuracy_score(y_test, y_pred):.3f}}")
-print(f"F1 weighted: {{f1_score(y_test, y_pred, average='weighted', zero_division=0):.3f}}")
-print(classification_report(y_test, y_pred, zero_division=0))
+print(f"Accuracy: {{accuracy_score(y_test, y_pred):.1%}}")
+print(f"F1 weighted: {{f1_score(y_test, y_pred, average='weighted', zero_division=0):.1%}}")
+report = pd.DataFrame(classification_report(
+    y_test, y_pred, output_dict=True, zero_division=0
+)).T
+for metric in ("precision", "recall", "f1-score"):
+    if metric in report:
+        report[metric] = report[metric].map(
+            lambda score: f"{{score:.1%}}" if pd.notna(score) else ""
+        )
+if "support" in report:
+    report["support"] = report["support"].map(
+        lambda count: f"{{count:,.0f}}" if pd.notna(count) else ""
+    )
+display(report)
 ConfusionMatrixDisplay.from_predictions(y_test, y_pred, cmap="Blues")
 plt.title("Confusion matrix · {estimator.split('(')[0]}")
 plt.tight_layout()
@@ -961,10 +1057,36 @@ plt.tight_layout()
         self.step_list.setObjectName("editorAnalysisStepList")
         self.step_list.currentRowChanged.connect(self._select_step)
         layout.addWidget(self.step_list, 1)
-        self.add_step_button = QPushButton("Tambah langkah")
+        add_row = QHBoxLayout()
+        self.add_step_button = QPushButton("Tambah kode")
         self.add_step_button.setObjectName("secondaryButton")
         self.add_step_button.clicked.connect(self._add_step)
-        layout.addWidget(self.add_step_button)
+        add_row.addWidget(self.add_step_button)
+        self.add_markdown_button = QPushButton("Tambah teks")
+        self.add_markdown_button.setObjectName("secondaryButton")
+        self.add_markdown_button.clicked.connect(self._add_markdown_cell)
+        add_row.addWidget(self.add_markdown_button)
+        layout.addLayout(add_row)
+        cell_actions = QHBoxLayout()
+        self.move_cell_up_button = QPushButton("Naik")
+        self.move_cell_up_button.setObjectName("secondaryButton")
+        self.move_cell_up_button.clicked.connect(lambda: self._move_step(-1))
+        cell_actions.addWidget(self.move_cell_up_button)
+        self.move_cell_down_button = QPushButton("Turun")
+        self.move_cell_down_button.setObjectName("secondaryButton")
+        self.move_cell_down_button.clicked.connect(lambda: self._move_step(1))
+        cell_actions.addWidget(self.move_cell_down_button)
+        layout.addLayout(cell_actions)
+        cell_actions = QHBoxLayout()
+        self.duplicate_cell_button = QPushButton("Duplikat")
+        self.duplicate_cell_button.setObjectName("secondaryButton")
+        self.duplicate_cell_button.clicked.connect(self._duplicate_step)
+        cell_actions.addWidget(self.duplicate_cell_button)
+        self.delete_cell_button = QPushButton("Hapus")
+        self.delete_cell_button.setObjectName("secondaryButton")
+        self.delete_cell_button.clicked.connect(self._delete_step)
+        cell_actions.addWidget(self.delete_cell_button)
+        layout.addLayout(cell_actions)
         apply_card_shadow(card)
         return card
 
@@ -994,15 +1116,65 @@ plt.tight_layout()
         self.restart_kernel_button.setObjectName("secondaryButton")
         self.restart_kernel_button.clicked.connect(self._restart_kernel)
         self.notebook_toolbar.addWidget(self.restart_kernel_button)
+        self.notebook_status_label = QLabel("Notebook belum disimpan")
+        self.notebook_status_label.setObjectName("editorAnalysisMuted")
+        self.notebook_toolbar.addWidget(self.notebook_status_label)
         self.notebook_toolbar.addStretch(1)
         layout.addLayout(self.notebook_toolbar)
+
+        cell_toolbar = QHBoxLayout()
+        cell_toolbar.addWidget(QLabel("Jenis sel"))
+        self.cell_type_combo = QComboBox()
+        self.cell_type_combo.setObjectName("editorAnalysisCategoryCombo")
+        self.cell_type_combo.addItem("Kode", "code")
+        self.cell_type_combo.addItem("Markdown", "markdown")
+        self.cell_type_combo.addItem("Raw", "raw")
+        self.cell_type_combo.currentIndexChanged.connect(self._cell_type_changed)
+        cell_toolbar.addWidget(self.cell_type_combo)
+        cell_toolbar.addStretch(1)
+        layout.addLayout(cell_toolbar)
+
+        execution_row = QHBoxLayout()
+        self.execution_note = QLabel(
+            "Ctrl+Enter menjalankan sel. Shift+Enter menjalankan lalu berpindah ke sel berikutnya."
+        )
+        self.execution_note.setObjectName("editorAnalysisExecutionNote")
+        self.execution_note.setWordWrap(True)
+        self._run_opacity_effect = QGraphicsOpacityEffect(self.execution_note)
+        self._run_opacity_effect.setOpacity(1.0)
+        self.execution_note.setGraphicsEffect(self._run_opacity_effect)
+        self._run_animation = QPropertyAnimation(self._run_opacity_effect, b"opacity", self)
+        self._run_animation.setDuration(850)
+        self._run_animation.setStartValue(0.45)
+        self._run_animation.setEndValue(1.0)
+        self._run_animation.setEasingCurve(QEasingCurve.InOutSine)
+        self._run_animation.setLoopCount(-1)
+        execution_row.addWidget(self.execution_note, 1)
+        self.run_button = QPushButton("Jalankan sel")
+        self.run_button.setObjectName("primaryButton")
+        self.run_button.setEnabled(False)
+        self.run_button.setToolTip("Jalankan kode pada sel yang dipilih.")
+        self.run_button.clicked.connect(self._execute_code)
+        execution_row.addWidget(self.run_button)
+        self.run_all_button = QPushButton("Jalankan semua")
+        self.run_all_button.setObjectName("secondaryButton")
+        self.run_all_button.setEnabled(False)
+        self.run_all_button.setToolTip("Jalankan semua sel kode secara berurutan dalam satu sesi Python.")
+        self.run_all_button.clicked.connect(self._run_all)
+        execution_row.addWidget(self.run_all_button)
+        self.cancel_button = QPushButton("Hentikan")
+        self.cancel_button.setObjectName("secondaryButton")
+        self.cancel_button.setEnabled(False)
+        self.cancel_button.clicked.connect(self._terminate_run)
+        execution_row.addWidget(self.cancel_button)
+        layout.addLayout(execution_row)
 
         self.template_toolbar = QHBoxLayout()
         self.template_toolbar.setSpacing(12)
         category_block = QVBoxLayout()
-        category_label = QLabel("Kelompok template")
-        category_label.setObjectName("editorAnalysisFieldLabel")
-        category_block.addWidget(category_label)
+        self.category_label = QLabel("Kelompok template")
+        self.category_label.setObjectName("editorAnalysisFieldLabel")
+        category_block.addWidget(self.category_label)
         self.template_category_combo = QComboBox()
         self.template_category_combo.setObjectName("editorAnalysisCategoryCombo")
         self.template_category_combo.addItems(self.template_groups.keys())
@@ -1010,9 +1182,9 @@ plt.tight_layout()
         category_block.addWidget(self.template_category_combo)
         self.template_toolbar.addLayout(category_block, 1)
         template_block = QVBoxLayout()
-        template_label = QLabel("Pilih template")
-        template_label.setObjectName("editorAnalysisFieldLabel")
-        template_block.addWidget(template_label)
+        self.template_label = QLabel("Pilih template")
+        self.template_label.setObjectName("editorAnalysisFieldLabel")
+        template_block.addWidget(self.template_label)
         self.template_combo = QComboBox()
         self.template_combo.setObjectName("editorAnalysisTemplateCombo")
         self.template_combo.currentTextChanged.connect(self._apply_template)
@@ -1048,9 +1220,9 @@ plt.tight_layout()
         layout.addWidget(self.library_status)
 
         editor_heading = QHBoxLayout()
-        code_label = QLabel("Kode Python")
-        code_label.setObjectName("editorAnalysisFieldLabel")
-        editor_heading.addWidget(code_label)
+        self.editor_code_label = QLabel("Kode Python")
+        self.editor_code_label.setObjectName("editorAnalysisFieldLabel")
+        editor_heading.addWidget(self.editor_code_label)
         editor_heading.addStretch(1)
         self.copy_button = QPushButton("Salin kode")
         self.copy_button.setObjectName("secondaryButton")
@@ -1101,12 +1273,20 @@ plt.tight_layout()
         self.code_editor.setTabStopDistance(self.code_editor.fontMetrics().horizontalAdvance(" ") * 4)
         self.code_highlighter = PythonCodeHighlighter(self.code_editor.document())
         self.code_editor.runRequested.connect(self._execute_code)
+        self.code_editor.runAndAdvanceRequested.connect(self._execute_code_and_advance)
         self.code_editor.setToolTip("Ctrl+Enter untuk menjalankan kode yang sedang dipilih.")
         self.code_editor.setMinimumHeight(300)
         self.code_editor.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.code_editor.textChanged.connect(self._save_current_code)
         self.code_editor.cursorPositionChanged.connect(self._update_cursor_status)
         layout.addWidget(self.code_editor, 1)
+
+        self.markdown_preview = QTextBrowser()
+        self.markdown_preview.setObjectName("editorAnalysisMarkdownPreview")
+        self.markdown_preview.setOpenExternalLinks(False)
+        self.markdown_preview.setMinimumHeight(120)
+        self.markdown_preview.hide()
+        layout.addWidget(self.markdown_preview)
 
         self.code_statusbar = QFrame()
         self.code_statusbar.setObjectName("editorAnalysisCodeStatusbar")
@@ -1130,11 +1310,16 @@ plt.tight_layout()
         layout.addWidget(output_title)
         self.output_tabs = QTabWidget()
         self.output_tabs.setObjectName("editorAnalysisOutputTabs")
-        self.output_text = QPlainTextEdit()
+        cell_output_panel = QWidget()
+        cell_output_layout = QVBoxLayout(cell_output_panel)
+        cell_output_layout.setContentsMargins(8, 8, 8, 8)
+        cell_output_layout.setSpacing(8)
+        self.output_text = QTextBrowser()
         self.output_text.setObjectName("editorAnalysisOutputText")
-        self.output_text.setReadOnly(True)
-        self.output_text.setPlaceholderText("Teks hasil dan pesan proses akan tampil di sini.")
-        self.output_tabs.addTab(self.output_text, "Output teks")
+        self.output_text.setOpenExternalLinks(False)
+        self.output_text.setHtml("<p>Teks hasil dan pesan proses akan tampil di sini.</p>")
+        self.output_text.setMinimumHeight(80)
+        cell_output_layout.addWidget(self.output_text, 1)
 
         self.graphics_scroll = QScrollArea()
         self.graphics_scroll.setObjectName("editorAnalysisGraphicsScroll")
@@ -1151,7 +1336,9 @@ plt.tight_layout()
         self.graphics_layout.addWidget(self.graphics_empty)
         self.graphics_layout.addStretch(1)
         self.graphics_scroll.setWidget(self.graphics_content)
-        self.output_tabs.addTab(self.graphics_scroll, "Grafik")
+        self.graphics_scroll.setMinimumHeight(140)
+        cell_output_layout.addWidget(self.graphics_scroll, 1)
+        self.output_tabs.addTab(cell_output_panel, "Output sel")
 
         self.library_output = QPlainTextEdit()
         self.library_output.setObjectName("editorAnalysisOutputText")
@@ -1161,40 +1348,6 @@ plt.tight_layout()
         self.output_tabs.setMinimumHeight(210)
         layout.addWidget(self.output_tabs)
 
-        execution_row = QHBoxLayout()
-        self.execution_note = QLabel(
-            "Eksekusi berjalan maksimal 120 detik. Perubahan hanya berlaku pada salinan dataset."
-        )
-        self.execution_note.setObjectName("editorAnalysisExecutionNote")
-        self.execution_note.setWordWrap(True)
-        self._run_opacity_effect = QGraphicsOpacityEffect(self.execution_note)
-        self._run_opacity_effect.setOpacity(1.0)
-        self.execution_note.setGraphicsEffect(self._run_opacity_effect)
-        self._run_animation = QPropertyAnimation(self._run_opacity_effect, b"opacity", self)
-        self._run_animation.setDuration(850)
-        self._run_animation.setStartValue(0.45)
-        self._run_animation.setEndValue(1.0)
-        self._run_animation.setEasingCurve(QEasingCurve.InOutSine)
-        self._run_animation.setLoopCount(-1)
-        execution_row.addWidget(self.execution_note, 1)
-        self.run_button = QPushButton("Jalankan kode")
-        self.run_button.setObjectName("primaryButton")
-        self.run_button.setEnabled(False)
-        self.run_button.setToolTip("Jalankan kode yang sedang dipilih pada salinan dataset aktif.")
-        self.run_button.clicked.connect(self._execute_code)
-        execution_row.addWidget(self.run_button)
-        self.run_all_button = QPushButton("Jalankan semua")
-        self.run_all_button.setObjectName("secondaryButton")
-        self.run_all_button.setEnabled(False)
-        self.run_all_button.setToolTip("Jalankan semua tahapan secara berurutan dalam satu sesi Python.")
-        self.run_all_button.clicked.connect(self._run_all)
-        execution_row.addWidget(self.run_all_button)
-        self.cancel_button = QPushButton("Hentikan")
-        self.cancel_button.setObjectName("secondaryButton")
-        self.cancel_button.setEnabled(False)
-        self.cancel_button.clicked.connect(self._terminate_run)
-        execution_row.addWidget(self.cancel_button)
-        layout.addLayout(execution_row)
         apply_card_shadow(card)
         return card
 
@@ -1202,10 +1355,61 @@ plt.tight_layout()
         self.step_list.blockSignals(True)
         self.step_list.clear()
         for index, step in enumerate(self._steps, start=1):
-            item = QListWidgetItem(f"{index:02d}   {step['title']}")
+            cell_type = step.get("cell_type", "code")
+            type_label = {"code": "Kode", "markdown": "Teks", "raw": "Raw"}.get(cell_type, "Kode")
+            run_state = "  !" if step.get("has_error") else (
+                f"  [{step['execution_count']}]" if step.get("execution_count") else ""
+            )
+            item = QListWidgetItem(f"{index:02d}  {type_label}  {step['title']}{run_state}")
             item.setToolTip(step["description"])
             self.step_list.addItem(item)
         self.step_list.blockSignals(False)
+        self._update_cell_controls()
+
+    def _update_cell_controls(self):
+        has_cell = 0 <= self._selected_step < len(self._steps)
+        controls_enabled = not self._execution_controls_locked
+        if hasattr(self, "move_cell_up_button"):
+            self.move_cell_up_button.setEnabled(controls_enabled and has_cell and self._selected_step > 0)
+            self.move_cell_down_button.setEnabled(
+                controls_enabled and has_cell and self._selected_step < len(self._steps) - 1
+            )
+            self.duplicate_cell_button.setEnabled(controls_enabled and has_cell)
+            self.delete_cell_button.setEnabled(controls_enabled and has_cell and len(self._steps) > 1)
+            self.add_step_button.setEnabled(controls_enabled)
+            self.add_markdown_button.setEnabled(controls_enabled)
+            self.step_list.setEnabled(controls_enabled)
+
+    def _set_execution_controls_locked(self, locked: bool):
+        self._execution_controls_locked = bool(locked)
+        for widget_name in (
+            "dataset_scope_combo",
+            "choose_dataset_button",
+            "open_notebook_button",
+            "save_notebook_button",
+            "restart_kernel_button",
+            "cell_type_combo",
+            "template_category_combo",
+            "template_combo",
+            "reset_button",
+            "target_combo",
+            "code_editor",
+        ):
+            widget = getattr(self, widget_name, None)
+            if widget is not None:
+                widget.setEnabled(not locked)
+        if not locked:
+            has_cell = 0 <= self._selected_step < len(self._steps)
+            is_code = has_cell and self._steps[self._selected_step].get("cell_type", "code") == "code"
+            self.cell_type_combo.setEnabled(has_cell)
+            self.code_editor.setEnabled(has_cell)
+            self.template_category_combo.setEnabled(is_code)
+            self.template_combo.setEnabled(is_code)
+            self.reset_button.setEnabled(is_code)
+            self.target_combo.setEnabled(
+                is_code and self._dataframe is not None and self.target_combo.count() > 0
+            )
+        self._update_cell_controls()
 
     def _update_cursor_status(self):
         cursor = self.code_editor.textCursor()
@@ -1249,7 +1453,242 @@ plt.tight_layout()
 
     def _save_current_code(self):
         if 0 <= self._selected_step < len(self._steps):
-            self._steps[self._selected_step]["code"] = self.code_editor.toPlainText()
+            step = self._steps[self._selected_step]
+            source = self.code_editor.toPlainText()
+            if source != step.get("code", ""):
+                step["code"] = source
+                self._mark_notebook_dirty()
+            if step.get("cell_type") == "markdown" and hasattr(self, "markdown_preview"):
+                self.markdown_preview.setMarkdown(source)
+
+    def _mark_notebook_dirty(self):
+        self._notebook_dirty = True
+        if hasattr(self, "notebook_status_label"):
+            self.notebook_status_label.setText("Perubahan belum disimpan")
+        self._schedule_autosave()
+
+    def _autosave_file_path(self) -> Path:
+        app_data = QStandardPaths.writableLocation(QStandardPaths.AppLocalDataLocation)
+        app_data_root = Path(app_data) if app_data else Path.home() / ".dora"
+        return app_data_root / "editor_analysis" / "autosave.json"
+
+    def _schedule_autosave(self):
+        if not self._initializing and hasattr(self, "_autosave_timer"):
+            self._autosave_timer.start()
+
+    def _save_autosave_state(self):
+        if not hasattr(self, "code_editor"):
+            return True
+        self._save_current_code()
+        state = {
+            "version": 1,
+            "steps": self._steps,
+            "selected_step": self._selected_step,
+            "notebook_metadata": self._notebook_metadata,
+            "notebook_minor": self._notebook_minor,
+            "notebook_dirty": self._notebook_dirty,
+            "notebook_path": str(self._notebook_path) if self._notebook_path else "",
+            "dataset_scope": self._dataset_scope,
+            "custom_dataset_path": self._custom_dataset_path,
+            "project_key": self._project_key,
+        }
+        path = self._autosave_file_path()
+        temporary_path = path.with_suffix(path.suffix + ".tmp")
+        try:
+            serialized = json.dumps(state, ensure_ascii=False, indent=2)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temporary_path.write_text(serialized, encoding="utf-8")
+            temporary_path.replace(path)
+        except (OSError, TypeError, ValueError) as error:
+            if hasattr(self, "library_status"):
+                self.library_status.setText(f"Autosave lokal gagal: {error}")
+            return False
+        return True
+
+    def _save_autosave_on_exit(self):
+        self._autosave_timer.stop()
+        return self._save_autosave_state()
+
+    def _restore_autosave_state(self):
+        if self._autosave_restored:
+            return
+        self._autosave_restored = True
+        path = self._autosave_file_path()
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(state, dict) or state.get("version") != 1:
+                return
+            steps = state.get("steps")
+            if not isinstance(steps, list) or any(not isinstance(step, dict) for step in steps):
+                return
+            for index, step in enumerate(steps, start=1):
+                step.setdefault("title", f"Sel {index:02d}")
+                step.setdefault("description", "Dipulihkan dari autosave lokal.")
+                cell_type = step.get("cell_type", "code")
+                step["cell_type"] = (
+                    cell_type if isinstance(cell_type, str) and cell_type in {"code", "markdown", "raw"}
+                    else "code"
+                )
+                category = step.get("category", "Custom")
+                step["category"] = (
+                    category if isinstance(category, str) and category in self.template_groups else "Custom"
+                )
+                template = step.get("template", "Kode kosong")
+                available_templates = self.template_groups[step["category"]]
+                step["template"] = (
+                    template if isinstance(template, str) and template in available_templates
+                    else next(iter(available_templates))
+                )
+                step.setdefault("cell_id", uuid.uuid4().hex[:8])
+                step["title"] = str(step["title"])
+                step["description"] = str(step["description"])
+                step["code"] = str(step.get("code", ""))
+                step["output"] = str(step.get("output", ""))
+                if not isinstance(step.get("charts"), list):
+                    step["charts"] = []
+                if not isinstance(step.get("rich_outputs"), list):
+                    step["rich_outputs"] = []
+                step.setdefault("notebook_metadata", {})
+            self._steps = steps
+            self._selected_step = -1
+            try:
+                selected_step = int(state.get("selected_step", 0))
+            except (TypeError, ValueError):
+                selected_step = 0
+            self._notebook_metadata = (
+                copy.deepcopy(state.get("notebook_metadata"))
+                if isinstance(state.get("notebook_metadata"), dict)
+                else {}
+            )
+            try:
+                self._notebook_minor = int(state.get("notebook_minor", 5))
+            except (TypeError, ValueError):
+                self._notebook_minor = 5
+            notebook_path = state.get("notebook_path")
+            self._notebook_path = Path(notebook_path) if isinstance(notebook_path, str) and notebook_path else None
+            self._notebook_dirty = bool(state.get("notebook_dirty", True))
+            self._dataset_scope = (
+                "custom" if state.get("dataset_scope") == "custom" else "workspace"
+            )
+            self.dataset_scope_combo.blockSignals(True)
+            self.dataset_scope_combo.setCurrentIndex(
+                max(0, self.dataset_scope_combo.findData(self._dataset_scope))
+            )
+            self.dataset_scope_combo.blockSignals(False)
+            custom_path = state.get("custom_dataset_path")
+            self._custom_dataset_path = custom_path if isinstance(custom_path, str) else ""
+            project_key = state.get("project_key")
+            self._autosave_project_key = project_key if isinstance(project_key, str) else ""
+            self._populate_step_list()
+            if self._steps:
+                selected_step = max(0, min(selected_step, len(self._steps) - 1))
+                self.step_list.setCurrentRow(selected_step)
+            else:
+                self._select_step(-1)
+            self.notebook_status_label.setText("Progres dipulihkan dari autosave lokal")
+            self.library_status.setText(
+                f"{len(self._steps)} sel dipulihkan dari sesi sebelumnya."
+            )
+        except FileNotFoundError:
+            return
+        except (OSError, json.JSONDecodeError, TypeError, ValueError) as error:
+            self.library_status.setText(f"Autosave lokal tidak dapat dipulihkan: {error}")
+
+    def _insert_cell(self, cell_type: str, index: int | None = None):
+        if cell_type not in {"code", "markdown", "raw"}:
+            cell_type = "code"
+        if index is None:
+            index = self._selected_step + 1 if self._selected_step >= 0 else len(self._steps)
+        index = max(0, min(index, len(self._steps)))
+        is_code = cell_type == "code"
+        step = {
+            "title": "Langkah kustom" if is_code else "Catatan",
+            "description": "Tulis kode analisis." if is_code else "Tambahkan konteks dan catatan analisis.",
+            "category": "Custom",
+            "template": "Kode kosong" if is_code else "Teks Markdown",
+            "cell_type": cell_type,
+            "cell_id": uuid.uuid4().hex[:8],
+            "code": self.template_groups["Custom"]["Kode kosong"] if is_code else "",
+            "output": "",
+            "charts": [],
+            "rich_outputs": [],
+            "has_error": False,
+            "execution_count": None,
+            "notebook_outputs": None,
+            "notebook_metadata": {},
+        }
+        self._steps.insert(index, step)
+        self._populate_step_list()
+        self.step_list.setCurrentRow(index)
+        self._mark_notebook_dirty()
+
+    def _add_markdown_cell(self):
+        self._insert_cell("markdown")
+
+    def _cell_type_changed(self, index: int):
+        if not 0 <= self._selected_step < len(self._steps):
+            return
+        cell_type = self.cell_type_combo.itemData(index)
+        if cell_type not in {"code", "markdown", "raw"}:
+            return
+        step = self._steps[self._selected_step]
+        if step.get("cell_type", "code") == cell_type:
+            return
+        self._save_current_code()
+        step["cell_type"] = cell_type
+        step["output"] = ""
+        step["charts"] = []
+        step["rich_outputs"] = []
+        step["has_error"] = False
+        step["execution_count"] = None
+        step["notebook_outputs"] = None
+        if cell_type == "code" and step.get("category") not in self.template_groups:
+            step["category"] = "Custom"
+            step["template"] = "Kode kosong"
+        if cell_type == "markdown":
+            step["template"] = "Teks Markdown"
+        self._populate_step_list()
+        self.step_list.setCurrentRow(self._selected_step)
+        self._mark_notebook_dirty()
+
+    def _duplicate_step(self):
+        if not 0 <= self._selected_step < len(self._steps):
+            return
+        self._save_current_code()
+        duplicate = copy.deepcopy(self._steps[self._selected_step])
+        duplicate["cell_id"] = uuid.uuid4().hex[:8]
+        duplicate["title"] = f"{duplicate.get('title', 'Sel')} (salinan)"
+        duplicate["output"] = ""
+        duplicate["charts"] = []
+        duplicate["rich_outputs"] = []
+        duplicate["has_error"] = False
+        duplicate["execution_count"] = None
+        duplicate["notebook_outputs"] = None
+        index = self._selected_step + 1
+        self._steps.insert(index, duplicate)
+        self._populate_step_list()
+        self.step_list.setCurrentRow(index)
+        self._mark_notebook_dirty()
+
+    def _delete_step(self):
+        if len(self._steps) <= 1 or not 0 <= self._selected_step < len(self._steps):
+            return
+        index = self._selected_step
+        self._steps.pop(index)
+        self._populate_step_list()
+        self.step_list.setCurrentRow(min(index, len(self._steps) - 1))
+        self._mark_notebook_dirty()
+
+    def _move_step(self, offset: int):
+        index = self._selected_step
+        destination = index + offset
+        if not 0 <= index < len(self._steps) or not 0 <= destination < len(self._steps):
+            return
+        self._save_current_code()
+        self._steps[index], self._steps[destination] = self._steps[destination], self._steps[index]
+        self._populate_step_list()
+        self.step_list.setCurrentRow(destination)
+        self._mark_notebook_dirty()
 
     def _select_step(self, index: int):
         self._save_current_code()
@@ -1259,33 +1698,87 @@ plt.tight_layout()
             self._update_editor_file_label()
             self.step_description.clear()
             self.code_editor.clear()
+            self.markdown_preview.clear()
+            self.markdown_preview.hide()
+            self._set_cell_editing_mode("raw")
+            self.code_editor.setEnabled(False)
+            self.cell_type_combo.setEnabled(False)
+            self.template_category_combo.setEnabled(False)
+            self.template_combo.setEnabled(False)
             self._update_target_controls("")
+            self.target_combo.setEnabled(False)
             self.output_text.clear()
             self._clear_graphs()
+            self._update_cell_controls()
+            self._schedule_autosave()
             return
         self._selected_step = index
+        self.code_editor.setEnabled(not self._execution_controls_locked)
+        self.cell_type_combo.setEnabled(not self._execution_controls_locked)
         step = self._steps[index]
+        cell_type = step.get("cell_type", "code")
+        is_code = cell_type == "code"
         self._update_editor_file_label()
         self.step_title.setText(step["template"])
         self.step_description.setText(step["description"])
+        self.cell_type_combo.blockSignals(True)
+        self.cell_type_combo.setCurrentIndex(max(0, self.cell_type_combo.findData(cell_type)))
+        self.cell_type_combo.blockSignals(False)
         self.template_category_combo.blockSignals(True)
         self.template_category_combo.setCurrentText(step["category"])
         self.template_category_combo.blockSignals(False)
-        self.template_combo.blockSignals(True)
-        selected_template = self._fill_template_choices(step["category"], step["template"])
-        step["template"] = selected_template
-        self.step_title.setText(selected_template)
-        self.step_description.setText(self.CATEGORY_DESCRIPTIONS.get(step["category"], step["description"]))
-        self.template_combo.blockSignals(False)
+        if is_code:
+            self.template_combo.blockSignals(True)
+            selected_template = self._fill_template_choices(step["category"], step["template"])
+            step["template"] = selected_template
+            self.step_title.setText(selected_template)
+            self.step_description.setText(self.CATEGORY_DESCRIPTIONS.get(step["category"], step["description"]))
+            self.template_combo.blockSignals(False)
+        self._set_cell_editing_mode(cell_type)
         self.code_editor.blockSignals(True)
-        step["code"] = self._bind_target_column(step["code"])
+        source = self._bind_target_column(step["code"]) if is_code else step["code"]
+        if source != step["code"]:
+            step["code"] = source
         self.code_editor.setPlainText(step["code"])
         self.code_editor.blockSignals(False)
-        self._update_target_controls(step["code"])
+        if cell_type == "markdown":
+            self.markdown_preview.setMarkdown(step["code"])
+        self._update_target_controls(step["code"] if is_code else "")
         self._render_step_output(step)
+        self._update_cell_controls()
+        self._schedule_autosave()
+
+    def _set_cell_editing_mode(self, cell_type: str):
+        is_code = cell_type == "code"
+        desired_document = self.code_editor.document() if is_code else None
+        if self.code_highlighter.document() is not desired_document:
+            signals_were_blocked = self.code_editor.blockSignals(True)
+            try:
+                self.code_highlighter.setDocument(desired_document)
+            finally:
+                self.code_editor.blockSignals(signals_were_blocked)
+        self.category_label.setVisible(is_code)
+        self.template_category_combo.setVisible(is_code)
+        self.template_label.setVisible(is_code)
+        self.template_combo.setVisible(is_code)
+        self.editor_code_label.setText("Kode Python" if is_code else ("Teks Markdown" if cell_type == "markdown" else "Teks Raw"))
+        self.reset_button.setVisible(is_code)
+        controls_enabled = not self._execution_controls_locked
+        self.template_category_combo.setEnabled(controls_enabled and is_code)
+        self.template_combo.setEnabled(controls_enabled and is_code)
+        self.reset_button.setEnabled(controls_enabled and is_code)
+        self.target_combo.setEnabled(controls_enabled and is_code and self.target_combo.count() > 0)
+        self.markdown_preview.setVisible(cell_type == "markdown")
+        self.output_tabs.setVisible(is_code)
+        self.code_editor.setEnabled(not self._execution_controls_locked)
+        self.cell_type_combo.setEnabled(not self._execution_controls_locked)
+        self.run_button.setEnabled(is_code and self._dataframe is not None and not self._kernel_busy)
+        self.run_all_button.setEnabled(self._dataframe is not None and any(
+            step.get("cell_type", "code") == "code" for step in self._steps
+        ) and not self._kernel_busy)
 
     def _category_changed(self, category: str):
-        if not 0 <= self._selected_step < len(self._steps):
+        if not 0 <= self._selected_step < len(self._steps) or self._steps[self._selected_step].get("cell_type", "code") != "code":
             return
         self._save_current_code()
         step = self._steps[self._selected_step]
@@ -1299,9 +1792,11 @@ plt.tight_layout()
         self.step_description.setText(self.CATEGORY_DESCRIPTIONS.get(category, ""))
         self.code_editor.setPlainText(step["code"])
         self._update_target_controls(step["code"])
+        step["notebook_outputs"] = None
+        self._mark_notebook_dirty()
 
     def _apply_template(self, template_name: str):
-        if not 0 <= self._selected_step < len(self._steps):
+        if not 0 <= self._selected_step < len(self._steps) or self._steps[self._selected_step].get("cell_type", "code") != "code":
             return
         step = self._steps[self._selected_step]
         category = self.template_category_combo.currentText()
@@ -1314,9 +1809,11 @@ plt.tight_layout()
         self.code_editor.setPlainText(step["code"])
         self.code_editor.blockSignals(False)
         self._update_target_controls(step["code"])
+        step["notebook_outputs"] = None
+        self._mark_notebook_dirty()
 
     def _reset_code(self):
-        if not 0 <= self._selected_step < len(self._steps):
+        if not 0 <= self._selected_step < len(self._steps) or self._steps[self._selected_step].get("cell_type", "code") != "code":
             return
         step = self._steps[self._selected_step]
         step["code"] = self._bind_target_column(
@@ -1324,6 +1821,8 @@ plt.tight_layout()
         )
         self.code_editor.setPlainText(step["code"])
         self._update_target_controls(step["code"])
+        step["notebook_outputs"] = None
+        self._mark_notebook_dirty()
 
     def _bind_target_column(self, source: str) -> str:
         target = self.target_combo.currentText() if hasattr(self, "target_combo") else ""
@@ -1338,7 +1837,7 @@ plt.tight_layout()
         self.target_combo.setEnabled(self._dataframe is not None and self.target_combo.count() > 0)
 
     def _target_changed(self, target: str):
-        if not target or not 0 <= self._selected_step < len(self._steps):
+        if not target or not 0 <= self._selected_step < len(self._steps) or self._steps[self._selected_step].get("cell_type", "code") != "code":
             return
         source = self.code_editor.toPlainText()
         if not self.TARGET_ASSIGNMENT.search(source):
@@ -1348,6 +1847,8 @@ plt.tight_layout()
         self.code_editor.setPlainText(source)
         self.code_editor.blockSignals(False)
         self._steps[self._selected_step]["code"] = source
+        self._steps[self._selected_step]["notebook_outputs"] = None
+        self._mark_notebook_dirty()
 
     def _preferred_target(self, columns: list[str]) -> str:
         by_normalized = {column.casefold(): column for column in columns}
@@ -1425,12 +1926,18 @@ plt.tight_layout()
         if self._kernel_busy or self._execution_queue or self._package_process is not None:
             return
         self._save_current_code()
-        self._execution_queue = [index for index in step_indexes if 0 <= index < len(self._steps)]
+        self._execution_queue = [
+            index for index in step_indexes
+            if 0 <= index < len(self._steps)
+            and self._steps[index].get("cell_type", "code") == "code"
+        ]
         if not self._execution_queue:
             return
         self._execution_total = len(self._execution_queue)
         self._execution_completed = 0
         self._queue_had_error = False
+        self._advance_after_run = self._advance_after_run and len(self._execution_queue) == 1
+        self._set_execution_controls_locked(True)
         self.run_button.setEnabled(False)
         self.run_all_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
@@ -1440,10 +1947,22 @@ plt.tight_layout()
         self._ensure_environment(self._start_kernel)
 
     def _execute_code(self):
-        if self._selected_step < 0:
+        if self._selected_step < 0 or self._steps[self._selected_step].get("cell_type", "code") != "code":
             self.execution_note.setText("Pilih bagian analisis yang akan dijalankan.")
             return
         self._queue_execution([self._selected_step])
+
+    def _execute_code_and_advance(self):
+        self._advance_after_run = True
+        self._execute_code()
+        if not self._execution_queue and not self._kernel_busy:
+            self._advance_after_run = False
+
+    def _focus_next_cell(self):
+        if self._selected_step + 1 < len(self._steps):
+            self.step_list.setCurrentRow(self._selected_step + 1)
+        else:
+            self._insert_cell("code", len(self._steps))
 
     def _run_all(self):
         self._save_current_code()
@@ -1517,6 +2036,9 @@ plt.tight_layout()
             return
         index = self._execution_queue.pop(0)
         step = self._steps[index]
+        if step.get("cell_type", "code") != "code":
+            self._send_next_cell()
+            return
         source = self._bind_target_column(step["code"])
         if self.TARGET_ASSIGNMENT.search(source):
             selected_target = self.target_combo.currentText()
@@ -1592,8 +2114,12 @@ plt.tight_layout()
         step = self._steps[index]
         step["output"] = message.get("output", "")
         step["charts"] = message.get("charts", [])
+        step["rich_outputs"] = message.get("rich_outputs", [])
+        step["notebook_outputs"] = None
         step["has_error"] = bool(message.get("error"))
         step["execution_count"] = (step.get("execution_count") or 0) + 1
+        self._mark_notebook_dirty()
+        self._populate_step_list()
         self._queue_had_error = self._queue_had_error or step["has_error"]
         self._kernel_busy = False
         self._running_step_index = -1
@@ -1601,6 +2127,10 @@ plt.tight_layout()
         self._execution_completed += 1
         if index == self._selected_step:
             self._render_step_output(step)
+        advance = self._advance_after_run
+        if advance:
+            self._advance_after_run = False
+            QTimer.singleShot(0, self._focus_next_cell)
         if self._execution_queue:
             self._send_next_cell()
         else:
@@ -1703,10 +2233,18 @@ plt.tight_layout()
         self._run_timeout.stop()
         self._run_animation.stop()
         self._run_opacity_effect.setOpacity(1.0)
-        self.run_button.setEnabled(self._dataframe is not None)
-        self.run_all_button.setEnabled(self._dataframe is not None)
+        active_is_code = (
+            0 <= self._selected_step < len(self._steps)
+            and self._steps[self._selected_step].get("cell_type", "code") == "code"
+        )
+        self.run_button.setEnabled(self._dataframe is not None and active_is_code)
+        self.run_all_button.setEnabled(
+            self._dataframe is not None
+            and any(step.get("cell_type", "code") == "code" for step in self._steps)
+        )
         self.cancel_button.setEnabled(False)
         self.install_library_button.setEnabled(self._dataframe is not None)
+        self._set_execution_controls_locked(False)
         if success:
             self.execution_note.setText("Analisis selesai. Variabel tetap tersedia di sesi Python ini.")
         elif self._execution_completed:
@@ -1717,6 +2255,7 @@ plt.tight_layout()
             )
         if not self._execution_queue:
             self._running_step_index = -1
+            self._advance_after_run = False
 
     def _append_library_log(self, text: str):
         self._package_log = (self._package_log + text)[-120_000:]
@@ -1845,7 +2384,29 @@ plt.tight_layout()
             self.execution_note.setText("Library tidak berhasil dipasang.")
 
     def _render_step_output(self, step: dict):
-        self.output_text.setPlainText(step.get("output", ""))
+        output_parts = []
+        text_output = step.get("output", "")
+        if text_output:
+            output_parts.append(f"<pre>{html.escape(text_output)}</pre>")
+        for rich_output in step.get("rich_outputs", []):
+            data = rich_output.get("data", {}) if isinstance(rich_output, dict) else {}
+            rich_html = data.get("text/html")
+            rich_text = data.get("text/plain")
+            if isinstance(rich_html, list):
+                rich_html = "".join(rich_html)
+            if isinstance(rich_text, list):
+                rich_text = "".join(rich_text)
+            if rich_html:
+                output_parts.append(str(rich_html))
+            elif rich_text and not text_output:
+                output_parts.append(f"<pre>{html.escape(str(rich_text))}</pre>")
+        self.output_text.setHtml(
+            "<html><body style='font-family:Segoe UI, sans-serif; color:#20324A'>"
+            + "<hr style='border:0;border-top:1px solid #e3e8ef'>".join(output_parts)
+            + "</body></html>"
+            if output_parts
+            else "<p>Sel ini belum memiliki output.</p>"
+        )
         self._clear_graphs()
         charts = step.get("charts", [])
         for chart in charts[:8]:
@@ -1869,7 +2430,12 @@ plt.tight_layout()
             self.graphics_empty.setAlignment(Qt.AlignCenter)
             self.graphics_layout.addWidget(self.graphics_empty)
             self.graphics_layout.addStretch(1)
-        self.output_tabs.setTabText(1, f"Grafik ({len(self._graphics)})" if self._graphics else "Grafik")
+        output_title = "Output sel"
+        if step.get("execution_count") is not None:
+            output_title += f" [{step['execution_count']}]"
+        if step.get("has_error"):
+            output_title += " - Error"
+        self.output_tabs.setTabText(0, output_title)
 
     def _clear_graphs(self):
         while self.graphics_layout.count():
@@ -1881,57 +2447,95 @@ plt.tight_layout()
 
     def _notebook_document(self) -> dict:
         cells = []
+        used_cell_ids = set()
         for step in self._steps:
-            outputs = []
-            output_text = step.get("output", "")
-            if output_text:
-                output_type = "stderr" if step.get("has_error") else "stdout"
-                outputs.append({
-                    "output_type": "stream",
-                    "name": output_type,
-                    "text": output_text.splitlines(keepends=True),
-                })
-            for chart in step.get("charts", [])[:8]:
-                outputs.append({
-                    "output_type": "display_data",
-                    "data": {"image/png": chart, "text/plain": "Grafik analisis"},
-                    "metadata": {},
-                })
-            cells.append({
-                "cell_type": "code",
-                "execution_count": step.get("execution_count"),
-                "metadata": {
-                    "dora": {
-                        "title": step["title"],
-                        "description": step["description"],
-                        "category": step["category"],
-                        "template": step["template"],
-                        "has_error": bool(step.get("has_error")),
-                    }
-                },
-                "outputs": outputs,
-                "source": step["code"].splitlines(keepends=True),
+            cell_type = step.get("cell_type", "code")
+            if step.get("notebook_outputs") is not None and cell_type == "code":
+                outputs = copy.deepcopy(step["notebook_outputs"])
+            else:
+                outputs = []
+                output_text = step.get("output", "")
+                if output_text:
+                    outputs.append({
+                        "output_type": "stream",
+                        "name": "stderr" if step.get("has_error") else "stdout",
+                        "text": output_text.splitlines(keepends=True),
+                    })
+                for rich_output in step.get("rich_outputs", []):
+                    if rich_output.get("data"):
+                        outputs.append({
+                            "output_type": "display_data",
+                            "data": copy.deepcopy(rich_output["data"]),
+                            "metadata": copy.deepcopy(rich_output.get("metadata", {})),
+                        })
+                for chart in step.get("charts", [])[:8]:
+                    outputs.append({
+                        "output_type": "display_data",
+                        "data": {"image/png": chart, "text/plain": "Grafik analisis"},
+                        "metadata": {},
+                    })
+
+            metadata = copy.deepcopy(step.get("notebook_metadata") or {})
+            existing_dora_metadata = metadata.get("dora")
+            dora_metadata = (
+                copy.deepcopy(existing_dora_metadata)
+                if isinstance(existing_dora_metadata, dict)
+                else {}
+            )
+            dora_metadata.update({
+                "title": step.get("title", "Sel notebook"),
+                "description": step.get("description", ""),
+                "category": step.get("category", "Custom"),
+                "template": step.get("template", "Kode kosong"),
+                "has_error": bool(step.get("has_error")),
             })
+            metadata["dora"] = dora_metadata
+            cell = copy.deepcopy(step.get("notebook_extra") or {})
+            cell_id = str(step.get("cell_id") or uuid.uuid4().hex[:8])
+            if cell_id in used_cell_ids:
+                cell_id = uuid.uuid4().hex[:8]
+            used_cell_ids.add(cell_id)
+            cell.update({
+                "cell_type": cell_type,
+                "id": cell_id,
+                "metadata": metadata,
+                "source": step.get("code", "").splitlines(keepends=True),
+            })
+            if cell_type == "code":
+                cell["execution_count"] = step.get("execution_count")
+                cell["outputs"] = outputs
+            else:
+                cell.pop("execution_count", None)
+                cell.pop("outputs", None)
+            cells.append(cell)
+        notebook_metadata = copy.deepcopy(self._notebook_metadata)
+        notebook_metadata.setdefault(
+            "kernelspec",
+            {"display_name": "Python 3", "language": "python", "name": "python3"},
+        )
+        notebook_metadata.setdefault(
+            "language_info", {"name": "python", "version": sys.version.split()[0]}
+        )
         return {
             "cells": cells,
-            "metadata": {
-                "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
-                "language_info": {"name": "python", "version": sys.version.split()[0]},
-            },
+            "metadata": notebook_metadata,
             "nbformat": 4,
             "nbformat_minor": 5,
         }
 
     def _save_notebook(self):
-        if self._project_workspace is None:
-            self.library_status.setText("Pilih atau muat dataset sebelum menyimpan notebook.")
-            return
-        default_path = str(self._notebook_path or (self._project_workspace / "analisis.ipynb"))
+        default_notebook = (
+            self._project_workspace / "analisis.ipynb"
+            if self._project_workspace is not None
+            else Path.home() / "analisis.ipynb"
+        )
+        default_path = str(self._notebook_path or default_notebook)
         filename, _ = QFileDialog.getSaveFileName(
             self, "Simpan notebook analisis", default_path, "Jupyter Notebook (*.ipynb)"
         )
         if not filename:
             return
+        self._save_current_code()
         path = Path(filename)
         if path.suffix.lower() != ".ipynb":
             path = path.with_suffix(".ipynb")
@@ -1942,12 +2546,27 @@ plt.tight_layout()
             self.library_status.setText(f"Notebook gagal disimpan: {error}")
             return
         self._notebook_path = path
+        self._notebook_dirty = False
+        self.notebook_status_label.setText(f"Tersimpan: {path.name}")
         self.library_status.setText(f"Notebook disimpan: {path.name}")
+        self._autosave_timer.stop()
+        self._save_autosave_state()
+        self.notebook_status_label.setText(f"Tersimpan: {path.name}")
 
     def _open_notebook(self):
         if self._kernel_busy or self._execution_queue:
             self.execution_note.setText("Hentikan proses sebelum membuka notebook lain.")
             return
+        if self._notebook_dirty:
+            response = QMessageBox.question(
+                self,
+                "Perubahan belum disimpan",
+                "Buka notebook lain dan buang perubahan yang belum disimpan?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if response != QMessageBox.Yes:
+                return
         filename, _ = QFileDialog.getOpenFileName(
             self, "Buka notebook", str(self._notebook_path or ""), "Jupyter Notebook (*.ipynb)"
         )
@@ -1955,58 +2574,120 @@ plt.tight_layout()
             return
         try:
             document = json.loads(Path(filename).read_text(encoding="utf-8"))
-            if document.get("nbformat") != 4 or not isinstance(document.get("cells"), list):
+            if (
+                not isinstance(document, dict)
+                or document.get("nbformat") != 4
+                or not isinstance(document.get("cells"), list)
+            ):
                 raise ValueError("Format notebook tidak didukung.")
             steps = []
-            for cell in document["cells"]:
-                if cell.get("cell_type") != "code":
-                    continue
+            for index, cell in enumerate(document["cells"], start=1):
+                if not isinstance(cell, dict):
+                    raise ValueError(f"Sel pada urutan {index} bukan objek notebook yang valid.")
+                cell_type = cell.get("cell_type")
+                if cell_type not in {"code", "markdown", "raw"}:
+                    raise ValueError(f"Jenis sel pada urutan {index} tidak didukung: {cell_type!r}.")
                 source = cell.get("source", "")
                 code = "".join(source) if isinstance(source, list) else str(source)
-                metadata = (cell.get("metadata") or {}).get("dora", {})
-                title = metadata.get("title", "Bagian notebook")
+                notebook_metadata = cell.get("metadata") or {}
+                if not isinstance(notebook_metadata, dict):
+                    notebook_metadata = {}
+                metadata = notebook_metadata.get("dora", {})
+                if not isinstance(metadata, dict):
+                    metadata = {}
+                fallback_title = "Catatan" if cell_type == "markdown" else f"Sel {index:02d}"
+                title = str(metadata.get("title", fallback_title))
+                description = str(metadata.get("description", "Diimpor dari notebook Jupyter."))
                 category = metadata.get("category", "Custom")
-                if category not in self.template_groups:
+                if not isinstance(category, str) or category not in self.template_groups:
                     category = "Custom"
-                template = metadata.get("template", "Kode kosong")
+                default_template = "Teks Markdown" if cell_type == "markdown" else "Kode kosong"
+                template = metadata.get("template", default_template)
+                if not isinstance(template, str):
+                    template = default_template
                 if template not in self.template_groups[category]:
                     template = next(iter(self.template_groups[category]))
                 output_parts = []
                 charts = []
+                rich_outputs = []
                 has_error = bool(metadata.get("has_error"))
-                for output in cell.get("outputs", []):
+                outputs = cell.get("outputs", []) if cell_type == "code" else []
+                if not isinstance(outputs, list):
+                    outputs = []
+                for output in outputs:
+                    if not isinstance(output, dict):
+                        continue
                     if output.get("output_type") == "stream":
                         text = output.get("text", "")
                         output_parts.append("".join(text) if isinstance(text, list) else str(text))
                     if output.get("output_type") == "error":
                         has_error = True
-                        output_parts.extend(output.get("traceback", []))
-                    image = (output.get("data") or {}).get("image/png")
+                        error_name = output.get("ename", "Error")
+                        error_value = output.get("evalue", "")
+                        traceback_lines = output.get("traceback", [])
+                        output_parts.append(f"{error_name}: {error_value}\n" + "\n".join(traceback_lines))
+                    data = output.get("data") or {}
+                    if not isinstance(data, dict):
+                        continue
+                    image = data.get("image/png")
                     if image:
                         charts.append(image)
+                    display_data = {}
+                    for mime_type in ("text/html", "text/plain"):
+                        value = data.get(mime_type)
+                        if isinstance(value, list):
+                            value = "".join(value)
+                        if isinstance(value, str):
+                            display_data[mime_type] = value
+                    if display_data:
+                        rich_outputs.append({
+                            "data": display_data,
+                            "metadata": copy.deepcopy(output.get("metadata") or {}),
+                        })
+                base_keys = {"cell_type", "id", "metadata", "source", "execution_count", "outputs"}
                 steps.append({
-                    "title": title,
-                    "description": metadata.get("description", "Diimpor dari notebook Jupyter."),
+                    "title": str(title),
+                    "description": description,
                     "category": category,
                     "template": template,
+                    "cell_type": cell_type,
+                    "cell_id": str(cell.get("id") or uuid.uuid4().hex[:8]),
                     "code": code,
                     "output": "".join(output_parts),
                     "charts": charts[:8],
+                    "rich_outputs": rich_outputs,
                     "has_error": has_error,
-                    "execution_count": cell.get("execution_count"),
+                    "execution_count": cell.get("execution_count") if cell_type == "code" else None,
+                    "notebook_outputs": copy.deepcopy(outputs) if cell_type == "code" else None,
+                    "notebook_metadata": copy.deepcopy(notebook_metadata),
+                    "notebook_extra": {
+                        key: copy.deepcopy(value)
+                        for key, value in cell.items()
+                        if key not in base_keys
+                    },
                 })
         except (OSError, json.JSONDecodeError, TypeError, ValueError) as error:
             self.library_status.setText(f"Notebook gagal dibuka: {error}")
             return
-        if not steps:
-            self.library_status.setText("Notebook tidak memiliki bagian kode Python.")
-            return
         self._stop_kernel()
         self._steps = steps
+        self._selected_step = -1
+        notebook_metadata = document.get("metadata") or {}
+        self._notebook_metadata = copy.deepcopy(notebook_metadata) if isinstance(notebook_metadata, dict) else {}
+        try:
+            self._notebook_minor = int(document.get("nbformat_minor", 5))
+        except (TypeError, ValueError):
+            self._notebook_minor = 5
         self._populate_step_list()
-        self.step_list.setCurrentRow(0)
+        if steps:
+            self.step_list.setCurrentRow(0)
+        else:
+            self._select_step(-1)
         self._notebook_path = Path(filename)
+        self._notebook_dirty = False
+        self.notebook_status_label.setText(f"Tersimpan: {Path(filename).name}")
         self.library_status.setText(f"{len(steps)} bagian dimuat dari {Path(filename).name}.")
+        self._schedule_autosave()
 
     def _terminate_process_on_exit(self):
         self._run_timeout.stop()
@@ -2017,31 +2698,113 @@ plt.tight_layout()
                 process.waitForFinished(1500)
 
     def _add_step(self):
-        index = len(self._steps) + 1
-        title = f"Langkah Kustom {index - len(self.STEPS)}"
-        step = {
-            "title": title,
-            "description": "Tulis catatan atau kode analisis sesuai kebutuhanmu.",
-            "category": "Custom",
-            "template": "Kode kosong",
-            "code": self.template_groups["Custom"]["Kode kosong"],
-            "output": "",
-            "charts": [],
-            "has_error": False,
-            "execution_count": None,
-        }
-        self._steps.append(step)
-        self._populate_step_list()
-        self.step_list.setCurrentRow(len(self._steps) - 1)
+        self._insert_cell("code")
 
     def set_dataset(self, dataframe, filename: str = ""):
+        self._workspace_dataframe = dataframe
+        self._workspace_dataset_name = filename or "Dataset"
+        if not self._initializing:
+            self._restore_autosave_state()
+        if self._dataset_scope == "custom" and self._custom_dataframe is not None:
+            self._apply_dataset(
+                self._custom_dataframe,
+                Path(self._custom_dataset_path).name or "Dataset notebook",
+            )
+            self._schedule_autosave()
+            return
+        if self._dataset_scope == "custom" and self._custom_dataset_path:
+            loader = getattr(self._main_window, "loader", None)
+            if loader is not None and Path(self._custom_dataset_path).is_file():
+                try:
+                    self._custom_dataframe = loader.load(self._custom_dataset_path)
+                except Exception as error:
+                    self.library_status.setText(
+                        f"Dataset notebook tidak dapat dipulihkan: {error}"
+                    )
+                else:
+                    self._apply_dataset(
+                        self._custom_dataframe,
+                        Path(self._custom_dataset_path).name or "Dataset notebook",
+                    )
+                    self._schedule_autosave()
+                    return
+            self._dataset_scope = "workspace"
+            self.library_status.setText(
+                "Progres notebook dipulihkan; pilih ulang dataset notebook yang tersimpan."
+            )
+        self._dataset_scope = "workspace"
+        self.dataset_scope_combo.blockSignals(True)
+        self.dataset_scope_combo.setCurrentIndex(self.dataset_scope_combo.findData("workspace"))
+        self.dataset_scope_combo.blockSignals(False)
+        self._apply_dataset(dataframe, filename)
+        self._schedule_autosave()
+
+    def _dataset_scope_changed(self, index: int):
+        scope = self.dataset_scope_combo.itemData(index)
+        if scope == self._dataset_scope:
+            return
+        if scope == "custom":
+            if self._custom_dataframe is None:
+                self._choose_notebook_dataset()
+            else:
+                self._dataset_scope = "custom"
+                self._apply_dataset(
+                    self._custom_dataframe,
+                    Path(self._custom_dataset_path).name or "Dataset notebook",
+                )
+                self._schedule_autosave()
+            return
+        if scope == "workspace":
+            self._dataset_scope = "workspace"
+            self._apply_dataset(self._workspace_dataframe, self._workspace_dataset_name)
+            self._schedule_autosave()
+
+    def _choose_notebook_dataset(self):
+        loader = getattr(self._main_window, "loader", None)
+        if loader is None:
+            QMessageBox.information(self, "Dataset notebook", "Loader dataset aplikasi tidak tersedia.")
+            self.dataset_scope_combo.blockSignals(True)
+            self.dataset_scope_combo.setCurrentIndex(self.dataset_scope_combo.findData(self._dataset_scope))
+            self.dataset_scope_combo.blockSignals(False)
+            return
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            "Pilih dataset untuk notebook",
+            self._custom_dataset_path,
+            "Dataset (*.csv *.tsv *.xlsx *.xls *.json *.parquet);;Semua file (*)",
+        )
+        if not filename:
+            self.dataset_scope_combo.blockSignals(True)
+            self.dataset_scope_combo.setCurrentIndex(self.dataset_scope_combo.findData(self._dataset_scope))
+            self.dataset_scope_combo.blockSignals(False)
+            return
+        try:
+            dataframe = loader.load(filename)
+        except Exception as error:
+            QMessageBox.critical(self, "Dataset tidak dapat dimuat", str(error))
+            self.dataset_scope_combo.blockSignals(True)
+            self.dataset_scope_combo.setCurrentIndex(self.dataset_scope_combo.findData(self._dataset_scope))
+            self.dataset_scope_combo.blockSignals(False)
+            return
+        self._custom_dataframe = dataframe
+        self._custom_dataset_path = str(Path(filename).resolve())
+        self._dataset_scope = "custom"
+        self.dataset_scope_combo.blockSignals(True)
+        self.dataset_scope_combo.setCurrentIndex(self.dataset_scope_combo.findData("custom"))
+        self.dataset_scope_combo.blockSignals(False)
+        self._apply_dataset(dataframe, Path(filename).name)
+        self._schedule_autosave()
+
+    def _apply_dataset(self, dataframe, filename: str = ""):
         previous_dataframe = self._dataframe
         previous_project_key = self._project_key
         self._dataframe = dataframe
-        self._dataset_name = filename or "Dataset"
+        scope_label = "Dataset notebook" if self._dataset_scope == "custom" else "Workspace"
+        self._dataset_name = f"{scope_label}: {filename or 'Dataset'}"
         if dataframe is None:
             self._cancel_environment_jobs()
             self._stop_kernel()
+            self._set_execution_controls_locked(False)
             self._project_key = ""
             self._project_workspace = None
             self._project_environment = None
@@ -2060,7 +2823,7 @@ plt.tight_layout()
 
         project_id = getattr(self._main_window, "current_project_id", None)
         if project_id is not None:
-            project_key = f"project_{project_id}"
+            project_key = f"project_{project_id}_{self._dataset_scope}"
         else:
             identity = f"{self._dataset_name}|{dataframe.shape}|{list(map(str, dataframe.columns))}"
             project_key = "dataset_" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16]
@@ -2068,12 +2831,35 @@ plt.tight_layout()
         if dataset_changed:
             self._cancel_environment_jobs()
             self._stop_kernel()
+            self._set_execution_controls_locked(False)
             self.cancel_button.setEnabled(False)
-            for step in self._steps:
-                step["output"] = ""
-                step["charts"] = []
-                step["has_error"] = False
-                step["execution_count"] = None
+            had_output = any(
+                step.get("output")
+                or step.get("charts")
+                or step.get("rich_outputs")
+                or step.get("notebook_outputs")
+                for step in self._steps
+            )
+            was_restored = self._autosave_restored
+            restored_dataset_matches = bool(
+                self._autosave_project_key and self._autosave_project_key == project_key
+            )
+            self._autosave_project_key = ""
+            self._autosave_restored = False
+            if not restored_dataset_matches:
+                for step in self._steps:
+                    step["output"] = ""
+                    step["charts"] = []
+                    step["rich_outputs"] = []
+                    step["has_error"] = False
+                    step["execution_count"] = None
+                    step["notebook_outputs"] = None
+            if had_output and not restored_dataset_matches:
+                self._mark_notebook_dirty()
+                if was_restored:
+                    self.notebook_status_label.setText(
+                        "Kode dipulihkan; output perlu dijalankan ulang karena dataset berubah."
+                    )
         self._project_key = project_key
         app_data = QStandardPaths.writableLocation(QStandardPaths.AppLocalDataLocation)
         app_data_root = Path(app_data) if app_data else Path.home() / ".dora"
@@ -2089,6 +2875,8 @@ plt.tight_layout()
             self.target_combo.setCurrentText(selected_target)
         self.target_combo.blockSignals(False)
         for step in self._steps:
+            if step.get("cell_type", "code") != "code":
+                continue
             existing = re.search(r"(?m)^target_column\s*=\s*(['\"])(.*?)\1\s*$", step["code"])
             if self.TARGET_ASSIGNMENT.search(step["code"]):
                 existing_target = existing.group(2) if existing else ""
@@ -2098,14 +2886,23 @@ plt.tight_layout()
                     )
         if 0 <= self._selected_step < len(self._steps):
             step = self._steps[self._selected_step]
-            step["code"] = self._bind_target_column(step["code"])
+            if step.get("cell_type", "code") == "code":
+                step["code"] = self._bind_target_column(step["code"])
             self.code_editor.blockSignals(True)
             self.code_editor.setPlainText(step["code"])
             self.code_editor.blockSignals(False)
-            self._update_target_controls(step["code"])
+            self._update_target_controls(step["code"] if step.get("cell_type", "code") == "code" else "")
         self.dataset_badge.setText(f"{self._dataset_name} · {len(dataframe):,} baris")
-        self.run_button.setEnabled(self._kernel_busy is False and self._package_process is None)
-        self.run_all_button.setEnabled(self._kernel_busy is False and self._package_process is None)
+        active_is_code = (
+            0 <= self._selected_step < len(self._steps)
+            and self._steps[self._selected_step].get("cell_type", "code") == "code"
+        )
+        self.run_button.setEnabled(active_is_code and self._kernel_busy is False and self._package_process is None)
+        self.run_all_button.setEnabled(
+            self._kernel_busy is False
+            and self._package_process is None
+            and any(step.get("cell_type", "code") == "code" for step in self._steps)
+        )
         self.install_library_button.setEnabled(self._package_process is None)
         self._refresh_library_status()
         if 0 <= self._selected_step < len(self._steps):

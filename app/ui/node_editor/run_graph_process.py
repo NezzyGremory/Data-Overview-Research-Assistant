@@ -45,18 +45,41 @@ def main() -> int:
             _send(protocol_output, ("progress", node_id, status))
 
         output = graph.run(payload["dataframe"], report_progress)
+        export_request = payload.get("export_model")
+        export_result = None
+        if export_request:
+            node_id = export_request.get("node_id")
+            node_output = output.get(node_id, {})
+            model = node_output.get("model", {}).get("estimator")
+            if model is None:
+                raise ValueError(f"Model dari node '{node_id}' tidak ditemukan untuk diekspor.")
+            from app.ml.graph.exporter import export_model_pkl
+            export_result = export_model_pkl(model, export_request["path"])
         # The UI only renders tables and metrics. Keep fitted estimators and
         # other internal values inside the worker process.
-        display_output = {
-            node_id: {
-                key: value
-                for key, value in node_output.items()
+        display_output = {}
+        for node_id, node_output in output.items():
+            if not isinstance(node_output, dict):
+                continue
+            visible = {
+                key: value for key, value in node_output.items()
                 if key in {"table", "metrics"}
             }
-            for node_id, node_output in output.items()
-            if isinstance(node_output, dict)
-            and any(key in node_output for key in ("table", "metrics"))
-        }
+            model_output = node_output.get("model")
+            if isinstance(model_output, dict) and model_output.get("estimator") is not None:
+                estimator = model_output["estimator"]
+                visible["model_summary"] = {
+                    "Estimator": type(estimator).__name__,
+                    "Task": model_output.get("task", ""),
+                    "Target": model_output.get("target", ""),
+                }
+            estimator = node_output.get("estimator")
+            if estimator is not None:
+                visible["estimator_summary"] = {"Estimator": type(estimator).__name__}
+            if visible:
+                display_output[node_id] = visible
+        if export_result is not None:
+            display_output["__model_export__"] = {"path": export_result}
         _send(protocol_output, ("finished", display_output))
         return 0
     except BaseException as exc:

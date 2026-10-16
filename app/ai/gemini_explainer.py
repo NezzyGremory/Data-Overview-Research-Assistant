@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -12,6 +13,7 @@ from app.ai.local_explainer import LocalAcademicExplainer
 
 # In-memory explanation cache: {fingerprint: (narrative, source)}
 _EXPLANATION_CACHE: Dict[str, Tuple[str, str]] = {}
+_QUOTA_BACKOFF: Dict[str, Tuple[str, float]] = {}
 
 
 def get_saved_api_key() -> str | None:
@@ -133,8 +135,22 @@ class GeminiDatasetExplainer:
         # 1. Cek Caching berdasarkan SHA-256 fingerprint
         fp = analysis.get("fingerprint") or {}
         fp_hash = fp.get("fingerprint") if isinstance(fp, dict) else None
+        key_fingerprint = hashlib.sha256("\0".join(self.api_keys).encode("utf-8")).hexdigest()
         if fp_hash and fp_hash in _EXPLANATION_CACHE:
             cached_text, cached_source = _EXPLANATION_CACHE[fp_hash]
+            if cached_source == "local_rate_limited":
+                backoff = _QUOTA_BACKOFF.get(fp_hash)
+                if (
+                    backoff
+                    and backoff[0] == key_fingerprint
+                    and time.monotonic() < backoff[1]
+                ):
+                    self.last_source = "local"
+                    self.last_error = "Batas permintaan Gemini tercapai; hasil lokal dipakai untuk analisis ini."
+                    return cached_text, "local"
+                _EXPLANATION_CACHE.pop(fp_hash, None)
+                _QUOTA_BACKOFF.pop(fp_hash, None)
+                cached_source = ""
             # Do not let an old local fallback hide a newly configured API key
             # or prevent a retry after a temporary cloud outage.
             if cached_source == "gemini" or not self.cloud_enabled:
@@ -163,7 +179,8 @@ class GeminiDatasetExplainer:
 
         # Bound the optional cloud request so a bad key/network cannot leave the
         # analysis worker waiting through every key/model/timeout combination.
-        deadline = time.monotonic() + 40.0
+        deadline = time.monotonic() + 20.0
+        quota_limited = False
         for api_key in self.api_keys:
             key_rejected = False
             for model_name in models:
@@ -215,9 +232,21 @@ class GeminiDatasetExplainer:
                             break
 
                         if response.status_code in {401, 403}:
+                            response_detail = str(response.text or "").lower()
+                            if response.status_code == 403 and any(
+                                marker in response_detail
+                                for marker in ("quota", "resource_exhausted", "rate limit")
+                            ):
+                                failures.append(f"{model_name}: kuota atau batas permintaan tercapai (HTTP 403)")
+                                quota_limited = True
+                                break
                             failures.append(f"API key ditolak (HTTP {response.status_code})")
                             # An authorization error is key-specific; try the next key.
                             key_rejected = True
+                            break
+                        if response.status_code == 429:
+                            failures.append(f"{model_name}: kuota atau batas permintaan tercapai (HTTP 429)")
+                            quota_limited = True
                             break
                         if response.status_code in {400, 404}:
                             failures.append(f"{model_name}: HTTP {response.status_code}")
@@ -249,10 +278,10 @@ class GeminiDatasetExplainer:
                     except Exception:
                         break
 
-                if gemini_success or key_rejected:
+                if gemini_success or key_rejected or quota_limited:
                     break
 
-            if gemini_success:
+            if gemini_success or quota_limited:
                 break
 
         # 4. Jika Gemini berhasil -> simpan cache dan kembalikan
@@ -267,6 +296,11 @@ class GeminiDatasetExplainer:
         local_text = self.local_explainer.explain(analysis)
         self.last_source = "local"
         self.last_error = "; ".join(dict.fromkeys(failures)) or "Gemini tidak memberi respons."
+        if quota_limited and fp_hash:
+            # Avoid repeatedly spending requests on the same result after a
+            # quota response. Retry after a short cooldown or a key change.
+            _EXPLANATION_CACHE[fp_hash] = (local_text, "local_rate_limited")
+            _QUOTA_BACKOFF[fp_hash] = (key_fingerprint, time.monotonic() + 60.0)
         return local_text, "local"
 
     def _models_to_try(self) -> List[str]:
