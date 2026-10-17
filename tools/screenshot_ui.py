@@ -84,12 +84,13 @@ def main() -> int:
         "--page",
         required=True,
         choices=(
-            "dataset-empty", "dataset-loaded", "dataset-search", "analysis",
-            "overview", "landscape", "about", "popup",
+            "dataset-empty", "dataset-loaded", "upload-loaded", "dataset-search", "analysis",
+            "overview", "overview-empty", "landscape", "about", "popup", "editor-analysis", "ml",
         ),
     )
     parser.add_argument("--width", type=int, default=1920)
     parser.add_argument("--height", type=int, default=1080)
+    parser.add_argument("--ui-scale", type=float)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--debug-layout", action="store_true")
     args = parser.parse_args()
@@ -98,23 +99,54 @@ def main() -> int:
 
     app = QApplication.instance() or QApplication(["dora-ui-screenshot"])
     window = MainWindow()
+    if args.ui_scale is not None:
+        # Keep screenshot captures independent from the user's persisted setting.
+        window.scale_manager._manual_scale = args.ui_scale
+        window.scale_manager._scale = args.ui_scale
+        window._apply_ui_scale(args.ui_scale)
     window.resize(args.width, args.height)
 
     popup_path: Path | None = None
+    preview_path: Path | None = None
     dialog = None
     if args.page == "dataset-empty":
         window.current_dataset = None
         window.dataset_preview_page.update_dataset(None)
         window.open_upload_page()
     elif args.page == "dataset-loaded":
+        preview_path = _write_popup_csv()
         window.current_dataset = _preview_dataframe()
-        window.current_file_path = None
+        window.current_file_path = preview_path
         window.dataset_preview_page.update_dataset(
             window.current_dataset, "Titanic-dataset.csv"
         )
-        window.dataset_preview_page.file_details.setText("60.3 KB · Uploaded just now")
         window.datasets_tabs.setCurrentWidget(window.dataset_preview_page)
         window._show_page("dataset")
+    elif args.page == "upload-loaded":
+        preview_path = _write_popup_csv()
+        window.current_dataset = _preview_dataframe()
+        window.current_file_path = preview_path
+        window.dataset_preview_page.update_dataset(
+            window.current_dataset, "Titanic-dataset.csv"
+        )
+        window.open_upload_page()
+    elif args.page == "editor-analysis":
+        window.current_dataset = _preview_dataframe()
+        window.editor_analysis_page.set_dataset(
+            window.current_dataset, "Titanic-dataset.csv"
+        )
+        window.open_editor_analysis_page()
+        # The managed screenshot environment cannot write the user's AppData
+        # autosave path; keep that environment-only warning out of the design capture.
+        window.editor_analysis_page._autosave_timer.stop()
+    elif args.page == "ml":
+        window.current_dataset = _preview_dataframe()
+        window.current_file_path = Path("Titanic-Dataset.csv")
+        window.analysis_result = _analysis_preview_result(
+            window, window.current_dataset
+        )
+        window.ml_page.update_dataset()
+        window.open_ml_page()
     elif args.page == "dataset-search":
         window.open_dataset_search_page()
         from app.dataset_search.huggingface import DatasetFile, DatasetSearchResult
@@ -126,7 +158,9 @@ def main() -> int:
             )
         ]
         window.dataset_search_page.search_input.setText("student")
-        window.dataset_search_page.source_combo.setCurrentIndex(0)
+        window.dataset_search_page.source_combo.setCurrentIndex(
+            window.dataset_search_page.source_combo.findData("all")
+        )
         window.dataset_search_page._on_search_finished([
             DatasetSearchResult(
                 dataset_id="kaggle:whenamancodes/student-performance",
@@ -149,10 +183,6 @@ def main() -> int:
                 match_reason="Kaggle dataset (3120 votes, usability 100%)",
             ),
         ])
-        window.dataset_search_page.status_label.setText(
-            "15 datasets found. Results are ranked by topic match and metadata. "
-            "Choose a file format, then Download or Download & Analyze."
-        )
     elif args.page == "analysis":
         window.current_dataset = _preview_dataframe()
         window.current_file_path = Path("Titanic-Dataset.csv")
@@ -160,6 +190,12 @@ def main() -> int:
             window, window.current_dataset
         )
         window.open_analysis_page()
+    elif args.page == "overview-empty":
+        window.current_dataset = None
+        window.current_file_path = None
+        window.dashboard.update_dataset(None, "")
+        window.dashboard.update_workflow_state(False, False, False)
+        window.open_dashboard()
     elif args.page == "overview":
         overview_dataframe = _preview_dataframe()
         rng = np.random.default_rng(2026)
@@ -199,8 +235,7 @@ def main() -> int:
         }
         window.research_page.research_result = overview_research
         window.dashboard.update_dataset(overview_dataframe, "Titanic-dataset.csv")
-        window.dashboard.update_research_result(overview_research)
-        window.dashboard.update_workflow_state(True, True, True, True)
+        window.dashboard.update_workflow_state(True, True, True)
         window.open_dashboard()
     elif args.page == "landscape":
         window.research_page.research_result = {
@@ -316,6 +351,36 @@ def main() -> int:
                 print(f"drop item {index}: {drop_layout.itemAt(index).geometry().getRect()}")
         if args.debug_layout and args.page == "dataset-loaded":
             page = window.dataset_preview_page
+            root_margins = page.root_layout.contentsMargins()
+            container_margins = page.page_scroll.widget().contentsMargins()
+            print(
+                f"layout_margins: root=({root_margins.left()}, {root_margins.top()}, "
+                f"{root_margins.right()}, {root_margins.bottom()}) "
+                f"container=({container_margins.left()}, {container_margins.top()}, "
+                f"{container_margins.right()}, {container_margins.bottom()}) "
+                f"spacing={page.root_layout.spacing()}",
+                flush=True,
+            )
+            for index in range(page.root_layout.count()):
+                item = page.root_layout.itemAt(index)
+                print(
+                    f"root item {index}: {item.geometry().getRect()} "
+                    f"widget={item.widget().objectName() if item.widget() else None}",
+                    flush=True,
+                )
+            for name, widget in (
+                ("page_stack", window.page_stack),
+                ("datasets_page", window.datasets_page),
+                ("datasets_tabs", window.datasets_tabs),
+                ("datasets_tab_pages", window.datasets_tab_pages),
+                ("page_scroll", page.page_scroll),
+                ("page_container", page.page_scroll.widget()),
+            ):
+                point = widget.mapTo(window, widget.rect().topLeft())
+                print(
+                    f"{name}: ({point.x()}, {point.y()}, {widget.width()}, {widget.height()})",
+                    flush=True,
+                )
             for name in (
                 "header", "overview_layout", "file_card", "tabs_scroll",
                 "content_stack", "preview_card", "preview_title", "table",
@@ -323,7 +388,12 @@ def main() -> int:
             ):
                 widget = getattr(page, name, None)
                 if widget is not None:
-                    print(f"{name}: {widget.geometry().getRect()}")
+                    if isinstance(widget, QWidget):
+                        point = widget.mapTo(window, widget.rect().topLeft())
+                        geometry = (point.x(), point.y(), widget.width(), widget.height())
+                    else:
+                        geometry = widget.geometry().getRect()
+                    print(f"{name}: {geometry}", flush=True)
             preview_layout = page.preview_card.layout()
             for index in range(preview_layout.count()):
                 print(f"preview item {index}: {preview_layout.itemAt(index).geometry().getRect()}")
@@ -331,6 +401,35 @@ def main() -> int:
             file_layout = page.file_card.layout()
             for index in range(file_layout.count()):
                 print(f"file item {index}: {file_layout.itemAt(index).geometry().getRect()}")
+        if args.debug_layout and args.page == "upload-loaded":
+            page = window.upload_page.loaded_page
+            print(f"ui_scale={QApplication.instance().property('uiScale')}", flush=True)
+            sidebar = window.sidebar_container
+            point = sidebar.mapTo(window, sidebar.rect().topLeft())
+            print(
+                f"sidebar: ({point.x()}, {point.y()}, {sidebar.width()}, {sidebar.height()}) "
+                f"visible={sidebar.isVisible()}",
+                flush=True,
+            )
+            for key in ("dashboard", "dataset", "analysis"):
+                button = window.nav_buttons.get(key)
+                if button is not None:
+                    print(
+                        f"nav_{key}: visible={button.isVisible()} text="
+                        f"{button.findChild(QWidget, 'navText').text() if button.findChild(QWidget, 'navText') else ''}",
+                        flush=True,
+                    )
+            for name in (
+                "steps", "dropzone", "file_summary", "preview_panel", "table",
+                "page_size_combo", "continue_button",
+            ):
+                widget = getattr(page, name, None)
+                if widget is not None:
+                    point = widget.mapTo(window, widget.rect().topLeft())
+                    print(
+                        f"{name}: ({point.x()}, {point.y()}, {widget.width()}, {widget.height()})",
+                        flush=True,
+                    )
         if args.debug_layout and args.page == "analysis":
             page = window.analysis_page
             for name, widget in (
@@ -395,6 +494,36 @@ def main() -> int:
                 } or widget.property("datasetSearch"):
                     position = widget.mapTo(window, widget.rect().topLeft())
                     print(f"{widget.objectName()}: ({position.x()}, {position.y()}, {widget.width()}, {widget.height()})")
+        if args.debug_layout and args.page == "editor-analysis":
+            page = window.editor_analysis_page
+            for name, widget in (
+                ("editor_page", page),
+                ("header", page.editor_header_container),
+                ("title_block", page.title_block_container),
+                ("info_banner", page.info_banner),
+                ("info_banner_container", page.info_banner_container),
+                ("workspace", page.editor_card),
+                ("steps_card", page.steps_card),
+                ("output_tabs", page.output_tabs),
+            ):
+                point = widget.mapTo(window, widget.rect().topLeft())
+                print(
+                    f"{name}: ({point.x()}, {point.y()}, {widget.width()}, {widget.height()}) "
+                    f"min={widget.minimumWidth()}x{widget.minimumHeight()} "
+                    f"max={widget.maximumWidth()}x{widget.maximumHeight()}"
+                )
+            margins = page.root_layout.contentsMargins()
+            print(
+                f"root_layout: spacing={page.root_layout.spacing()} margins="
+                f"({margins.left()}, {margins.top()}, {margins.right()}, {margins.bottom()})"
+            )
+            for index in range(page.root_layout.count()):
+                item = page.root_layout.itemAt(index)
+                rect = item.geometry()
+                print(
+                    f"root_item_{index}: ({rect.x()}, {rect.y()}, {rect.width()}, {rect.height()}) "
+                    f"hint={item.sizeHint().width()}x{item.sizeHint().height()}"
+                )
         if args.debug_layout and dialog is not None:
             position = dialog.mapTo(window, dialog.rect().topLeft())
             print(f"dialog: ({position.x()}, {position.y()}, {dialog.width()}, {dialog.height()})")
@@ -412,7 +541,10 @@ def main() -> int:
             painter.drawPixmap(left, top, dialog.grab())
             painter.end()
         image.save(str(output))
-        print(f"Screenshot saved: {output}")
+        print(f"Screenshot saved: {output}", flush=True)
+        for temporary_path in (popup_path, preview_path):
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
         if dialog is not None:
             dialog.close()
         window._session_data_cleaned = True
@@ -423,6 +555,8 @@ def main() -> int:
     app.exec()
     if popup_path is not None:
         popup_path.unlink(missing_ok=True)
+    if preview_path is not None:
+        preview_path.unlink(missing_ok=True)
     return 0
 
 

@@ -49,7 +49,7 @@ class DropMissingOptionsDialog(QDialog):
 
     def __init__(self, dataframe: pd.DataFrame, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Drop Missing Values")
+        self.setWindowTitle("Hapus Missing Values")
         self.setMinimumSize(540, 620)
         self._column_checks: dict[str, QCheckBox] = {}
         self._zero_checks: dict[str, QCheckBox] = {}
@@ -69,8 +69,8 @@ class DropMissingOptionsDialog(QDialog):
         strategy_row = QHBoxLayout()
         strategy_row.addWidget(QLabel("Strategi"))
         self.strategy_combo = QComboBox()
-        self.strategy_combo.addItem("Drop baris", "drop_rows")
-        self.strategy_combo.addItem("Drop kolom", "drop_cols")
+        self.strategy_combo.addItem("Hapus baris", "drop_rows")
+        self.strategy_combo.addItem("Hapus kolom", "drop_cols")
         self.strategy_combo.addItem("Imputasi", "impute")
         self.strategy_combo.addItem("Laporan saja", "report")
         strategy_row.addWidget(self.strategy_combo, 1)
@@ -83,9 +83,9 @@ class DropMissingOptionsDialog(QDialog):
         self.col_threshold.setRange(0.0, 1.0)
         self.col_threshold.setSingleStep(0.05)
         self.col_threshold.setValue(0.5)
-        self.col_threshold.setSuffix(" missing")
+        self.col_threshold.setSuffix(" Missing Values")
         threshold_row = QHBoxLayout()
-        threshold_row.addWidget(QLabel("Hapus kolom jika missing melebihi"))
+        threshold_row.addWidget(QLabel("Hapus kolom jika Missing Values melebihi"))
         threshold_row.addWidget(self.col_threshold)
         strategy_options_layout.addLayout(threshold_row)
         self.impute_method = QComboBox()
@@ -123,18 +123,18 @@ class DropMissingOptionsDialog(QDialog):
         row = QHBoxLayout()
         row.addWidget(QLabel("Hapus baris jika"))
         self.how_combo = QComboBox()
-        self.how_combo.addItem("any - minimal satu kolom kosong", "any")
-        self.how_combo.addItem("all - semua kolom kosong", "all")
+        self.how_combo.addItem("Minimal satu kolom kosong", "any")
+        self.how_combo.addItem("Semua kolom kosong", "all")
         row.addWidget(self.how_combo, 1)
         layout.addLayout(row)
 
         row = QHBoxLayout()
         row.addWidget(QLabel("Perlakuan nilai 0"))
         self.zero_mode_combo = QComboBox()
-        self.zero_mode_combo.addItem("Auto (deteksi 0 mencurigakan)", "auto")
-        self.zero_mode_combo.addItem("Jangan anggap 0 missing", "off")
-        self.zero_mode_combo.addItem("Selective (pilih kolom)", "selective")
-        self.zero_mode_combo.addItem("Strict (semua kolom)", "strict")
+        self.zero_mode_combo.addItem("Otomatis (deteksi nilai 0 mencurigakan)", "auto")
+        self.zero_mode_combo.addItem("Jangan anggap 0 sebagai Missing Value", "off")
+        self.zero_mode_combo.addItem("Selektif (pilih kolom)", "selective")
+        self.zero_mode_combo.addItem("Ketat (semua kolom)", "strict")
         row.addWidget(self.zero_mode_combo, 1)
         layout.addLayout(row)
 
@@ -143,7 +143,7 @@ class DropMissingOptionsDialog(QDialog):
         zero_layout = QVBoxLayout(self.zero_panel)
         zero_layout.setContentsMargins(8, 6, 8, 6)
         zero_layout.setSpacing(3)
-        zero_layout.addWidget(QLabel("Kolom numerik yang nilai 0-nya dianggap missing"))
+        zero_layout.addWidget(QLabel("Kolom numerik yang nilai 0-nya dianggap Missing Value"))
         zero_scroll = self._make_scroll_area()
         zero_content = QWidget()
         zero_checks_layout = QVBoxLayout(zero_content)
@@ -171,7 +171,7 @@ class DropMissingOptionsDialog(QDialog):
         layout.addWidget(self.zero_panel)
 
         self.strict_warning = QLabel(
-            "PERINGATAN: nilai 0 pada semua kolom akan dianggap missing. "
+            "PERINGATAN: nilai 0 pada semua kolom akan dianggap Missing Value. "
             "Kolom biner dan kolom target dapat kehilangan satu kelas atau rusak."
         )
         self.strict_warning.setObjectName("dropMissingWarningBanner")
@@ -261,7 +261,7 @@ class DropMissingPreviewDialog(QDialog):
 
     def __init__(self, result: CleanResult, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Pratinjau Drop Missing Values")
+        self.setWindowTitle("Pratinjau penghapusan Missing Values")
         self.setMinimumSize(510, 440)
         dialog_layout = QVBoxLayout(self)
         content_scroll = QScrollArea()
@@ -281,7 +281,7 @@ class DropMissingPreviewDialog(QDialog):
         elif strategy == "drop_cols":
             summary_text = f"Akan menghapus {result.report.get('columns_dropped', 0):,} kolom."
         elif strategy == "impute":
-            summary_text = f"Missing value akan diisi pada {len(result.report.get('columns_imputed', [])):,} kolom."
+            summary_text = f"Missing Values akan diisi pada {len(result.report.get('columns_imputed', [])):,} kolom."
         else:
             summary_text = "Laporan dibuat tanpa mengubah DataFrame."
         summary = QLabel(summary_text)

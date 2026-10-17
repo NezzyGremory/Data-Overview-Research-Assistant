@@ -1495,6 +1495,17 @@ QProgressBar::chunk {
     padding: @px(10);
 }
 
+#gapExplanationEyebrow {
+    color: #2360B5;
+    font-size: @px(10);
+    font-weight: 700;
+    letter-spacing: @px(0.7);
+}
+
+QFrame#contentCard[researchGapExplanation="true"] {
+    border-left: @px(4) solid #1769E8;
+}
+
 /* Dashboard arrangement follows the provided reference image. */
 #dashboardCanvas {
     background: #F3F6FC;

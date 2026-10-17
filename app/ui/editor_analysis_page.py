@@ -15,7 +15,7 @@ import sysconfig
 import uuid
 from pathlib import Path
 
-from app.ui.scale import logical_width
+from app.ui.scale import logical_width, ui_px
 
 from PySide6.QtCore import (
     QEasingCurve,
@@ -52,6 +52,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMessageBox,
+    QMenu,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -61,6 +62,7 @@ from PySide6.QtWidgets import (
     QTabWidget,
     QVBoxLayout,
     QWidget,
+    QWidgetAction,
 )
 
 from app.ui.style_utils import apply_card_shadow
@@ -719,24 +721,30 @@ print(f"Rata-rata: {scores.mean():.3f} ± {scores.std():.3f}")
         container = QWidget()
         container.setObjectName("editorAnalysisContent")
         self.root_layout = QVBoxLayout(container)
-        self.root_layout.setContentsMargins(30, 22, 28, 20)
-        self.root_layout.setSpacing(16)
+        self.root_layout.setContentsMargins(12, 28, 10, 12)
+        self.root_layout.setSpacing(28)
 
-        header = QHBoxLayout()
+        self.editor_header_container = QWidget()
+        header = QHBoxLayout(self.editor_header_container)
+        header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(16)
-        title_block = QVBoxLayout()
+        self.title_block_container = QWidget()
+        title_block = QVBoxLayout(self.title_block_container)
+        self.title_block = title_block
         title_block.setSpacing(4)
         title = QLabel("Editor Analysis")
-        title.setObjectName("pageTitle")
+        title.setObjectName("editorAnalysisPageTitle")
+        title.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         subtitle = QLabel(
             "Ikuti tahapan analisis, pilih template, lalu sesuaikan kode dengan kebutuhan risetmu."
         )
-        subtitle.setObjectName("pageSubtitle")
+        subtitle.setObjectName("editorAnalysisPageSubtitle")
+        subtitle.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         subtitle.setWordWrap(True)
         title_block.addWidget(title)
         title_block.addWidget(subtitle)
-        header.addLayout(title_block, 1)
-        self.dataset_scope_combo = QComboBox()
+        header.addWidget(self.title_block_container, 1)
+        self.dataset_scope_combo = QComboBox(self)
         self.dataset_scope_combo.setObjectName("editorAnalysisDatasetScope")
         self.dataset_scope_combo.addItem("Ikuti Workspace", "workspace")
         self.dataset_scope_combo.addItem("Dataset notebook", "custom")
@@ -744,15 +752,38 @@ print(f"Rata-rata: {scores.mean():.3f} ± {scores.std():.3f}")
             "Pilih dataset Workspace atau file dataset khusus notebook ini."
         )
         self.dataset_scope_combo.currentIndexChanged.connect(self._dataset_scope_changed)
-        header.addWidget(self.dataset_scope_combo, 0, Qt.AlignTop)
-        self.choose_dataset_button = QPushButton("Pilih dataset")
+        self.dataset_scope_combo.hide()
+        self.choose_dataset_button = QPushButton("Pilih dataset", self)
         self.choose_dataset_button.setObjectName("secondaryButton")
         self.choose_dataset_button.clicked.connect(self._choose_notebook_dataset)
-        header.addWidget(self.choose_dataset_button, 0, Qt.AlignTop)
-        self.dataset_badge = QLabel("Dataset belum dimuat")
+        self.choose_dataset_button.hide()
+        self.dataset_badge = QLabel("Dataset belum dimuat", self)
         self.dataset_badge.setObjectName("editorAnalysisDatasetBadge")
-        header.addWidget(self.dataset_badge, 0, Qt.AlignTop)
-        self.root_layout.addLayout(header)
+        self.dataset_badge.hide()
+        self.dataset_menu_button = QPushButton("Dataset")
+        self.dataset_menu_button.setObjectName("editorAnalysisDatasetMenu")
+        dataset_menu = QMenu(self.dataset_menu_button)
+        use_workspace_action = dataset_menu.addAction("Ikuti dataset Workspace")
+        use_workspace_action.triggered.connect(
+            lambda: self.dataset_scope_combo.setCurrentIndex(
+                self.dataset_scope_combo.findData("workspace")
+            )
+        )
+        use_notebook_action = dataset_menu.addAction("Gunakan dataset notebook")
+        use_notebook_action.triggered.connect(
+            lambda: self.dataset_scope_combo.setCurrentIndex(
+                self.dataset_scope_combo.findData("custom")
+            )
+        )
+        dataset_menu.addSeparator()
+        choose_dataset_action = dataset_menu.addAction("Pilih file dataset…")
+        choose_dataset_action.triggered.connect(self._choose_notebook_dataset)
+        self.dataset_menu_button.setMenu(dataset_menu)
+        self.dataset_menu_button.setToolTip(
+            "Pilih dataset Workspace atau file dataset khusus notebook ini."
+        )
+        header.addWidget(self.dataset_menu_button, 0, Qt.AlignTop)
+        self.root_layout.addWidget(self.editor_header_container)
 
         self.info_banner = QLabel(
             "Template dibuat tim DORA, bukan oleh AI. Kode dijalankan lokal dengan salinan dataset; "
@@ -761,15 +792,22 @@ print(f"Rata-rata: {scores.mean():.3f} ± {scores.std():.3f}")
         )
         self.info_banner.setObjectName("editorAnalysisInfoBanner")
         self.info_banner.setWordWrap(True)
-        self.root_layout.addWidget(self.info_banner)
+        self.info_banner_container = QWidget()
+        self.info_banner_container_layout = QVBoxLayout(self.info_banner_container)
+        self.info_banner_container_layout.setContentsMargins(0, 0, 0, 0)
+        self.info_banner_container_layout.setSpacing(0)
+        self.info_banner_container_layout.addWidget(self.info_banner)
+        self.root_layout.addWidget(self.info_banner_container)
 
         self.workspace = QHBoxLayout()
-        self.workspace.setSpacing(16)
+        self.workspace.setSpacing(15)
         self.steps_card = self._build_steps_card()
         self.editor_card = self._build_editor_card()
-        self.workspace.addWidget(self.steps_card, 1)
-        self.workspace.addWidget(self.editor_card, 3)
+        self.editor_card.setFixedHeight(ui_px(766))
+        self.workspace.addWidget(self.steps_card, 12, Qt.AlignTop)
+        self.workspace.addWidget(self.editor_card, 34, Qt.AlignTop)
         self.root_layout.addLayout(self.workspace, 1)
+        self.root_layout.setAlignment(self.workspace, Qt.AlignTop)
 
         self.page_scroll.setWidget(container)
         outer.addWidget(self.page_scroll)
@@ -1046,9 +1084,32 @@ plt.tight_layout()
         layout = QVBoxLayout(card)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
+
+        heading_row = QHBoxLayout()
         heading = QLabel("Tahapan Analisis")
         heading.setObjectName("editorAnalysisSectionTitle")
-        layout.addWidget(heading)
+        heading_row.addWidget(heading, 1)
+        self.step_actions_button = QPushButton("...")
+        self.step_actions_button.setObjectName("editorAnalysisStepActions")
+        self.step_actions_button.setFixedSize(28, 28)
+        self.step_actions_button.setToolTip("Kelola langkah analisis dan sel notebook.")
+        self.step_actions_menu = QMenu(self.step_actions_button)
+        self._step_menu_actions = {}
+        for key, label, callback in (
+            ("add_code", "Tambah kode", self._add_step),
+            ("add_text", "Tambah teks", self._add_markdown_cell),
+            ("move_up", "Naik", lambda: self._move_step(-1)),
+            ("move_down", "Turun", lambda: self._move_step(1)),
+            ("duplicate", "Duplikat", self._duplicate_step),
+            ("delete", "Hapus", self._delete_step),
+        ):
+            action = self.step_actions_menu.addAction(label)
+            action.triggered.connect(callback)
+            self._step_menu_actions[key] = action
+        self.step_actions_button.setMenu(self.step_actions_menu)
+        heading_row.addWidget(self.step_actions_button)
+        layout.addLayout(heading_row)
+
         hint = QLabel("Pilih bagian untuk membuka kode template.")
         hint.setObjectName("editorAnalysisMuted")
         hint.setWordWrap(True)
@@ -1057,36 +1118,35 @@ plt.tight_layout()
         self.step_list.setObjectName("editorAnalysisStepList")
         self.step_list.currentRowChanged.connect(self._select_step)
         layout.addWidget(self.step_list, 1)
-        add_row = QHBoxLayout()
+
         self.add_step_button = QPushButton("Tambah kode")
         self.add_step_button.setObjectName("secondaryButton")
         self.add_step_button.clicked.connect(self._add_step)
-        add_row.addWidget(self.add_step_button)
         self.add_markdown_button = QPushButton("Tambah teks")
         self.add_markdown_button.setObjectName("secondaryButton")
         self.add_markdown_button.clicked.connect(self._add_markdown_cell)
-        add_row.addWidget(self.add_markdown_button)
-        layout.addLayout(add_row)
-        cell_actions = QHBoxLayout()
         self.move_cell_up_button = QPushButton("Naik")
         self.move_cell_up_button.setObjectName("secondaryButton")
         self.move_cell_up_button.clicked.connect(lambda: self._move_step(-1))
-        cell_actions.addWidget(self.move_cell_up_button)
         self.move_cell_down_button = QPushButton("Turun")
         self.move_cell_down_button.setObjectName("secondaryButton")
         self.move_cell_down_button.clicked.connect(lambda: self._move_step(1))
-        cell_actions.addWidget(self.move_cell_down_button)
-        layout.addLayout(cell_actions)
-        cell_actions = QHBoxLayout()
         self.duplicate_cell_button = QPushButton("Duplikat")
         self.duplicate_cell_button.setObjectName("secondaryButton")
         self.duplicate_cell_button.clicked.connect(self._duplicate_step)
-        cell_actions.addWidget(self.duplicate_cell_button)
         self.delete_cell_button = QPushButton("Hapus")
         self.delete_cell_button.setObjectName("secondaryButton")
         self.delete_cell_button.clicked.connect(self._delete_step)
-        cell_actions.addWidget(self.delete_cell_button)
-        layout.addLayout(cell_actions)
+        for button in (
+            self.add_step_button,
+            self.add_markdown_button,
+            self.move_cell_up_button,
+            self.move_cell_down_button,
+            self.duplicate_cell_button,
+            self.delete_cell_button,
+        ):
+            button.setParent(card)
+            button.hide()
         apply_card_shadow(card)
         return card
 
@@ -1095,7 +1155,7 @@ plt.tight_layout()
         card.setObjectName("editorAnalysisCodeCard")
         layout = QVBoxLayout(card)
         layout.setContentsMargins(18, 16, 18, 16)
-        layout.setSpacing(12)
+        layout.setSpacing(8)
 
         heading_row = QHBoxLayout()
         self.step_title = QLabel("Pilih tahapan analisis")
@@ -1105,41 +1165,45 @@ plt.tight_layout()
 
         self.notebook_toolbar = QHBoxLayout()
         self.open_notebook_button = QPushButton("Buka notebook")
-        self.open_notebook_button.setObjectName("secondaryButton")
+        self.open_notebook_button.setObjectName("editorAnalysisNotebookButton")
         self.open_notebook_button.clicked.connect(self._open_notebook)
+        self.open_notebook_button.setFixedSize(132, 34)
         self.notebook_toolbar.addWidget(self.open_notebook_button)
         self.save_notebook_button = QPushButton("Simpan notebook")
-        self.save_notebook_button.setObjectName("secondaryButton")
+        self.save_notebook_button.setObjectName("editorAnalysisNotebookButton")
         self.save_notebook_button.clicked.connect(self._save_notebook)
+        self.save_notebook_button.setFixedSize(142, 34)
         self.notebook_toolbar.addWidget(self.save_notebook_button)
         self.restart_kernel_button = QPushButton("Mulai ulang Python")
-        self.restart_kernel_button.setObjectName("secondaryButton")
+        self.restart_kernel_button.setObjectName("editorAnalysisNotebookButton")
         self.restart_kernel_button.clicked.connect(self._restart_kernel)
+        self.restart_kernel_button.setText("Muat ulang")
+        self.restart_kernel_button.setToolTip("Mulai ulang kernel Python notebook.")
+        self.restart_kernel_button.setFixedSize(118, 34)
         self.notebook_toolbar.addWidget(self.restart_kernel_button)
-        self.notebook_status_label = QLabel("Notebook belum disimpan")
+        self.notebook_status_label = QLabel("Belum disimpan")
         self.notebook_status_label.setObjectName("editorAnalysisMuted")
+        self.notebook_status_label.setFixedWidth(94)
         self.notebook_toolbar.addWidget(self.notebook_status_label)
         self.notebook_toolbar.addStretch(1)
-        layout.addLayout(self.notebook_toolbar)
+        heading_row.addLayout(self.notebook_toolbar)
 
-        cell_toolbar = QHBoxLayout()
-        cell_toolbar.addWidget(QLabel("Jenis sel"))
         self.cell_type_combo = QComboBox()
         self.cell_type_combo.setObjectName("editorAnalysisCategoryCombo")
         self.cell_type_combo.addItem("Kode", "code")
         self.cell_type_combo.addItem("Markdown", "markdown")
         self.cell_type_combo.addItem("Raw", "raw")
         self.cell_type_combo.currentIndexChanged.connect(self._cell_type_changed)
-        cell_toolbar.addWidget(self.cell_type_combo)
-        cell_toolbar.addStretch(1)
-        layout.addLayout(cell_toolbar)
+        self.cell_type_combo.setFixedSize(112, 34)
+        self.cell_type_combo.setToolTip("Jenis sel notebook yang sedang dipilih.")
 
-        execution_row = QHBoxLayout()
         self.execution_note = QLabel(
             "Ctrl+Enter menjalankan sel. Shift+Enter menjalankan lalu berpindah ke sel berikutnya."
         )
         self.execution_note.setObjectName("editorAnalysisExecutionNote")
         self.execution_note.setWordWrap(True)
+        self.execution_note.setParent(card)
+        self.execution_note.hide()
         self._run_opacity_effect = QGraphicsOpacityEffect(self.execution_note)
         self._run_opacity_effect.setOpacity(1.0)
         self.execution_note.setGraphicsEffect(self._run_opacity_effect)
@@ -1149,25 +1213,22 @@ plt.tight_layout()
         self._run_animation.setEndValue(1.0)
         self._run_animation.setEasingCurve(QEasingCurve.InOutSine)
         self._run_animation.setLoopCount(-1)
-        execution_row.addWidget(self.execution_note, 1)
         self.run_button = QPushButton("Jalankan sel")
         self.run_button.setObjectName("primaryButton")
         self.run_button.setEnabled(False)
+        self.run_button.setText("Jalankan")
+        self.run_button.setFixedSize(130, 34)
         self.run_button.setToolTip("Jalankan kode pada sel yang dipilih.")
         self.run_button.clicked.connect(self._execute_code)
-        execution_row.addWidget(self.run_button)
         self.run_all_button = QPushButton("Jalankan semua")
         self.run_all_button.setObjectName("secondaryButton")
         self.run_all_button.setEnabled(False)
         self.run_all_button.setToolTip("Jalankan semua sel kode secara berurutan dalam satu sesi Python.")
         self.run_all_button.clicked.connect(self._run_all)
-        execution_row.addWidget(self.run_all_button)
         self.cancel_button = QPushButton("Hentikan")
         self.cancel_button.setObjectName("secondaryButton")
         self.cancel_button.setEnabled(False)
         self.cancel_button.clicked.connect(self._terminate_run)
-        execution_row.addWidget(self.cancel_button)
-        layout.addLayout(execution_row)
 
         self.template_toolbar = QHBoxLayout()
         self.template_toolbar.setSpacing(12)
@@ -1190,6 +1251,7 @@ plt.tight_layout()
         self.template_combo.currentTextChanged.connect(self._apply_template)
         template_block.addWidget(self.template_combo)
         self.template_toolbar.addLayout(template_block, 1)
+        layout.addSpacing(9)
         layout.addLayout(self.template_toolbar)
 
         self.step_description = QLabel("")
@@ -1232,6 +1294,29 @@ plt.tight_layout()
         self.reset_button.setObjectName("secondaryButton")
         self.reset_button.clicked.connect(self._reset_code)
         editor_heading.addWidget(self.reset_button)
+        self.more_actions_menu = QMenu(self)
+        for action_button in (self.run_all_button, self.cancel_button):
+            action = QWidgetAction(self.more_actions_menu)
+            action.setDefaultWidget(action_button)
+            self.more_actions_menu.addAction(action)
+        self.more_actions_button = QPushButton("Lainnya")
+        self.more_actions_button.setObjectName("editorAnalysisMoreActions")
+        self.more_actions_button.setFixedSize(86, 34)
+        self.more_actions_button.setMenu(self.more_actions_menu)
+        self.more_actions_button.setToolTip(
+            "Ubah jenis sel, jalankan semua sel, atau hentikan eksekusi."
+        )
+        cell_type_menu = self.more_actions_menu.addMenu("Jenis sel")
+        for label, value in (("Kode", "code"), ("Markdown", "markdown"), ("Raw", "raw")):
+            action = cell_type_menu.addAction(label)
+            action.triggered.connect(
+                lambda _checked=False, item=value: self.cell_type_combo.setCurrentIndex(
+                    self.cell_type_combo.findData(item)
+                )
+            )
+        self.more_actions_menu.addSeparator()
+        editor_heading.addWidget(self.more_actions_button)
+        editor_heading.addWidget(self.run_button)
         layout.addLayout(editor_heading)
 
         self.target_row = QHBoxLayout()
@@ -1244,7 +1329,7 @@ plt.tight_layout()
         self.target_combo.currentTextChanged.connect(self._target_changed)
         self.target_row.addWidget(self.target_combo)
         self.target_row.addStretch(1)
-        layout.addLayout(self.target_row)
+        self.template_toolbar.addLayout(self.target_row)
 
         self.code_chrome = QFrame()
         self.code_chrome.setObjectName("editorAnalysisCodeChrome")
@@ -1259,6 +1344,7 @@ plt.tight_layout()
         chrome_hint.setObjectName("editorAnalysisChromeHint")
         chrome_layout.addWidget(chrome_hint)
         layout.addWidget(self.code_chrome)
+        self.code_chrome.setFixedHeight(28)
 
         self.code_editor = PythonCodeEditor()
         self.code_editor.setObjectName("editorAnalysisCodeEditor")
@@ -1275,8 +1361,8 @@ plt.tight_layout()
         self.code_editor.runRequested.connect(self._execute_code)
         self.code_editor.runAndAdvanceRequested.connect(self._execute_code_and_advance)
         self.code_editor.setToolTip("Ctrl+Enter untuk menjalankan kode yang sedang dipilih.")
-        self.code_editor.setMinimumHeight(300)
-        self.code_editor.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.code_editor.setFixedHeight(125)
+        self.code_editor.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.code_editor.textChanged.connect(self._save_current_code)
         self.code_editor.cursorPositionChanged.connect(self._update_cursor_status)
         layout.addWidget(self.code_editor, 1)
@@ -1304,22 +1390,19 @@ plt.tight_layout()
         self.code_language_label.setObjectName("editorAnalysisStatusLanguage")
         status_layout.addWidget(self.code_language_label)
         layout.addWidget(self.code_statusbar)
+        self.code_statusbar.setFixedHeight(20)
 
         output_title = QLabel("Hasil eksekusi")
         output_title.setObjectName("editorAnalysisFieldLabel")
         layout.addWidget(output_title)
         self.output_tabs = QTabWidget()
         self.output_tabs.setObjectName("editorAnalysisOutputTabs")
-        cell_output_panel = QWidget()
-        cell_output_layout = QVBoxLayout(cell_output_panel)
-        cell_output_layout.setContentsMargins(8, 8, 8, 8)
-        cell_output_layout.setSpacing(8)
         self.output_text = QTextBrowser()
         self.output_text.setObjectName("editorAnalysisOutputText")
         self.output_text.setOpenExternalLinks(False)
         self.output_text.setHtml("<p>Teks hasil dan pesan proses akan tampil di sini.</p>")
         self.output_text.setMinimumHeight(80)
-        cell_output_layout.addWidget(self.output_text, 1)
+        self.output_tabs.addTab(self.output_text, "Output teks")
 
         self.graphics_scroll = QScrollArea()
         self.graphics_scroll.setObjectName("editorAnalysisGraphicsScroll")
@@ -1337,8 +1420,7 @@ plt.tight_layout()
         self.graphics_layout.addStretch(1)
         self.graphics_scroll.setWidget(self.graphics_content)
         self.graphics_scroll.setMinimumHeight(140)
-        cell_output_layout.addWidget(self.graphics_scroll, 1)
-        self.output_tabs.addTab(cell_output_panel, "Output sel")
+        self.output_tabs.addTab(self.graphics_scroll, "Grafik")
 
         self.library_output = QPlainTextEdit()
         self.library_output.setObjectName("editorAnalysisOutputText")
@@ -1360,8 +1442,8 @@ plt.tight_layout()
             run_state = "  !" if step.get("has_error") else (
                 f"  [{step['execution_count']}]" if step.get("execution_count") else ""
             )
-            item = QListWidgetItem(f"{index:02d}  {type_label}  {step['title']}{run_state}")
-            item.setToolTip(step["description"])
+            item = QListWidgetItem(f"{index}  {step['title']}{run_state}")
+            item.setToolTip(f"Jenis sel: {type_label}. {step['description']}")
             self.step_list.addItem(item)
         self.step_list.blockSignals(False)
         self._update_cell_controls()
@@ -1379,6 +1461,17 @@ plt.tight_layout()
             self.add_step_button.setEnabled(controls_enabled)
             self.add_markdown_button.setEnabled(controls_enabled)
             self.step_list.setEnabled(controls_enabled)
+            for key, button in {
+                "add_code": self.add_step_button,
+                "add_text": self.add_markdown_button,
+                "move_up": self.move_cell_up_button,
+                "move_down": self.move_cell_down_button,
+                "duplicate": self.duplicate_cell_button,
+                "delete": self.delete_cell_button,
+            }.items():
+                action = self._step_menu_actions.get(key)
+                if action is not None:
+                    action.setEnabled(button.isEnabled())
 
     def _set_execution_controls_locked(self, locked: bool):
         self._execution_controls_locked = bool(locked)
@@ -2430,7 +2523,7 @@ plt.tight_layout()
             self.graphics_empty.setAlignment(Qt.AlignCenter)
             self.graphics_layout.addWidget(self.graphics_empty)
             self.graphics_layout.addStretch(1)
-        output_title = "Output sel"
+        output_title = "Output teks"
         if step.get("execution_count") is not None:
             output_title += f" [{step['execution_count']}]"
         if step.get("has_error"):
@@ -2739,6 +2832,13 @@ plt.tight_layout()
         self._apply_dataset(dataframe, filename)
         self._schedule_autosave()
 
+    def _sync_dataset_menu_button(self):
+        if hasattr(self, "dataset_menu_button"):
+            self.dataset_menu_button.setToolTip(
+                f"Dataset aktif: {self.dataset_badge.text()}\n"
+                "Pilih dataset Workspace atau file notebook melalui menu."
+            )
+
     def _dataset_scope_changed(self, index: int):
         scope = self.dataset_scope_combo.itemData(index)
         if scope == self._dataset_scope:
@@ -2809,6 +2909,7 @@ plt.tight_layout()
             self._project_workspace = None
             self._project_environment = None
             self.dataset_badge.setText("Dataset belum dimuat")
+            self._sync_dataset_menu_button()
             self.target_combo.blockSignals(True)
             self.target_combo.clear()
             self.target_combo.blockSignals(False)
@@ -2905,6 +3006,7 @@ plt.tight_layout()
         )
         self.install_library_button.setEnabled(self._package_process is None)
         self._refresh_library_status()
+        self._sync_dataset_menu_button()
         if 0 <= self._selected_step < len(self._steps):
             self._render_step_output(self._steps[self._selected_step])
 
@@ -2938,8 +3040,34 @@ plt.tight_layout()
 
     def _apply_responsive_layout(self, width: int):
         compact = logical_width(width) < 1080
-        self.root_layout.setContentsMargins(16 if logical_width(width) < 760 else 30, 16, 16 if logical_width(width) < 760 else 28, 18)
+        self.root_layout.setContentsMargins(
+            16 if logical_width(width) < 760 else 12,
+            28,
+            16 if logical_width(width) < 760 else 10,
+            12,
+        )
+        self.root_layout.setSpacing(28)
+        self.title_block.setContentsMargins(
+            0 if logical_width(width) < 1080 else 36, 0, 0, 0
+        )
         self.workspace.setDirection(QBoxLayout.TopToBottom if compact else QBoxLayout.LeftToRight)
+        self.workspace.setSpacing(15)
+        if compact:
+            self.editor_header_container.setMinimumHeight(0)
+            self.editor_header_container.setMaximumHeight(16777215)
+            self.info_banner.setMinimumHeight(0)
+            self.info_banner.setMaximumHeight(16777215)
+            self.info_banner_container.setMinimumHeight(0)
+            self.info_banner_container.setMaximumHeight(16777215)
+        else:
+            self.editor_header_container.setFixedHeight(ui_px(66))
+            self.info_banner.setFixedHeight(ui_px(56))
+            self.info_banner_container.setFixedHeight(ui_px(56))
+        if compact:
+            self.editor_card.setMinimumHeight(0)
+            self.editor_card.setMaximumHeight(16777215)
+        else:
+            self.editor_card.setFixedHeight(ui_px(766))
         self.template_toolbar.setDirection(
             QBoxLayout.TopToBottom if logical_width(width) < 650 else QBoxLayout.LeftToRight
         )
@@ -2949,8 +3077,14 @@ plt.tight_layout()
         self.library_row.setDirection(
             QBoxLayout.TopToBottom if logical_width(width) < 650 else QBoxLayout.LeftToRight
         )
-        self.steps_card.setMinimumWidth(0 if compact else 240)
-        self.steps_card.setMaximumWidth(16777215 if compact else 360)
+        if compact:
+            self.steps_card.setMinimumWidth(0)
+            self.steps_card.setMaximumWidth(16777215)
+            self.steps_card.setMinimumHeight(0)
+            self.steps_card.setMaximumHeight(16777215)
+        else:
+            self.steps_card.setFixedWidth(264)
+            self.steps_card.setFixedHeight(393)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

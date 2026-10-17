@@ -92,7 +92,11 @@ class TelemetryClient:
         except HTTPError as error:
             # Report only HTTP status, never headers/payload/token.
             _logger.warning("Telemetry API rejected an event (HTTP %s).", error.code)
-        except (OSError, URLError, ValueError) as error:
+        except URLError as error:
+            # Telemetry is optional; offline or unreachable endpoints are normal
+            # for desktop use and should not produce a warning on every launch.
+            _logger.debug("Telemetry endpoint is unavailable (%s).", type(error).__name__)
+        except (OSError, ValueError) as error:
             _logger.warning("Telemetry event could not be sent (%s).", type(error).__name__)
             return
 

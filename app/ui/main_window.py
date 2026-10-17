@@ -5,6 +5,7 @@ from html import escape as html_escape
 from html.parser import HTMLParser
 from pathlib import Path
 import re
+import json
 import os
 import pickle
 import subprocess
@@ -19,9 +20,10 @@ import pandas as pd
 import httpx
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
+from shiboken6 import isValid as is_qt_object_valid
 
-from PySide6.QtCore import Qt, QUrl, QObject, QThread, QTimer, Signal, Slot, QMarginsF, QSize, QPoint, QRect, QRectF, QEvent
-from PySide6.QtGui import QAction, QActionGroup, QIcon, QPixmap, QDesktopServices, QTextDocument, QFont, QFontDatabase, QColor, QPalette, QPageSize, QPageLayout, QPainter, QRegion
+from PySide6.QtCore import Qt, QUrl, QObject, QThread, QTimer, Signal, Slot, QMarginsF, QSize, QPoint, QRect, QRectF, QEvent, QEventLoop
+from PySide6.QtGui import QAction, QActionGroup, QIcon, QPixmap, QDesktopServices, QTextDocument, QFont, QFontDatabase, QColor, QPalette, QPageSize, QPageLayout, QPainter, QPen, QRegion
 from PySide6.QtPrintSupport import QPrinter
 from PySide6.QtWidgets import (
     QApplication,
@@ -72,7 +74,6 @@ from app.analyzer.cleaner import (
     export_cleaned_csv,
     preview_drop,
 )
-from app.analyzer.ml_readiness import analyze_ml_readiness
 from app.analyzer.duplicates import DuplicateAnalyzer
 from app.analyzer.outliers import OutlierAnalyzer
 from app.analyzer.correlations import CorrelationAnalyzer
@@ -83,18 +84,15 @@ from app.ai.local_explainer import LocalAcademicExplainer
 from app.ai.research_gap_explainer import ResearchGapExplainer
 from app.ml.task_detector import MLTaskDetector
 from app.ml.method_recommender import MethodRecommender
-from app.ml.intelligence import MLIntelligenceEngine
-from app.research.intelligence import ResearchIntelligenceEngine
 from app.ui.dataset_search_page import DatasetSearchPage
 from app.ui.dataset_preview_page import DatasetPreviewPage
+from app.ui.upload_loaded_page import LoadedUploadPage
 from app.ui.missing_values_dialogs import (
     DropMissingOptionsDialog,
     DropMissingPreviewDialog,
 )
-from app.ui.editor_analysis_page import EditorAnalysisPage
-from app.ui.style_utils import apply_card_shadow
+from app.ui.style_utils import apply_card_shadow, render_icon_pixmap
 from app.ui.scale import SCALE_PRESETS, ScaleManager, build_stylesheet, logical_width, scale_stylesheet, ui_px
-from app.ui.views.credits_overlay import show_credits_overlay
 from app.storage import Database, ProjectRepository, DatasetVersionManager
 from app.reports import ReportGenerator
 from app.core.config import get_data_dir
@@ -197,6 +195,11 @@ class DatasetAnalysisWorker(QObject):
 
     def run(self):
         try:
+            # This analyzer loads scikit-learn, which is comparatively slow to
+            # import. Defer it until a dataset analysis is actually requested
+            # so opening the desktop UI does not pay that cost up front.
+            from app.analyzer.ml_readiness import analyze_ml_readiness
+
             with ThreadPoolExecutor(max_workers=len(self.analyzers)) as executor:
                 futures = {
                     name: executor.submit(analyzer, self.dataframe)
@@ -1290,7 +1293,7 @@ class MiniLineChart(QFrame):
 
         if not self._values:
             painter.setPen(QColor("#A0ADBD"))
-            painter.drawText(chart, Qt.AlignCenter, "Run Academic Research to populate this chart")
+            painter.drawText(chart, Qt.AlignCenter, "Jalankan Academic Research untuk menampilkan grafik ini.")
             painter.end()
             return
 
@@ -1400,7 +1403,7 @@ class MiniBarChart(QFrame):
 
         if not self._values:
             painter.setPen(QColor("#A0ADBD"))
-            painter.drawText(chart, Qt.AlignCenter, "No research data yet")
+            painter.drawText(chart, Qt.AlignCenter, "Belum ada data riset")
             painter.end()
             return
 
@@ -1549,9 +1552,19 @@ class UploadDatasetDialog(QDialog):
             max(1, self.available_geometry.height() - 32),
             max(1, main_window.height() - 32),
         )
-        self.dialog_width = min(1027, safe_width)
-        self.dialog_height = min(757, safe_height)
-        self.compact_layout = self.dialog_width < 900 or self.dialog_height < 740
+        scale_manager = getattr(main_window, "scale_manager", None)
+        self.ui_scale = max(
+            0.01,
+            float(scale_manager.get_scale()) if scale_manager is not None else 1.0,
+        )
+        # MainWindow applies the selected scale to the dialog subtree after it is
+        # created, so keep these base dimensions in unscaled coordinates.
+        self.dialog_width = max(1, round(min(1027, safe_width / self.ui_scale)))
+        self.dialog_height = max(1, round(min(757, safe_height / self.ui_scale)))
+        final_width = self.dialog_width * self.ui_scale
+        final_height = self.dialog_height * self.ui_scale
+        self.compact_layout = final_width < 900 or final_height < 740
+        self.single_column_layout = final_width < 760
         self.setProperty("compact", self.compact_layout)
 
         self.surface = QFrame(self)
@@ -1608,7 +1621,7 @@ class UploadDatasetDialog(QDialog):
         title.setObjectName("uploadDialogTitle")
         content_layout.addWidget(title)
         content_layout.addSpacing(6 if self.compact_layout else 6)
-        subtitle = QLabel("Choose a CSV file and confirm how DORA should read it.")
+        subtitle = QLabel("Pilih file CSV dan konfirmasi cara DORA membacanya.")
         subtitle.setObjectName("uploadDialogSubtitle")
         subtitle.setWordWrap(True)
         content_layout.addWidget(subtitle)
@@ -1627,9 +1640,13 @@ class UploadDatasetDialog(QDialog):
         file_icon.setObjectName("uploadDialogFileIcon")
         file_icon.setAlignment(Qt.AlignCenter)
         file_icon.setFixedSize(72 if self.compact_layout else 80, 72 if self.compact_layout else 80)
-        icon = QPixmap(str(_resource_path("assets/icons/file-text.svg")))
-        if not icon.isNull():
-            file_icon.setPixmap(icon.scaled(42, 42, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        file_icon.setPixmap(
+            render_icon_pixmap(
+                _resource_path("assets/icons/file-text.svg"),
+                max(1, round(42 * self.ui_scale)),
+                file_icon.devicePixelRatioF(),
+            )
+        )
         file_layout.addWidget(file_icon)
         file_text = QVBoxLayout()
         file_text.setSpacing(4)
@@ -1637,9 +1654,9 @@ class UploadDatasetDialog(QDialog):
         filename.setObjectName("uploadDialogFileName")
         size_kb = self.file_path.stat().st_size / 1024 if self.file_path.exists() else 0
         details_text = (
-            f"{max(size_kb, 0.1):.1f} KB · {len(self.columns)} columns detected"
+            f"{max(size_kb, 0.1):.1f} KB · {len(self.columns)} kolom terdeteksi"
             if self.columns
-            else f"{max(size_kb, 0.1):.1f} KB · CSV file selected"
+            else f"{max(size_kb, 0.1):.1f} KB · file CSV dipilih"
         )
         details = QLabel(details_text)
         details.setObjectName("uploadDialogFileDetails")
@@ -1651,9 +1668,9 @@ class UploadDatasetDialog(QDialog):
 
         dataset_name = QLineEdit(self.file_path.name)
         delimiter = QComboBox()
-        delimiter.addItems(["Comma (,)" , "Semicolon (;)" , "Tab"])
+        delimiter.addItems(["Koma (,)" , "Titik koma (;)" , "Tab"])
         target = QComboBox()
-        target.addItems(self.columns or ["Select target column"])
+        target.addItems(self.columns or ["Pilih kolom target"])
         if "Survived" in self.columns:
             target.setCurrentText("Survived")
         encoding = QComboBox()
@@ -1663,21 +1680,25 @@ class UploadDatasetDialog(QDialog):
         fields.setContentsMargins(0, 0, 0 if self.compact_layout else 8, 0)
         fields.setHorizontalSpacing(10 if self.compact_layout else 15)
         fields.setVerticalSpacing(14 if self.compact_layout else 25)
-        fields.addWidget(self._field("DATASET NAME", dataset_name), 0, 0)
-        fields.addWidget(self._field("DEMILITER", delimiter), 0, 1)
-        target_field = self._field("TARGET COLUMN", target)
+        field_widgets = [
+            self._field("NAMA DATASET", dataset_name),
+            self._field("PEMISAH", delimiter),
+        ]
+        target_field = self._field("KOLOM TARGET", target)
         encoding_field = self._field("ENCODING", encoding)
         target_field.layout().setSpacing(17)
         encoding_field.layout().setSpacing(17)
-        fields.addWidget(target_field, 1, 0)
-        fields.addWidget(encoding_field, 1, 1)
-        fields.setColumnStretch(0, 1)
-        fields.setColumnStretch(1, 1)
+        field_widgets.extend((target_field, encoding_field))
+        columns = 1 if self.single_column_layout else 2
+        for index, field in enumerate(field_widgets):
+            fields.addWidget(field, index // columns, index % columns)
+        for column in range(columns):
+            fields.setColumnStretch(column, 1)
         content_layout.addLayout(fields)
         content_layout.addSpacing(18 if self.compact_layout else 26)
 
         first_row = SwitchCheckBox(
-            "First row contains column names",
+            "Baris pertama berisi nama kolom",
             getattr(self.main_window, "_theme_tokens", {}),
         )
         first_row.setObjectName("uploadDialogCheck")
@@ -1689,11 +1710,11 @@ class UploadDatasetDialog(QDialog):
         actions.setContentsMargins(0, 0, 0 if self.compact_layout else 8, 0)
         actions.setSpacing(10 if self.compact_layout else 14)
         actions.addStretch(1)
-        cancel = QPushButton("Cancel")
+        cancel = QPushButton("Batal")
         cancel.setObjectName("uploadDialogCancel")
         cancel.setFixedSize(126 if self.compact_layout else 153, 52 if self.compact_layout else 63)
         cancel.clicked.connect(lambda _checked=False: self.done(QDialog.Rejected))
-        confirm = QPushButton("Upload && Preview")
+        confirm = QPushButton("Unggah && Pratinjau")
         confirm.setObjectName("primaryButton")
         confirm.setFixedSize(230 if self.compact_layout else 291, 52 if self.compact_layout else 63)
         confirm.clicked.connect(lambda _checked=False: self.done(QDialog.Accepted))
@@ -1768,7 +1789,7 @@ class UploadPage(QWidget):
         title.setObjectName("pageTitle")
         title.setFixedHeight(42)
         title.setContentsMargins(0, 1, 0, 0)
-        subtitle = QLabel("Upload, preview and clean your CSV before analysis.")
+        subtitle = QLabel("Unggah, pratinjau, dan bersihkan file CSV sebelum analisis.")
         subtitle.setObjectName("pageSubtitle")
         subtitle.setFixedHeight(35)
         subtitle.setAlignment(Qt.AlignLeft | Qt.AlignTop)
@@ -1789,9 +1810,13 @@ class UploadPage(QWidget):
         upload_icon = QLabel()
         upload_icon.setObjectName("datasetPreviewUploadIcon")
         upload_icon.setFixedSize(32, 24)
-        upload_pixmap = QPixmap(str(_resource_path("assets/icons/upload.svg")))
-        if not upload_pixmap.isNull():
-            upload_icon.setPixmap(upload_pixmap.scaled(32, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        upload_icon.setPixmap(
+            render_icon_pixmap(
+                _resource_path("assets/icons/upload.svg"),
+                QSize(32, 24),
+                upload_icon.devicePixelRatioF(),
+            )
+        )
         upload_button_layout.addWidget(upload_icon)
         upload_text = QLabel("Upload Dataset")
         upload_text.setObjectName("datasetPreviewUploadText")
@@ -1820,7 +1845,7 @@ class UploadPage(QWidget):
         upload_layout.setContentsMargins(17, 18, 24, 28)
         upload_layout.setSpacing(40)
 
-        upload_title = QLabel("Upload a dataset")
+        upload_title = QLabel("Unggah dataset")
         upload_title.setObjectName("sectionTitle")
         upload_title.setObjectName("uploadPageSectionTitle")
         upload_title.setContentsMargins(18, 10, 0, 0)
@@ -1841,13 +1866,17 @@ class UploadPage(QWidget):
         icon_label.setObjectName("uploadDropIcon")
         icon_label.setAlignment(Qt.AlignCenter)
         icon_label.setFixedSize(70, 70)
-        upload_pixmap = QPixmap(str(_resource_path("assets/icons/file-arrow-up.svg")))
-        if not upload_pixmap.isNull():
-            icon_label.setPixmap(upload_pixmap.scaled(70, 70, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        icon_label.setPixmap(
+            render_icon_pixmap(
+                _resource_path("assets/icons/file-arrow-up.svg"),
+                70,
+                icon_label.devicePixelRatioF(),
+            )
+        )
         drop_layout.addWidget(icon_label, 0, Qt.AlignHCenter)
         drop_layout.addSpacing(14)
 
-        drop_title = QLabel("Drag & drop your file CSV file here")
+        drop_title = QLabel("Seret dan lepas file CSV di sini")
         drop_title.setObjectName("uploadDropTitle")
         drop_title.setAlignment(Qt.AlignCenter)
         drop_title.setWordWrap(True)
@@ -1858,17 +1887,17 @@ class UploadPage(QWidget):
         description_row.setContentsMargins(0, 0, 0, 0)
         description_row.setAlignment(Qt.AlignHCenter)
         description_row.setSpacing(2)
-        prefix = QLabel("or")
+        prefix = QLabel("atau")
         prefix.setObjectName("uploadDropDescription")
         prefix.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        browse_link = QPushButton("browse from your computer.")
+        browse_link = QPushButton("pilih dari komputer.")
         self.upload_browse_link = browse_link
         browse_link.setObjectName("uploadBrowseLink")
         browse_link.setFlat(True)
         browse_link.setCursor(Qt.PointingHandCursor)
         browse_link.clicked.connect(self.select_dataset)
         description_row.addWidget(browse_link, 0, 1, Qt.AlignLeft | Qt.AlignVCenter)
-        suffix = QLabel("csv up to 200 MB")
+        suffix = QLabel("CSV hingga 200 MB")
         suffix.setObjectName("uploadDropDescription")
         suffix.setObjectName("uploadDropSizeLimit")
         self.drop_size_label = suffix
@@ -1898,10 +1927,10 @@ class UploadPage(QWidget):
         for column, stretch in enumerate((197, 230, 253, 234)):
             steps_row.setColumnStretch(column, stretch)
         for number, heading, detail in (
-            ("1", "Upload CSV", "Choose your file"),
-            ("2", "Preview", "Check the first rows"),
-            ("3", "Quality check", "Missing values & outlier"),
-            ("4", "Analyze", "Continue to Analysis"),
+            ("1", "Unggah CSV", "Pilih file Anda"),
+            ("2", "Pratinjau", "Periksa beberapa baris pertama"),
+            ("3", "Pemeriksaan kualitas", "Periksa Missing Values & Outliers"),
+            ("4", "Analysis", "Lanjutkan ke Analysis"),
         ):
             step = QFrame()
             step.setObjectName("uploadStep")
@@ -1948,25 +1977,29 @@ class UploadPage(QWidget):
         search_icon.setObjectName("uploadSearchIcon")
         search_icon.setAlignment(Qt.AlignCenter)
         search_icon.setFixedSize(42, 42)
-        search_pixmap = QPixmap(str(_resource_path("assets/icons/search.svg")))
-        if not search_pixmap.isNull():
-            search_icon.setPixmap(search_pixmap.scaled(28, 28, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        search_icon.setPixmap(
+            render_icon_pixmap(
+                _resource_path("assets/icons/search.svg"),
+                28,
+                search_icon.devicePixelRatioF(),
+            )
+        )
         search_layout.addWidget(search_icon, 0, Qt.AlignLeft)
         search_layout.addSpacing(9)
-        search_title = QLabel("No dataset yet?")
+        search_title = QLabel("Belum ada data")
         search_title.setObjectName("cardTitle")
         search_title.setFixedSize(152, 24)
         search_layout.addWidget(search_title)
         search_layout.addSpacing(7)
         search_description = QLabel(
-            "Find public dataset form Kaggle and Hugging Face, then send them straight to DORA"
+            "Cari dataset publik di Kaggle dan Hugging Face, lalu impor langsung ke DORA."
         )
         search_description.setObjectName("cardDescription")
         search_description.setWordWrap(True)
         search_description.setFixedSize(392, 38)
         search_layout.addWidget(search_description)
         search_layout.addSpacing(17)
-        search_button = QPushButton("Open Dataset Search")
+        search_button = QPushButton("Buka Dataset Search")
         search_button.setObjectName("uploadSearchButton")
         search_button.setFixedSize(253, 63)
         search_button.clicked.connect(self.main_window.open_dataset_search_page)
@@ -1981,16 +2014,16 @@ class UploadPage(QWidget):
         tips_layout = QVBoxLayout(tips_card)
         tips_layout.setContentsMargins(22, 20, 22, 22)
         tips_layout.setSpacing(0)
-        tips_title = QLabel("Tips for a good upload")
+        tips_title = QLabel("Tips unggah CSV")
         tips_title.setObjectName("cardTitle")
         tips_title.setFixedSize(217, 24)
         tips_layout.addWidget(tips_title)
         tips_layout.addSpacing(24)
         tips = QLabel(
-            "1. First row contains column names\n"
-            "2. One table per file, comma separated\n"
-            "3. Choose your target column in the next step\n"
-            "4. Keep sensitive data out of shared files"
+            "1. Baris pertama berisi nama kolom\n"
+            "2. Gunakan satu tabel per file dengan pemisah koma\n"
+            "3. Pilih kolom target pada langkah berikutnya\n"
+            "4. Jangan sertakan data sensitif dalam file yang dibagikan"
         )
         tips.setObjectName("uploadTipsText")
         tips.setWordWrap(True)
@@ -2001,10 +2034,20 @@ class UploadPage(QWidget):
         content_row.addLayout(side_column, 100)
         layout.addLayout(content_row, 1)
 
-        self.info_label = QLabel("No dataset selected.")
+        self.info_label = QLabel("Belum ada dataset yang dipilih.")
         self.info_label.setObjectName("cardDescription")
         self.scroll.setWidget(container)
-        root.addWidget(self.scroll)
+        self.state_stack = QStackedWidget()
+        self.state_stack.addWidget(self.scroll)
+        self.loaded_page = LoadedUploadPage(self)
+        self.state_stack.addWidget(self.loaded_page)
+        root.addWidget(self.state_stack)
+
+    def update_loaded_state(self, dataframe, filename=""):
+        self.loaded_page.update_dataset(dataframe, filename)
+        self.state_stack.setCurrentWidget(
+            self.loaded_page if dataframe is not None else self.scroll
+        )
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -2091,7 +2134,7 @@ class UploadPage(QWidget):
         if not isinstance(file_path, (str, Path)) or not str(file_path):
             file_path, _ = QFileDialog.getOpenFileName(
                 self,
-                "Select Dataset",
+                "Pilih Dataset",
                 "",
                 "Datasets (*.csv *.tsv *.xlsx *.xls *.json *.parquet);;CSV/TSV Files (*.csv *.tsv);;Excel Files (*.xlsx *.xls);;JSON Files (*.json);;Parquet Files (*.parquet)",
             )
@@ -2151,10 +2194,10 @@ class UploadPage(QWidget):
 
 
             self.info_label.setText(
-                f"<b>File:</b> {filename}<br>"
-                f"<b>Size:</b> {file_size:.2f} KB<br>"
-                f"<b>Rows:</b> {len(dataframe):,}<br>"
-                f"<b>Columns:</b> "
+                f"<b>Nama file:</b> {filename}<br>"
+                f"<b>Ukuran:</b> {file_size:.2f} KB<br>"
+                f"<b>Baris:</b> {len(dataframe):,}<br>"
+                f"<b>Kolom:</b> "
                 f"{len(dataframe.columns):,}"
             )
 
@@ -2171,8 +2214,8 @@ class UploadPage(QWidget):
 
             QMessageBox.critical(
                 self,
-                "Upload Error",
-                "Failed to load dataset.\n\n"
+                "Gagal mengunggah dataset",
+                "Dataset gagal dimuat.\n\n"
                 f"{error}"
             )
 
@@ -2194,6 +2237,9 @@ class AnalysisPage(QWidget):
         self._analysis_worker: DatasetAnalysisWorker | None = None
         self._analysis_started_at = 0.0
         self._rendered_result_signature = None
+        self._deferred_analysis_result = None
+        self._detailed_analysis_prompt = None
+        self._detailed_analysis_loaded = False
         self._clean_preview_thread = None
         self._clean_preview_worker = None
         self._clean_version_thread = None
@@ -2204,6 +2250,124 @@ class AnalysisPage(QWidget):
         self._drop_dataframe = None
 
         self.build_ui()
+
+    @staticmethod
+    def _analysis_icon_pixmap(
+        name: str, size: int, color: str, device_pixel_ratio: float = 1.0
+    ) -> QPixmap:
+        """Draw the small line icons used by the analysis frame."""
+        ratio = max(1.0, float(device_pixel_ratio or 1.0))
+        pixel_size = max(1, round(size * ratio))
+        pixmap = QPixmap(pixel_size, pixel_size)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        pen = painter.pen()
+        pen.setColor(QColor(color))
+        pen.setWidthF(max(1.2, size / 12))
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+
+        scale = pixel_size / 24
+        painter.scale(scale, scale)
+        if name == "file-spreadsheet":
+            painter.drawRoundedRect(QRectF(4, 2.5, 16, 19), 2, 2)
+            painter.drawLine(9, 2.5, 9, 21.5)
+            painter.drawLine(9, 9, 20, 9)
+            painter.drawLine(9, 15, 20, 15)
+            painter.drawLine(14.5, 9, 14.5, 21.5)
+        elif name == "hash":
+            painter.drawLine(9, 3, 6, 21)
+            painter.drawLine(17, 3, 14, 21)
+            painter.drawLine(4, 9, 20, 9)
+            painter.drawLine(3, 15, 19, 15)
+        elif name == "copy":
+            painter.drawRoundedRect(QRectF(7, 3.5, 13.5, 16), 1.6, 1.6)
+            painter.drawRoundedRect(QRectF(3.5, 7, 13.5, 15), 1.6, 1.6)
+        elif name == "circle-alert":
+            painter.drawEllipse(QRectF(3, 3, 18, 18))
+            painter.drawLine(12, 7.5, 12, 13.5)
+            painter.drawPoint(12, 17)
+        elif name == "triangle-alert":
+            painter.drawLine(12, 3, 21, 20)
+            painter.drawLine(21, 20, 3, 20)
+            painter.drawLine(3, 20, 12, 3)
+            painter.drawLine(12, 8, 12, 13.5)
+            painter.drawPoint(12, 17)
+
+        painter.end()
+        pixmap.setDevicePixelRatio(ratio)
+        return pixmap
+
+    def _apply_analysis_frame_layout(self):
+        """Match the 1920 px design frame and keep smaller windows usable."""
+        scale = QApplication.instance().property("uiScale") or 1.0
+        window_height_getter = getattr(self.main_window, "height", None)
+        window_height = (
+            window_height_getter() if callable(window_height_getter) else self.height()
+        ) / max(float(scale), 0.01)
+        available_page_width = self.width() / max(float(scale), 0.01)
+        available_window_height = window_height
+        available_page_height = self.height() / max(float(scale), 0.01)
+        # The frame can be used whenever the page itself has room for its
+        # 1,683 px reference width; the sidebar and native window chrome are
+        # outside that page area and should not force a different composition.
+        target_frame = (
+            callable(window_height_getter)
+            and available_page_width >= 1683
+            and available_window_height >= 900
+        )
+
+        if target_frame:
+            bottom_margin = 104 if available_page_height >= 1024 else 16
+            margins = (43, 40, 60, bottom_margin)
+            header_height = 84
+            header_top = 8
+            spacing = 28
+        else:
+            margins = (28, 24, 28, 16)
+            header_height = 84
+            header_top = 0
+            spacing = 24
+
+        frame_scale = float(scale) if target_frame else None
+        self._target_frame_scale = frame_scale
+        px = (
+            (lambda value: round(value * frame_scale))
+            if target_frame
+            else ui_px
+        )
+        self._target_frame_layout = target_frame
+        self._root_layout.setContentsMargins(*(px(value) for value in margins))
+        self._header_widget.setFixedHeight(px(header_height))
+        self._header_layout.setContentsMargins(0, px(header_top), 0, 0)
+        if target_frame:
+            self._title_label.setFixedHeight(49)
+            self._subtitle_label.setFixedHeight(25)
+            self.analyze_button.setFixedSize(220, 52)
+            self._analyze_button_container.setFixedSize(220, 52)
+            self.dataset_label.setFixedHeight(92)
+            self.dataset_icon_container.setFixedSize(56, 56)
+            self.dataset_metrics_pill.setFixedSize(164, 22)
+            if getattr(self, "chart_type", None) is not None:
+                self.chart_type.setFixedSize(244, 53)
+                self.chart_column.setFixedSize(240, 53)
+                control_labels = self.findChildren(QLabel, "analysisControlLabel")
+                if len(control_labels) >= 2:
+                    control_labels[0].setFixedWidth(98)
+                    control_labels[1].setFixedWidth(49)
+        for index in (1, 3):
+            item = self._root_layout.itemAt(index)
+            spacer = item.spacerItem() if item is not None else None
+            if spacer is not None:
+                spacer.changeSize(
+                    0,
+                    px(spacing),
+                    QSizePolicy.Minimum,
+                    QSizePolicy.Fixed,
+                )
+        self._root_layout.invalidate()
+        self._root_layout.activate()
 
     def build_ui(self):
 
@@ -2226,7 +2390,7 @@ class AnalysisPage(QWidget):
         self._root_layout = root_layout
         root_layout.setSizeConstraint(QLayout.SetNoConstraint)
 
-        root_layout.setContentsMargins(36, 29, 25, 16)
+        root_layout.setContentsMargins(ui_px(43), ui_px(40), ui_px(60), ui_px(104))
         root_layout.setSpacing(0)
 
         # =================================================
@@ -2235,70 +2399,67 @@ class AnalysisPage(QWidget):
 
         header_widget = QWidget()
         self._header_widget = header_widget
+        self._header_widget.setFixedHeight(ui_px(84))
         header_layout = QHBoxLayout(header_widget)
         self._header_layout = header_layout
-        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setContentsMargins(0, ui_px(8), 0, 0)
         header_layout.setSpacing(0)
 
         title_layout = QVBoxLayout()
         title_layout.setContentsMargins(0, 0, 0, 0)
-        title_layout.setSpacing(4)
+        title_layout.setSpacing(ui_px(3))
 
         title = QLabel(
             "Dataset Analysis"
         )
         self._title_label = title
 
-        title.setObjectName(
-            "pageTitle"
-        )
-        title.setFixedHeight(40)
+        title.setObjectName("analysisPageTitle")
+        title.setFixedHeight(ui_px(49))
 
         subtitle = QLabel(
-            "Understand the structure, quality, "
-            "statistics, and relationships within your dataset."
+            "Pahami struktur, kualitas, statistik, dan hubungan antarvariabel dalam dataset Anda."
         )
         self._subtitle_label = subtitle
 
-        subtitle.setObjectName(
-            "analysisSubtitle"
-        )
+        subtitle.setObjectName("analysisSubtitle")
 
         subtitle.setWordWrap(True)
-        subtitle.setMinimumHeight(28)
+        subtitle.setFixedHeight(ui_px(25))
 
         title_layout.addWidget(title)
         title_layout.addWidget(subtitle)
 
         header_layout.addLayout(title_layout, 1)
 
-        self.analyze_button = QPushButton("Run Analysis")
+        self.analyze_button = QPushButton("Jalankan Analysis")
 
         self.analyze_button.setObjectName(
             "primaryButton"
         )
         self.analyze_button.setProperty("analysisRun", True)
 
-        self.analyze_button.setFixedSize(236, 63)
+        self.analyze_button.setFixedSize(ui_px(220), ui_px(52))
         run_icon = _resource_path("assets/icons/run.svg")
         if run_icon.exists():
             self.analyze_button.setIcon(QIcon(str(run_icon)))
-            self.analyze_button.setIconSize(QSize(32, 32))
+            self.analyze_button.setIconSize(QSize(ui_px(18), ui_px(18)))
 
         self.analyze_button.clicked.connect(
             self.run_analysis
         )
 
         analyze_button_container = QWidget()
-        analyze_button_container.setFixedSize(236, 65)
+        self._analyze_button_container = analyze_button_container
+        analyze_button_container.setFixedSize(ui_px(220), ui_px(52))
         analyze_button_layout = QVBoxLayout(analyze_button_container)
-        analyze_button_layout.setContentsMargins(0, 2, 0, 0)
+        analyze_button_layout.setContentsMargins(0, 0, 0, 0)
         analyze_button_layout.setSpacing(0)
         analyze_button_layout.addWidget(self.analyze_button)
         header_layout.addWidget(analyze_button_container, 0, Qt.AlignTop)
 
         root_layout.addWidget(header_widget)
-        root_layout.addSpacing(24)
+        root_layout.addSpacing(ui_px(28))
 
         # =================================================
         # DATASET READINESS SUMMARY
@@ -2355,24 +2516,50 @@ class AnalysisPage(QWidget):
         self.dataset_label.setObjectName(
             "analysisDatasetBanner"
         )
-        self.dataset_label.setFixedHeight(86)
+        self.dataset_label.setFixedHeight(ui_px(92))
         dataset_banner_layout = QHBoxLayout(self.dataset_label)
         self.dataset_banner_layout = dataset_banner_layout
-        dataset_banner_layout.setContentsMargins(32, 0, 19, 0)
-        dataset_banner_layout.setSpacing(12)
-        self.dataset_name_label = QLabel("No dataset loaded")
+        dataset_banner_layout.setContentsMargins(ui_px(22), 0, ui_px(24), 0)
+        dataset_banner_layout.setSpacing(ui_px(22))
+
+        self.dataset_icon_container = QFrame()
+        self.dataset_icon_container.setObjectName("analysisDatasetIconContainer")
+        self.dataset_icon_container.setFixedSize(ui_px(56), ui_px(56))
+        dataset_icon_layout = QVBoxLayout(self.dataset_icon_container)
+        dataset_icon_layout.setContentsMargins(0, 0, 0, 0)
+        dataset_icon_layout.setAlignment(Qt.AlignCenter)
+        self.dataset_icon = QLabel()
+        self.dataset_icon.setObjectName("analysisDatasetIcon")
+        self.dataset_icon.setPixmap(
+            self._analysis_icon_pixmap(
+                "file-spreadsheet", 24, "#3278F2", self.dataset_icon.devicePixelRatioF()
+            )
+        )
+        dataset_icon_layout.addWidget(self.dataset_icon)
+
+        self.dataset_name_label = QLabel("Belum ada dataset yang dimuat")
         self.dataset_name_label.setObjectName("analysisDatasetName")
-        self.dataset_name_label.setWordWrap(True)
+        self.dataset_name_label.setWordWrap(False)
+        self.dataset_name_label.setMinimumWidth(0)
+
+        self.dataset_metrics_pill = QFrame()
+        self.dataset_metrics_pill.setObjectName("analysisDatasetMetricsPill")
+        self.dataset_metrics_pill.setFixedSize(ui_px(164), ui_px(22))
+        metrics_layout = QHBoxLayout(self.dataset_metrics_pill)
+        metrics_layout.setContentsMargins(ui_px(12), 0, ui_px(12), 0)
+        metrics_layout.setSpacing(0)
         self.dataset_metrics_label = QLabel("")
         self.dataset_metrics_label.setObjectName("analysisDatasetMetrics")
-        self.dataset_metrics_label.setWordWrap(True)
+        self.dataset_metrics_label.setWordWrap(False)
+        metrics_layout.addWidget(self.dataset_metrics_label, 1, Qt.AlignCenter)
+        dataset_banner_layout.addWidget(self.dataset_icon_container)
         dataset_banner_layout.addWidget(self.dataset_name_label)
         dataset_banner_layout.addStretch(1)
-        dataset_banner_layout.addWidget(self.dataset_metrics_label)
+        dataset_banner_layout.addWidget(self.dataset_metrics_pill)
         apply_card_shadow(self.dataset_label)
 
         root_layout.addWidget(self.dataset_label)
-        root_layout.addSpacing(20)
+        root_layout.addSpacing(ui_px(28))
 
         # =================================================
         # RESULT AREA
@@ -2416,6 +2603,9 @@ class AnalysisPage(QWidget):
         self.page_scroll.setWidget(content)
         page_layout.addWidget(self.page_scroll)
 
+        self.result_scroll = scroll
+        self._apply_analysis_frame_layout()
+
         self.show_empty_state()
 
     # =====================================================
@@ -2428,9 +2618,9 @@ class AnalysisPage(QWidget):
         self._rendered_result_signature = None
 
         label = QLabel(
-            "No analysis results yet.\n\n"
-            "Upload a dataset and click "
-            "\"Run Analysis\"."
+            "Belum ada hasil analisis.\n\n"
+            "Unggah dataset, lalu pilih "
+            "\"Jalankan Analysis\"."
         )
 
         label.setObjectName(
@@ -2452,17 +2642,23 @@ class AnalysisPage(QWidget):
         self._subtitle_label.setSizePolicy(
             QSizePolicy.Ignored, QSizePolicy.Preferred
         )
-        horizontal_margin = ui_px(32 if compact else 61)
+        frame_scale = getattr(self, "_target_frame_scale", None)
+        px = (
+            (lambda value: round(value * frame_scale))
+            if frame_scale is not None
+            else ui_px
+        )
+        horizontal_margin = px(32 if compact else 61)
         button_width = 0 if compact else self.analyze_button.width()
         subtitle_width = max(1, width - horizontal_margin - button_width)
         subtitle_height = self._subtitle_label.heightForWidth(subtitle_width)
-        self._subtitle_label.setFixedHeight(max(ui_px(28), subtitle_height))
+        self._subtitle_label.setFixedHeight(max(px(25 if self._target_frame_layout else 28), subtitle_height))
         if compact:
             self._header_widget.setMinimumHeight(
                 self._title_label.minimumHeight()
                 + self._subtitle_label.minimumHeight()
                 + self.analyze_button.minimumHeight()
-                + ui_px(18)
+                + px(18)
             )
         else:
             self._header_widget.setMinimumHeight(0)
@@ -2490,19 +2686,23 @@ class AnalysisPage(QWidget):
         )
         chart_controls = getattr(self, "chart_controls", None)
         if chart_controls is not None:
-            if logical_width(width) < 900:
-                chart_controls.setDirection(QBoxLayout.TopToBottom)
-                self.chart_type.setFixedWidth(max(ui_px(180), width - ui_px(80)))
-                self.chart_column.setMinimumWidth(0)
-            else:
-                chart_controls.setDirection(QBoxLayout.LeftToRight)
-                self.chart_type.setFixedWidth(ui_px(338))
-                self.chart_column.setMinimumWidth(ui_px(200))
+            try:
+                if logical_width(width) < 900:
+                    chart_controls.setDirection(QBoxLayout.TopToBottom)
+                    self.chart_type.setFixedWidth(max(ui_px(180), width - ui_px(80)))
+                    self.chart_column.setMinimumWidth(0)
+                else:
+                    chart_controls.setDirection(QBoxLayout.LeftToRight)
+                    self.chart_type.setFixedWidth(ui_px(338))
+                    self.chart_column.setMinimumWidth(ui_px(200))
+            except RuntimeError:
+                # Result cards are replaced with deleteLater(); a resize callback
+                # can run before Qt has cleared this Python reference.
+                self.chart_controls = None
 
     def showEvent(self, event):
         super().showEvent(event)
-        self._apply_responsive_layout(self.width())
-        self._apply_overview_layout(self.width())
+        self._refresh_analysis_layout(self.width())
 
     @staticmethod
     def _readiness_metric(label):
@@ -2603,6 +2803,27 @@ class AnalysisPage(QWidget):
 
     def clear_results(self):
 
+        # Result cards are destroyed asynchronously by deleteLater(). Drop
+        # their references before a resize/show callback can use old layouts.
+        self._deferred_analysis_result = None
+        self._detailed_analysis_prompt = None
+        self._detailed_analysis_loaded = False
+        for attribute in (
+            "chart_controls",
+            "chart_type",
+            "chart_column",
+            "chart_message",
+            "chart_canvas",
+            "chart_figure",
+            "visualization_card",
+            "_overview_layout",
+            "_overview_widget",
+            "_overview_visualization_host",
+            "_overview_side_column",
+        ):
+            setattr(self, attribute, None)
+        getattr(self, "_ml_readiness_cards", {}).clear()
+
         while self.result_layout.count():
 
             item = self.result_layout.takeAt(0)
@@ -2674,7 +2895,7 @@ class AnalysisPage(QWidget):
     def _show_analysis_error(self, error):
         self._update_readiness(failed=True)
         self.clear_results()
-        label = QLabel(f"Analysis failed.\n\n{error}")
+        label = QLabel(f"Analisis gagal.\n\n{error}")
         label.setObjectName("errorState")
         label.setWordWrap(True)
         self.result_layout.addWidget(label)
@@ -2690,14 +2911,14 @@ class AnalysisPage(QWidget):
             self._show_analysis_error(error)
         finally:
             self.analyze_button.setEnabled(True)
-            self.analyze_button.setText("Run Analysis")
+            self.analyze_button.setText("Jalankan Analysis")
 
     def _on_analysis_failed(self, error):
         duration_ms = int((time.perf_counter() - self._analysis_started_at) * 1000)
         self.main_window.fail_dataset_analysis(duration_ms)
         self._show_analysis_error(error)
         self.analyze_button.setEnabled(True)
-        self.analyze_button.setText("Run Analysis")
+        self.analyze_button.setText("Jalankan Analysis")
 
     def _cleanup_analysis_worker(self):
         self._analysis_worker = None
@@ -2733,93 +2954,128 @@ class AnalysisPage(QWidget):
         self._build_visualization_panel()
         overview = QFrame()
         overview.setObjectName("analysisOverview")
-        overview.setMinimumHeight(682)
+        overview.setMinimumHeight(ui_px(648))
+        self._overview_widget = overview
         overview_layout = QHBoxLayout(overview)
         self._overview_layout = overview_layout
-        overview_layout.setContentsMargins(0, 0, 6, 0)
-        overview_layout.setSpacing(16)
-        overview_layout.addWidget(self.visualization_card, 1)
+        overview_layout.setContentsMargins(0, 0, 0, 0)
+        overview_layout.setSpacing(ui_px(20))
+        visualization_host = QWidget()
+        visualization_host.setObjectName("analysisVisualizationHost")
+        visualization_host_layout = QVBoxLayout(visualization_host)
+        visualization_host_layout.setContentsMargins(0, ui_px(11), 0, 0)
+        visualization_host_layout.setSpacing(0)
+        visualization_host_layout.addWidget(self.visualization_card, 0, Qt.AlignTop)
+        self._overview_visualization_host = visualization_host
+        overview_layout.addWidget(visualization_host, 0, Qt.AlignTop)
 
         side_panel = QWidget()
         side_column = QVBoxLayout(side_panel)
         side_column.setContentsMargins(0, 0, 0, 0)
-        side_column.setSpacing(18)
+        side_column.setSpacing(ui_px(24))
         side_column.addWidget(self._build_fingerprint_card(fingerprint))
         problem_definition = ml_readiness.get("problem_definition") or {}
         problem_card = self._build_readiness_summary_card(
-            "Problem Definition",
-            problem_definition.get("summary", "Target not detected"),
+            "Definisi Masalah",
+            problem_definition.get("summary", "Target belum terdeteksi"),
             problem_definition.get("status", "Warning"),
             [
-                ("Target", problem_definition.get("target") or "Target not detected"),
-                ("ML Task", problem_definition.get("task") or "Not detected"),
-                ("Recommended Metrics", problem_definition.get("metrics") or "Not available"),
+                ("Target", problem_definition.get("target") or "Target belum terdeteksi"),
+                ("ML Task", problem_definition.get("task") or "Belum terdeteksi"),
+                ("Metrik yang Disarankan", problem_definition.get("metrics") or "Tidak tersedia"),
                 (
                     "Target Confidence",
                     f"{problem_definition['target_score']}/100"
                     if problem_definition.get("target_score") is not None
-                    else "Not available",
+                    else "Tidak tersedia",
                 ),
             ],
             "Validate the target and metrics against the research objective."
             if problem_definition.get("target")
-            else "Select or identify a target before supervised modeling.",
+            else "Pilih atau identifikasi target sebelum menggunakan supervised modeling.",
         )
         self._ml_readiness_cards["problem_definition"] = problem_card
-        side_column.addWidget(problem_card)
 
         quality = ml_readiness.get("quality_summary") or {}
         quality_card = self._build_quality_summary_card(
-            quality, result.get("data_quality") or []
+            quality,
+            result.get("data_quality") or [],
+            missing_values,
+            outliers,
         )
         self._ml_readiness_cards["quality_summary"] = quality_card
         side_column.addWidget(quality_card, 1)
-        overview_layout.addWidget(side_panel)
+        overview_layout.addWidget(side_panel, 0, Qt.AlignLeft | Qt.AlignTop)
         self._overview_side_column = side_panel
         self.result_layout.addWidget(overview)
         self.result_layout.addSpacing(28)
+        self.result_layout.addWidget(problem_card)
 
-        # Keep the analyzer's detailed result views and their action handlers
-        # available below the Figma overview.
-        self.add_cell_profiling(profile, fingerprint, statistics)
-
-        # =================================================
-        # DATA QUALITY
-        # =================================================
-        quality_issues = result.get("data_quality") or []
-        self.add_cell_data_quality(quality_issues)
-
-        # =================================================
-        # MISSING VALUES
-        # =================================================
-        self.add_cell_missing_values(missing_values)
-
-        # =================================================
-        # OUTLIERS
-        # =================================================
-        self.add_cell_outliers(outliers)
-
-        # =================================================
-        # CORRELATIONS
-        # =================================================
-        # =================================================
-        # DATASET VERSIONS
-        # =================================================
-        self.add_versioning_section()
-
-        # =================================================
-        # AUTOMATED INTERPRETATION
-        # =================================================
-        self.add_cell_gemini(result)
-
-        self.add_ml_readiness_sections(ml_readiness)
-
-        self.result_layout.addStretch()
+        # Detailed tables, version history, and generated explanations can
+        # create many widgets. Keep the first Analysis view quick and build
+        # those sections only when the user asks to inspect them.
+        self._deferred_analysis_result = result
+        self._detailed_analysis_loaded = False
+        self._add_detailed_analysis_prompt()
         self._rendered_result_signature = (
             id(result),
             id(self.main_window.current_dataset),
         )
-        self._apply_overview_layout(self.width())
+        self._refresh_analysis_layout(self.width())
+        QTimer.singleShot(0, lambda: self._refresh_analysis_layout(self.width()))
+
+    def _add_detailed_analysis_prompt(self):
+        card = QFrame()
+        card.setObjectName("contentCard")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(8)
+
+        title = QLabel("Detail analisis lanjutan")
+        title.setObjectName("sectionTitle")
+        description = QLabel(
+            "Profil kolom, tabel kualitas data, riwayat versi, dan detail ML "
+            "akan dimuat saat dibutuhkan."
+        )
+        description.setObjectName("cardDescription")
+        description.setWordWrap(True)
+        button = QPushButton("Tampilkan detail analisis")
+        button.setObjectName("secondaryButton")
+        button.clicked.connect(self._load_detailed_analysis)
+
+        layout.addWidget(title)
+        layout.addWidget(description)
+        layout.addWidget(button, 0, Qt.AlignLeft)
+        self._detailed_analysis_prompt = card
+        self.result_layout.addWidget(card)
+
+    def _load_detailed_analysis(self):
+        if self._detailed_analysis_loaded:
+            return
+        result = self._deferred_analysis_result
+        if not isinstance(result, dict):
+            return
+
+        self._detailed_analysis_loaded = True
+        prompt = self._detailed_analysis_prompt
+        if prompt is not None:
+            self.result_layout.removeWidget(prompt)
+            prompt.deleteLater()
+        self._detailed_analysis_prompt = None
+
+        self.add_cell_profiling(
+            result.get("profile") or {},
+            result.get("fingerprint") or {},
+            result.get("statistics") or [],
+        )
+        self.add_cell_data_quality(result.get("data_quality") or [])
+        self.add_cell_missing_values(result.get("missing_values") or [])
+        self.add_cell_outliers(result.get("outliers") or [])
+        self.add_versioning_section()
+        self.add_cell_gemini(result)
+        self.add_ml_readiness_sections(result.get("ml_readiness") or {})
+        self.result_layout.addStretch()
+        self._refresh_analysis_layout(self.width())
 
     def _append_ml_readiness_section(
         self,
@@ -2847,7 +3103,7 @@ class AnalysisPage(QWidget):
         status_badge.setProperty("state", status.casefold())
         header.addWidget(status_badge)
         layout.addLayout(header)
-        summary_label = QLabel(summary or "Not applicable for this dataset")
+        summary_label = QLabel(summary or "Tidak berlaku untuk dataset ini.")
         summary_label.setObjectName("cardDescription")
         summary_label.setWordWrap(True)
         layout.addWidget(summary_label)
@@ -2882,12 +3138,12 @@ class AnalysisPage(QWidget):
                 table.cellClicked.connect(self._on_ml_checklist_row_clicked)
             layout.addWidget(table)
         elif empty_state:
-            empty_label = QLabel("Not applicable for this dataset")
+            empty_label = QLabel("Tidak berlaku untuk dataset ini.")
             empty_label.setObjectName("cardDescription")
             layout.addWidget(empty_label)
 
         if recommendation:
-            recommendation_label = QLabel(f"Recommendation: {recommendation}")
+            recommendation_label = QLabel(f"Rekomendasi: {recommendation}")
             recommendation_label.setObjectName("cardDescription")
             recommendation_label.setWordWrap(True)
             layout.addWidget(recommendation_label)
@@ -2916,19 +3172,19 @@ class AnalysisPage(QWidget):
             for item in type_data.get("columns", [])
         ]
         type_warnings = any(item.get("numeric_as_text") for item in type_data.get("columns", []))
-        type_summary = type_data.get("summary", "Not applicable for this dataset")
+        type_summary = type_data.get("summary", "Tidak berlaku untuk dataset ini.")
         if type_data.get("sample_note"):
             type_summary += f" {type_data['sample_note']}."
         if type_warnings:
-            type_summary += " Numeric text requires review."
+            type_summary += " Teks numerik perlu ditinjau."
         self._append_ml_readiness_section(
             "data_types",
             "Data Types Overview",
             type_summary,
             "Warning" if type_warnings else type_data.get("status", "OK"),
-            ["Column", "Detected Type", "Unique Values", "Sample Values", "Recommendation"],
+            ["Kolom", "Tipe Terdeteksi", "Nilai Unik", "Contoh Nilai", "Rekomendasi"],
             type_rows,
-            "Review numeric text and exclude ID-like columns from model features.",
+            "Tinjau teks numerik dan kecualikan kolom yang menyerupai ID dari Feature model.",
             empty_state=not type_rows,
         )
 
@@ -2950,9 +3206,9 @@ class AnalysisPage(QWidget):
                 item.get("column"),
                 "Categorical Distribution",
                 f"{item.get('cardinality')} cardinality · {item.get('unique_count')} unique",
-                top_text or "Not applicable for this dataset",
+                top_text or "Tidak berlaku untuk dataset ini.",
             ])
-        distribution_summary = distributions.get("summary", "Not applicable for this dataset")
+        distribution_summary = distributions.get("summary", "Tidak berlaku untuk dataset ini.")
         if distributions.get("sample_note"):
             distribution_summary += f" {distributions['sample_note']}."
         self._append_ml_readiness_section(
@@ -2960,14 +3216,14 @@ class AnalysisPage(QWidget):
             "Distribution Analysis",
             distribution_summary,
             "OK" if distribution_rows else "Warning",
-            ["Column", "Analysis", "Result", "Details"],
+            ["Kolom", "Analysis", "Hasil", "Rincian"],
             distribution_rows,
-            "Review skewed distributions before selecting transformations or scale-sensitive models.",
+            "Tinjau distribusi yang menceng sebelum memilih transformasi atau model yang sensitif terhadap skala.",
             empty_state=not distribution_rows,
         )
 
         balance = readiness.get("class_balance") or {}
-        balance_summary = balance.get("summary", "Target not detected")
+        balance_summary = balance.get("summary", "Target belum terdeteksi")
         if distributions.get("sample_note"):
             balance_summary += f" {distributions['sample_note']}."
         if balance.get("imbalance_ratio") is not None:
@@ -2983,13 +3239,13 @@ class AnalysisPage(QWidget):
             balance.get("status", "OK"),
             ["Class", "Count", "Percentage"],
             balance_rows,
-            "Review stratified splitting and class-sensitive metrics when imbalance is present."
-            if balance.get("applicable") else "Not applicable for this dataset",
+            "Tinjau stratified split dan metrik yang peka terhadap kelas jika data tidak seimbang."
+            if balance.get("applicable") else "Tidak berlaku untuk dataset ini.",
             empty_state=not balance_rows,
         )
 
         leakage = readiness.get("leakage") or {}
-        leakage_summary = leakage.get("summary", "Target not detected")
+        leakage_summary = leakage.get("summary", "Target belum terdeteksi")
         if distributions.get("sample_note"):
             leakage_summary += f" {distributions['sample_note']}."
         leakage_rows = [
@@ -3001,9 +3257,9 @@ class AnalysisPage(QWidget):
             "Data Leakage Check",
             leakage_summary,
             leakage.get("status", "Warning"),
-            ["Feature", "Reason"],
+            ["Feature", "Alasan"],
             leakage_rows,
-            "Review flagged features and exclude identifiers or target-derived fields where appropriate.",
+            "Tinjau Feature yang ditandai dan kecualikan identifier atau kolom turunan target bila diperlukan.",
             empty_state=not leakage_rows,
         )
 
@@ -3019,15 +3275,15 @@ class AnalysisPage(QWidget):
         self._append_ml_readiness_section(
             "split",
             "Train/Test Split Recommendation",
-            split.get("summary", "Not applicable for this dataset"),
+            split.get("summary", "Tidak berlaku untuk dataset ini."),
             split.get("status", "Warning"),
             ["Setting", "Recommendation"],
             split_rows,
-            split.get("recommendation", "Review split strategy before modeling."),
+            split.get("recommendation", "Tinjau strategi split sebelum melatih model."),
         )
 
         preprocessing = readiness.get("preprocessing") or {}
-        preprocessing_summary = preprocessing.get("summary", "Not applicable for this dataset")
+        preprocessing_summary = preprocessing.get("summary", "Tidak berlaku untuk dataset ini.")
         if distributions.get("sample_note"):
             preprocessing_summary += f" {distributions['sample_note']}."
         preprocessing_rows = []
@@ -3067,7 +3323,7 @@ class AnalysisPage(QWidget):
         selection = readiness.get("feature_selection") or {}
         selection_rows = []
         selection_rows.extend([["Constant", column, "Remove or review"] for column in selection.get("constant_columns", [])])
-        selection_rows.extend([["Near-constant", column, "Review low variance"] for column in selection.get("near_constant_columns", [])])
+        selection_rows.extend([["Near-constant", column, "Tinjau variance yang rendah"] for column in selection.get("near_constant_columns", [])])
         selection_rows.extend([
             ["High Correlation", f"{item.get('left')} / {item.get('right')}", f"|r| = {item.get('correlation', 0):.3f}"]
             for item in selection.get("correlated_pairs", [])
@@ -3076,7 +3332,7 @@ class AnalysisPage(QWidget):
             ["Quick Feature Importance", item.get("feature"), f"{item.get('importance', 0):.4f}"]
             for item in selection.get("importance", [])
         ])
-        selection_summary = selection.get("summary", "Not applicable for this dataset")
+        selection_summary = selection.get("summary", "Tidak berlaku untuk dataset ini.")
         if selection.get("importance_note"):
             selection_summary += f" {selection['importance_note']}."
         self._append_ml_readiness_section(
@@ -3086,7 +3342,7 @@ class AnalysisPage(QWidget):
             selection.get("status", "OK"),
             ["Hint", "Feature", "Result"],
             selection_rows,
-            selection.get("recommendation", "Review features before modeling."),
+            selection.get("recommendation", "Tinjau Feature sebelum melatih model."),
             empty_state=not selection_rows,
         )
 
@@ -3094,10 +3350,10 @@ class AnalysisPage(QWidget):
         done_count = sum(item.get("status") == "Done" for item in checklist)
         self._append_ml_readiness_section(
             "pipeline_checklist",
-            "ML Pipeline Checklist",
+            "Checklist ML Pipeline",
             f"{done_count} of {len(checklist)} stages done; remaining stages are guidance or not available yet.",
             "OK" if checklist and done_count == len(checklist) else "Warning" if checklist else "Issue",
-            ["Stage", "Status", "Details"],
+            ["Tahap", "Status", "Rincian"],
             [[item.get("stage"), item.get("status"), item.get("details")] for item in checklist],
             "Recommendations are analytical suggestions, not decisions.",
             empty_state=not checklist,
@@ -3130,52 +3386,143 @@ class AnalysisPage(QWidget):
         overview_layout = getattr(self, "_overview_layout", None)
         if overview_layout is None:
             return
-        stacked = logical_width(width) < 1250
+        if not is_qt_object_valid(overview_layout):
+            self._overview_layout = None
+            self._overview_widget = None
+            self._overview_visualization_host = None
+            self._overview_side_column = None
+            self.visualization_card = None
+            return
+        frame_scale = getattr(self, "_target_frame_scale", None)
+        px = (
+            (lambda value: round(value * frame_scale))
+            if frame_scale is not None
+            else ui_px
+        )
+        stacked = (
+            not getattr(self, "_target_frame_layout", False)
+            and logical_width(width) < 1680
+        )
         overview_layout.setDirection(
             QBoxLayout.TopToBottom if stacked else QBoxLayout.LeftToRight
         )
-        overview_layout.setStretch(0, 1)
-        overview_layout.setStretch(1, 0)
+        overview = getattr(self, "_overview_widget", None)
+        visualization = getattr(self, "visualization_card", None)
+        visualization_host = getattr(self, "_overview_visualization_host", None)
         side_panel = getattr(self, "_overview_side_column", None)
-        if side_panel is not None:
-            if stacked:
-                overview_layout.setContentsMargins(0, 0, 0, 0)
+        if not is_qt_object_valid(overview):
+            overview = None
+        if not is_qt_object_valid(visualization):
+            visualization = None
+        if not is_qt_object_valid(visualization_host):
+            visualization_host = None
+        if not is_qt_object_valid(side_panel):
+            side_panel = None
+        if stacked:
+            overview_layout.setStretch(0, 1)
+            overview_layout.setStretch(1, 0)
+            overview_layout.setContentsMargins(0, 0, 0, 0)
+            overview_layout.setSpacing(px(16))
+            if overview is not None:
+                overview.setMinimumHeight(0)
+                overview.setMaximumHeight(16777215)
+            if visualization is not None:
+                visualization.setMinimumWidth(0)
+                visualization.setMaximumWidth(16777215)
+                visualization.setMinimumHeight(px(596))
+                visualization.setMaximumHeight(16777215)
+            if visualization_host is not None:
+                visualization_host.setMinimumWidth(0)
+                visualization_host.setMaximumWidth(16777215)
+                visualization_host.setMinimumHeight(0)
+                visualization_host.setMaximumHeight(16777215)
+            if side_panel is not None:
                 side_panel.setMinimumWidth(0)
                 side_panel.setMaximumWidth(16777215)
-            else:
-                overview_layout.setContentsMargins(0, 0, 6, 0)
-                side_panel.setFixedWidth(ui_px(450))
+                side_panel.setMinimumHeight(0)
+                side_panel.setMaximumHeight(16777215)
+        else:
+            overview_layout.setStretch(0, 0)
+            overview_layout.setStretch(1, 0)
+            overview_layout.setContentsMargins(
+                px(4), 0, px(72), 0
+            )
+            overview_layout.setSpacing(px(20))
+            if overview is not None:
+                overview.setFixedHeight(px(648))
+            if visualization is not None:
+                visualization.setFixedSize(px(1028), px(596))
+            if visualization_host is not None:
+                visualization_host.setFixedSize(px(1028), px(607))
+            if side_panel is not None:
+                side_panel.setFixedSize(px(456), px(648))
+        overview_layout.invalidate()
+        overview_layout.activate()
+
+    def _refresh_analysis_layout(self, width=None):
+        """Apply frame sizing before responsive overrides on the Analysis page."""
+        width = self.width() if width is None else width
+        self._apply_analysis_frame_layout()
+        self._apply_responsive_layout(width)
+        if getattr(self, "_target_frame_layout", False):
+            # Restore the exact frame dimensions after the responsive pass.
+            self._apply_analysis_frame_layout()
+        self._apply_overview_layout(width)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self._apply_responsive_layout(event.size().width())
-        self._apply_overview_layout(event.size().width())
+        self._refresh_analysis_layout(event.size().width())
 
     def _build_fingerprint_card(self, fingerprint):
         card = QFrame()
         card.setObjectName("analysisFingerprintCard")
-        card.setMinimumHeight(162)
+        card.setFixedHeight(ui_px(172))
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(15, 14, 15, 16)
-        layout.setSpacing(2)
+        layout.setContentsMargins(
+            ui_px(26), ui_px(22), ui_px(26), ui_px(26)
+        )
+        layout.setSpacing(0)
 
-        title = QLabel("Sidik jari dataset")
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.setSpacing(ui_px(12))
+        icon = QLabel()
+        icon.setObjectName("analysisFingerprintIcon")
+        icon.setFixedSize(ui_px(20), ui_px(20))
+        icon.setPixmap(
+            self._analysis_icon_pixmap(
+                "hash", ui_px(20), "#172235", icon.devicePixelRatioF()
+            )
+        )
+        title_row.addWidget(icon)
+
+        title = QLabel("Dataset Fingerprint")
         title.setObjectName("analysisPanelTitle")
-        title.setFixedHeight(30)
-        layout.addWidget(title)
+        title.setFixedHeight(ui_px(29))
+        title_row.addWidget(title)
+        title_row.addStretch(1)
+        layout.addLayout(title_row)
+        layout.addSpacing(ui_px(15))
+
         algorithm = QLabel("SHA-256")
         algorithm.setObjectName("analysisPanelSubtitle")
-        algorithm.setFixedHeight(42)
+        algorithm.setFixedHeight(ui_px(20))
         layout.addWidget(algorithm)
+        layout.addSpacing(ui_px(12))
 
         hash_value = fingerprint.get("fingerprint") if isinstance(fingerprint, dict) else ""
-        value = QLabel(f"{hash_value[:32]}.." if hash_value else "Belum tersedia")
+        value_frame = QFrame()
+        value_frame.setObjectName("analysisFingerprintValueContainer")
+        value_frame.setFixedHeight(ui_px(44))
+        value_layout = QHBoxLayout(value_frame)
+        value_layout.setContentsMargins(ui_px(14), 0, ui_px(14), 0)
+        value_layout.setSpacing(0)
+        value = QLabel(f"{hash_value[:32]}..." if hash_value else "Tidak tersedia")
         value.setObjectName("analysisFingerprintValue")
-        value.setFixedHeight(48)
         value.setTextInteractionFlags(Qt.TextSelectableByMouse)
         value.setToolTip(str(hash_value or ""))
-        layout.addWidget(value)
-        apply_card_shadow(card)
+        value_layout.addWidget(value)
+        layout.addWidget(value_frame)
         return card
 
     def _build_readiness_summary_card(
@@ -3222,28 +3569,43 @@ class AnalysisPage(QWidget):
             row.addWidget(value_label, 2)
             layout.addLayout(row)
 
-        note = QLabel(f"Recommendation: {recommendation}")
+        note = QLabel(f"Rekomendasi: {recommendation}")
         note.setObjectName("cardDescription")
         note.setWordWrap(True)
         layout.addWidget(note)
         apply_card_shadow(card)
         return card
 
-    def _build_quality_summary_card(self, quality, quality_issues):
-        """Render the key dataset quality checks in the analysis overview."""
+    def _build_quality_summary_card(
+        self, quality, quality_issues, missing_values=None, outliers=None
+    ):
+        """Render real analyzer counts in the quality summary from the frame."""
         card = QFrame()
-        card.setObjectName("contentCard")
+        card.setObjectName("analysisQualitySummaryCard")
+        card.setFixedHeight(ui_px(452))
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(18, 16, 18, 16)
-        layout.setSpacing(8)
+        layout.setContentsMargins(
+            ui_px(22), ui_px(18), ui_px(22), ui_px(50)
+        )
+        layout.setSpacing(0)
 
-        header = QHBoxLayout()
         heading = QLabel("Kualitas data")
-        heading.setObjectName("sectionTitle")
-        header.addWidget(heading, 1)
+        heading.setObjectName("analysisQualityTitle")
+        heading.setFixedHeight(ui_px(29))
+        layout.addWidget(heading)
+        layout.addSpacing(ui_px(11))
+
+        summary = QLabel(
+            "Ringkasan Missing Values, Outliers, dan baris duplikat."
+        )
+        summary.setObjectName("analysisQualitySubtitle")
+        summary.setWordWrap(True)
+        summary.setFixedHeight(ui_px(42))
+        layout.addWidget(summary)
+        layout.addSpacing(ui_px(22))
 
         issues_by_category = {}
-        for item in quality_issues:
+        for item in quality_issues or []:
             if isinstance(item, dict):
                 category = item.get("category")
                 severity = item.get("severity", "info")
@@ -3251,94 +3613,136 @@ class AnalysisPage(QWidget):
                 category = getattr(item, "category", None)
                 severity = getattr(item, "severity", "info")
             if category:
-                issues_by_category.setdefault(category, []).append(str(severity).casefold())
+                issues_by_category.setdefault(category, []).append(
+                    str(severity).casefold()
+                )
 
         def state_for(category, count):
             if not count:
                 return "ok"
             severities = issues_by_category.get(category, [])
-            if "critical" in severities:
+            if "critical" in severities or category == "missing_values":
                 return "issue"
             return "warning"
 
-        counts = (
-            int(quality.get("missing_cells") or 0),
-            int(quality.get("duplicate_rows") or 0),
-            int(quality.get("outlier_values") or 0),
+        missing_values = missing_values or []
+        missing_columns = [
+            str(item.get("column"))
+            for item in missing_values
+            if isinstance(item, dict) and int(item.get("missing_count") or 0) > 0
+        ]
+        missing_count = int(
+            quality.get("missing_cells")
+            if quality.get("missing_cells") is not None
+            else sum(
+                int(item.get("missing_count") or 0)
+                for item in missing_values
+                if isinstance(item, dict)
+            )
         )
-        main_states = (
-            state_for("missing_values", counts[0]),
-            state_for("duplicates", counts[1]),
-            state_for("outliers", counts[2]),
+        missing_detail = (
+            f"{missing_count:,} cells across {len(missing_columns)} columns "
+            f"({', '.join(missing_columns[:3])})"
+            if missing_count and missing_columns
+            else f"{missing_count:,} empty cells"
+            if missing_count
+            else "No missing values"
         )
-        all_severities = {
-            severity for severities in issues_by_category.values()
-            for severity in severities
-        }
-        overall_state = (
-            "issue" if "critical" in all_severities or "issue" in main_states
-            else "warning"
-            if "warning" in all_severities or "info" in all_severities
-            or "warning" in main_states or quality.get("status") == "Issue"
-            else "ok"
-        )
-        badge_text = {"ok": "Baik", "warning": "Tinjau", "issue": "Kritis"}
-        badge = QLabel(badge_text[overall_state])
-        badge.setObjectName("mlReadinessStatusBadge")
-        badge.setProperty("state", overall_state)
-        header.addWidget(badge)
-        layout.addLayout(header)
 
-        summary = QLabel(
-            "Temuan pada nilai kosong, duplikasi, dan outlier."
+        outliers = outliers or []
+        outlier_items = [
+            item for item in outliers
+            if isinstance(item, dict) and int(item.get("outlier_count") or 0) > 0
+        ]
+        outlier_count = int(
+            quality.get("outlier_values")
+            if quality.get("outlier_values") is not None
+            else sum(int(item.get("outlier_count") or 0) for item in outlier_items)
         )
-        summary.setObjectName("cardDescription")
-        summary.setWordWrap(True)
-        layout.addWidget(summary)
+        if outlier_count and len(outlier_items) == 1:
+            item = outlier_items[0]
+            outlier_detail = (
+                f"{item.get('column')}: {int(item.get('outlier_count') or 0):,} rows "
+                f"({float(item.get('outlier_percentage') or 0):.1f}%)"
+            )
+        elif outlier_count and outlier_items:
+            outlier_columns = ", ".join(
+                str(item.get("column")) for item in outlier_items[:3]
+            )
+            outlier_detail = (
+                f"{outlier_count:,} values across {len(outlier_items)} columns "
+                f"({outlier_columns})"
+            )
+        elif outlier_count:
+            outlier_detail = f"{outlier_count:,} outlier values"
+        else:
+            outlier_detail = "No outliers found"
+
+        duplicate_count = int(quality.get("duplicate_rows") or 0)
+        duplicate_detail = f"{duplicate_count:,} duplicate rows"
 
         definitions = (
-            ("Nilai kosong", counts[0], "missing_values", "sel kosong"),
-            ("Baris duplikat", counts[1], "duplicates", "baris berulang"),
-            ("Nilai outlier", counts[2], "outliers", "nilai ekstrem"),
+            ("Missing Values", missing_detail, "missing_values", missing_count, "circle-alert"),
+            ("Outliers", outlier_detail, "outliers", outlier_count, "triangle-alert"),
+            ("Duplicates", duplicate_detail, "duplicates", duplicate_count, "copy"),
         )
-        for title, count, category, detail in definitions:
-            state = state_for(category, count)
-            description = (
-                f"Ditemukan {count:,} {detail}. Periksa diagnosis untuk saran penanganan."
-                if count
-                else f"Tidak ditemukan {detail} pada pemeriksaan ini."
+        for index, (title, detail, category, count, icon_name) in enumerate(definitions):
+            row = self._build_quality_insight_row(
+                title, detail, state_for(category, count), icon_name
             )
-            layout.addWidget(
-                self._build_quality_insight_row(
-                    title, f"{count:,}", description, state
-                )
-            )
+            layout.addWidget(row)
+            if index < len(definitions) - 1:
+                layout.addSpacing(ui_px(12))
 
-        apply_card_shadow(card)
         return card
 
-    @staticmethod
-    def _build_quality_insight_row(title, value, description, state):
+    def _build_quality_insight_row(self, title, description, state, icon_name):
         row = QFrame()
         row.setObjectName("analysisQualityInsight")
         row.setProperty("state", state)
-        row_layout = QVBoxLayout(row)
-        row_layout.setContentsMargins(11, 8, 11, 8)
-        row_layout.setSpacing(3)
+        row.setFixedHeight(ui_px(84))
 
-        top = QHBoxLayout()
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(ui_px(14), 0, ui_px(14), 0)
+        row_layout.setSpacing(ui_px(20))
+
+        icon_container = QFrame()
+        icon_container.setObjectName("analysisQualityIcon")
+        icon_container.setProperty("state", state)
+        icon_container.setFixedSize(ui_px(40), ui_px(40))
+        icon_layout = QVBoxLayout(icon_container)
+        icon_layout.setContentsMargins(0, 0, 0, 0)
+        icon_layout.setAlignment(Qt.AlignCenter)
+        icon = QLabel()
+        icon.setObjectName("analysisQualityIconGlyph")
+        icon.setPixmap(
+            self._analysis_icon_pixmap(
+                icon_name,
+                ui_px(16),
+                {
+                    "issue": "#D94C5D",
+                    "warning": "#D8892B",
+                    "ok": "#26885A",
+                }.get(state, "#75808F"),
+                icon.devicePixelRatioF(),
+            )
+        )
+        icon_layout.addWidget(icon)
+        row_layout.addWidget(icon_container)
+
+        text_layout = QVBoxLayout()
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(0)
         label = QLabel(title)
         label.setObjectName("analysisQualityInsightTitle")
-        top.addWidget(label, 1)
-        count = QLabel(value)
-        count.setObjectName("analysisQualityInsightValue")
-        top.addWidget(count)
-        row_layout.addLayout(top)
-
+        label.setFixedHeight(ui_px(22))
+        text_layout.addWidget(label)
         detail = QLabel(description)
         detail.setObjectName("analysisQualityInsightDescription")
         detail.setWordWrap(True)
-        row_layout.addWidget(detail)
+        detail.setMaximumHeight(ui_px(38))
+        text_layout.addWidget(detail)
+        row_layout.addLayout(text_layout, 1)
         return row
 
     # =====================================================
@@ -3350,28 +3754,29 @@ class AnalysisPage(QWidget):
 
     def _build_visualization_panel(self):
         card = QFrame()
-        card.setObjectName("contentCard")
-        card.setMinimumHeight(682)
+        card.setObjectName("analysisVisualizationCard")
+        card.setMinimumHeight(ui_px(596))
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(33, 28, 32, 37)
-        layout.setSpacing(12)
+        layout.setContentsMargins(ui_px(20), ui_px(20), ui_px(20), ui_px(20))
+        layout.setSpacing(0)
 
-        title = QLabel("Visualisasi Data")
+        title = QLabel("Data Visualization")
         title.setObjectName("analysisVisualizationTitle")
+        title.setFixedHeight(ui_px(30))
         layout.addWidget(title)
-        layout.addSpacing(20)
+        layout.addSpacing(ui_px(18))
 
         controls = QHBoxLayout()
         self.chart_controls = controls
-        controls.setContentsMargins(0, 0, 4, 0)
+        controls.setContentsMargins(0, 0, 0, 0)
         controls.setSpacing(0)
         self.chart_type = QComboBox()
         self.chart_type.setObjectName("analysisControlSelect")
         self.chart_type.addItem("Histogram", "histogram")
-        self.chart_type.addItem("Diagram batang", "bar")
-        self.chart_type.addItem("Box plot", "box")
-        self.chart_type.addItem("Heatmap korelasi", "correlation")
-        self.chart_type.addItem("Nilai kosong", "missing")
+        self.chart_type.addItem("Bar Chart", "bar")
+        self.chart_type.addItem("Box Plot", "box")
+        self.chart_type.addItem("Correlation Heatmap", "correlation")
+        self.chart_type.addItem("Missing Values", "missing")
         self.chart_type.currentIndexChanged.connect(self._update_visualization_options)
 
         self.chart_column = QComboBox()
@@ -3379,33 +3784,38 @@ class AnalysisPage(QWidget):
         self.chart_column.currentIndexChanged.connect(self._draw_visualization)
         self.chart_type.currentIndexChanged.connect(self._draw_visualization)
 
-        chart_type_label = QLabel("Jenis Grafik")
+        chart_type_label = QLabel("Chart Type")
         chart_type_label.setObjectName("analysisControlLabel")
-        chart_type_label.setFixedWidth(108)
+        chart_type_label.setFixedWidth(ui_px(98))
+        chart_type_label.setFixedHeight(ui_px(24))
         controls.addWidget(chart_type_label)
-        controls.addSpacing(14)
-        self.chart_type.setFixedWidth(338)
+        controls.addSpacing(ui_px(14))
+        self.chart_type.setFixedSize(ui_px(244), ui_px(53))
         controls.addWidget(self.chart_type)
-        controls.addSpacing(26)
-        column_label = QLabel("Kolom")
+        controls.addSpacing(ui_px(26))
+        column_label = QLabel("Column")
         column_label.setObjectName("analysisControlLabel")
-        column_label.setFixedWidth(57)
+        column_label.setFixedWidth(ui_px(49))
+        column_label.setFixedHeight(ui_px(24))
         controls.addWidget(column_label)
-        controls.addSpacing(10)
-        controls.addWidget(self.chart_column, 1)
+        controls.addSpacing(ui_px(14))
+        self.chart_column.setFixedSize(ui_px(240), ui_px(53))
+        controls.addWidget(self.chart_column)
         layout.addLayout(controls)
-        layout.addSpacing(10)
+        layout.addSpacing(ui_px(10))
 
         self.chart_message = QLabel("Jalankan analisis untuk melihat visualisasi.")
         self.chart_message.setObjectName("analysisChartMessage")
         self.chart_message.setAlignment(Qt.AlignCenter)
-        self.chart_message.setMinimumHeight(250)
+        self.chart_message.setMinimumHeight(ui_px(360))
         layout.addWidget(self.chart_message)
 
-        self.chart_figure = Figure(figsize=(8, 4), tight_layout=True)
+        self.chart_figure = Figure(figsize=(8, 4))
+        self.chart_figure.subplots_adjust(left=0.12, right=0.96, top=0.92, bottom=0.16)
+        self.chart_figure.patch.set_facecolor("white")
         self.chart_canvas = FigureCanvasQTAgg(self.chart_figure)
         self.chart_canvas.setObjectName("chartCanvas")
-        self.chart_canvas.setMinimumHeight(440)
+        self.chart_canvas.setMinimumHeight(ui_px(360))
         self.chart_canvas.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.chart_canvas.hide()
         layout.addWidget(self.chart_canvas)
@@ -3419,19 +3829,33 @@ class AnalysisPage(QWidget):
         if dataframe is None:
             return []
         if chart_type in ("histogram", "box"):
-            return [
-                column for column in dataframe.select_dtypes(include=["number"]).columns
-                if dataframe[column].nunique(dropna=True) > 1
-            ]
+            # Do not scan every row just to populate the chart selector.
+            # The selected, bounded plot sample checks for constant columns.
+            return list(dataframe.select_dtypes(include=["number"]).columns)
         if chart_type == "bar":
+            sample = AnalysisPage._plot_sample(dataframe)
             return [
                 column for column in dataframe.columns
-                if 1 < dataframe[column].nunique(dropna=True) <= 100
+                if 1 < sample[column].nunique(dropna=True) <= 100
             ]
         return []
 
+    @staticmethod
+    def _plot_sample(dataframe):
+        row_count = len(dataframe)
+        if row_count <= AnalysisPage.MAX_PLOT_ROWS:
+            return dataframe
+        # Evenly spaced sampling avoids allocating random indices proportional
+        # to a very large dataset while keeping the chart input bounded.
+        step = max(
+            1,
+            (row_count + AnalysisPage.MAX_PLOT_ROWS - 1)
+            // AnalysisPage.MAX_PLOT_ROWS,
+        )
+        return dataframe.iloc[::step].head(AnalysisPage.MAX_PLOT_ROWS)
+
     def _update_visualization_options(self, *_):
-        if not hasattr(self, "chart_type"):
+        if getattr(self, "chart_type", None) is None or getattr(self, "chart_column", None) is None:
             return
         chart_type = self.chart_type.currentData()
         columns = [str(column) for column in self._chart_columns(self._visualization_dataframe, chart_type)]
@@ -3452,20 +3876,17 @@ class AnalysisPage(QWidget):
         self._draw_visualization()
 
     def _draw_visualization(self, *_):
-        if not hasattr(self, "chart_figure"):
+        if getattr(self, "chart_figure", None) is None:
             return
         self.chart_figure.clear()
         dataframe = self._visualization_dataframe
         if dataframe is None:
-            self._show_chart_message("Belum ada dataset untuk divisualisasikan.")
+            self._show_chart_message("Belum ada dataset yang dimuat untuk divisualisasikan.")
             return
 
         chart_type = self.chart_type.currentData()
         axis = self.chart_figure.add_subplot(111)
-        if len(dataframe) > self.MAX_PLOT_ROWS:
-            sample = dataframe.sample(self.MAX_PLOT_ROWS, random_state=0)
-        else:
-            sample = dataframe
+        sample = self._plot_sample(dataframe)
 
         if chart_type in ("histogram", "box", "bar"):
             if self.chart_column.currentIndex() < 0:
@@ -3478,40 +3899,40 @@ class AnalysisPage(QWidget):
             values = sample[column].dropna()
             if chart_type == "histogram":
                 if len(values) < 2 or values.nunique() < 2:
-                    self._show_chart_message("Kolom ini belum memiliki variasi untuk histogram.")
+                    self._show_chart_message("This column does not have enough variation for a histogram.")
                     return
-                theme = getattr(self.main_window, "_theme_tokens", {})
-                chart_blue = theme.get("chart-blue", "#0d99ff")
-                chart_grid = theme.get("chart-grid", "#e5e5e5")
-                chart_text = theme.get("chart-text", "#564e4e")
+                chart_blue = "#3278F2"
+                chart_grid = "#E8EDF5"
+                chart_text = "#75808F"
+                axis.set_facecolor("white")
                 axis.hist(values, bins="auto", color=chart_blue, edgecolor="white", linewidth=0.7)
                 axis.set_title(
-                    f"Distribusi {column_name}", fontsize=12, fontweight="bold",
-                    color=chart_text, pad=6,
+                    f"Distribution of {column_name}", fontsize=17.6, fontweight="bold",
+                    color="#172235", pad=16,
                 )
                 axis.set_xlabel("")
                 axis.set_ylabel("")
                 axis.set_axisbelow(True)
-                axis.grid(axis="y", color=chart_grid, linewidth=0.8)
+                axis.grid(axis="y", color=chart_grid, linewidth=1.2)
                 for spine in axis.spines.values():
                     spine.set_visible(False)
-                axis.tick_params(axis="both", colors=chart_text, labelsize=10, length=0, pad=8)
+                axis.tick_params(axis="both", colors=chart_text, labelsize=11, length=0, pad=8)
             elif chart_type == "box":
                 if values.empty:
-                    self._show_chart_message("Tidak ada nilai untuk ditampilkan pada box plot.")
+                    self._show_chart_message("Tidak ada nilai yang dapat ditampilkan pada box plot ini.")
                     return
                 axis.boxplot(values, vert=False, patch_artist=True,
                              boxprops={"facecolor": "#DCEAFF", "color": "#4F8CFF"},
                              medianprops={"color": "#172033"})
-                axis.set(title=f"Sebaran {column_name}", xlabel=column_name, yticks=[])
+                axis.set(title=f"Distribution of {column_name}", xlabel=column_name, yticks=[])
             else:
                 counts = sample.iloc[:, dataframe.columns.get_loc(column)].dropna()
                 counts = counts.astype("string").value_counts().head(self.MAX_CATEGORIES)
                 if counts.empty:
-                    self._show_chart_message("Tidak ada kategori untuk ditampilkan.")
+                    self._show_chart_message("Tidak ada kategori yang dapat ditampilkan pada grafik ini.")
                     return
-                axis.bar(counts.index.astype(str), counts.values, color="#4F8CFF")
-                axis.set(title=f"Kategori {column_name}", xlabel=column_name, ylabel="Jumlah")
+                axis.bar(counts.index.astype(str), counts.values, color="#3278F2")
+                axis.set(title=f"Count by {column_name}", xlabel=column_name, ylabel="Count")
                 axis.tick_params(axis="x", labelrotation=35)
                 axis.margins(x=0.05)
         elif chart_type == "correlation":
@@ -3524,7 +3945,7 @@ class AnalysisPage(QWidget):
             names = [str(name) for name in correlations.columns]
             axis.set_xticks(range(len(names)), names, rotation=35, ha="right")
             axis.set_yticks(range(len(names)), names)
-            axis.set_title("Korelasi antar kolom numerik")
+            axis.set_title("Correlation between numeric columns")
             self.chart_figure.colorbar(image, ax=axis, fraction=0.046, pad=0.04)
         else:
             missing = self._visualization_missing_values or []
@@ -3534,8 +3955,8 @@ class AnalysisPage(QWidget):
                 return
             names = [str(item["column"]) for item in entries[:self.MAX_CATEGORIES]]
             counts = [int(item["missing_count"]) for item in entries[:self.MAX_CATEGORIES]]
-            axis.bar(names, counts, color="#4F8CFF")
-            axis.set(title="Nilai kosong per kolom", xlabel="Kolom", ylabel="Jumlah")
+            axis.bar(names, counts, color="#3278F2")
+            axis.set(title="Missing values by column", xlabel="Column", ylabel="Count")
             axis.tick_params(axis="x", labelrotation=35)
 
         self.chart_message.hide()
@@ -3547,9 +3968,9 @@ class AnalysisPage(QWidget):
         if chart_type in ("histogram", "box"):
             return "Tidak ada kolom numerik dengan variasi yang sesuai."
         if chart_type == "bar":
-            return "Tidak ada kolom kategori yang sesuai untuk diagram batang."
+            return "Tidak ada kolom kategorikal yang sesuai untuk ditampilkan pada bar chart."
         if chart_type == "correlation":
-            return "Heatmap korelasi belum tersedia untuk dataset ini."
+            return "Correlation heatmap tidak tersedia untuk dataset ini."
         return "Tidak ada nilai kosong pada dataset."
 
     def _show_chart_message(self, message):
@@ -3907,7 +4328,7 @@ class AnalysisPage(QWidget):
 
         self.dataset_name_label.setText(str(filename))
         self.dataset_metrics_label.setText(
-            f"{len(dataframe):,} rows x {len(dataframe.columns):,} columns"
+            f"{len(dataframe):,} rows × {len(dataframe.columns):,} columns"
         )
 
         result = getattr(self.main_window, "analysis_result", {})
@@ -4141,7 +4562,7 @@ class AnalysisPage(QWidget):
                 imp_btn = QPushButton("Terapkan Imputasi (Median / Modus)")
                 imp_btn.setObjectName("secondaryButton")
                 imp_btn.clicked.connect(self._handle_impute_missing)
-                drop_btn = QPushButton("Drop Baris dengan Missing Values")
+                drop_btn = QPushButton("Hapus baris dengan Missing Values")
                 drop_btn.setObjectName("secondaryButton")
                 drop_btn.clicked.connect(self._handle_drop_missing)
                 btn_row.addWidget(imp_btn)
@@ -4235,12 +4656,12 @@ class AnalysisPage(QWidget):
             impute_btn.clicked.connect(self._handle_impute_missing)
             action_row.addWidget(impute_btn)
 
-            drop_btn = QPushButton("Drop Baris dengan Missing Values")
+            drop_btn = QPushButton("Hapus baris dengan Missing Values")
             drop_btn.setObjectName("secondaryButton")
             drop_btn.clicked.connect(self._handle_drop_missing)
             action_row.addWidget(drop_btn)
 
-        drop_button = QPushButton("Drop Missing Values")
+        drop_button = QPushButton("Hapus Missing Values")
         drop_button.setObjectName("primaryButton")
         drop_button.clicked.connect(self._start_drop_missing_preview)
         action_row.addWidget(drop_button)
@@ -4248,7 +4669,7 @@ class AnalysisPage(QWidget):
         action_row.addStretch()
         layout.addLayout(action_row)
 
-        export_button = QPushButton("Export Cleaned Dataset")
+        export_button = QPushButton("Ekspor dataset yang sudah dibersihkan")
         export_button.setObjectName("secondaryButton")
         export_button.clicked.connect(self._export_latest_cleaned_dataset)
         latest_cleaned = self._latest_cleaned_version()
@@ -4336,7 +4757,7 @@ class AnalysisPage(QWidget):
         try:
             self.main_window.activate_dataset_version(int(version))
         except Exception as error:
-            QMessageBox.warning(self, "Dataset Version", str(error))
+            QMessageBox.warning(self, "Versi Dataset", str(error))
 
     def _start_drop_missing_preview(self):
         if (
@@ -4346,16 +4767,23 @@ class AnalysisPage(QWidget):
             return
         dataframe = getattr(self.main_window, "current_dataset", None)
         if dataframe is None:
-            QMessageBox.information(self, "Drop Missing Values", "Muat dataset terlebih dahulu.")
+            QMessageBox.information(self, "Hapus Missing Values", "Muat dataset terlebih dahulu.")
             return
 
         dialog = DropMissingOptionsDialog(dataframe, self)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
+        try:
+            accepted = dialog.exec() == QDialog.DialogCode.Accepted
+            options = dialog.options() if accepted else None
+        finally:
+            # exec() is modal but the dialog is parented to the page. Schedule
+            # its C++ object for deletion so its combo signals cannot outlive
+            # the Python wrapper after this method returns.
+            dialog.deleteLater()
+        if not accepted:
             return
-        options = dialog.options()
         if not options["columns"]:
             QMessageBox.information(
-                self, "Drop Missing Values", "Pilih setidaknya satu kolom untuk diperiksa."
+                self, "Hapus Missing Values", "Pilih setidaknya satu kolom untuk diperiksa."
             )
             return
 
@@ -4409,14 +4837,14 @@ class AnalysisPage(QWidget):
 
     def _on_clean_worker_failed(self, message: str):
         self.main_window.statusBar().clearMessage()
-        QMessageBox.warning(self, "Drop Missing Values", message)
+        QMessageBox.warning(self, "Hapus Missing Values", message)
 
     def _on_drop_preview_ready(self, result: CleanResult):
         self.main_window.statusBar().clearMessage()
         strategy = result.report.get("strategy", "drop_rows")
         if strategy == "drop_rows" and result.rows_dropped == 0:
             QMessageBox.information(
-                self, "Drop Missing Values", "Tidak ada yang dihapus. Dataset baru tidak dibuat."
+                self, "Hapus Missing Values", "Tidak ada yang dihapus. Dataset baru tidak dibuat."
             )
             return
 
@@ -4476,7 +4904,7 @@ class AnalysisPage(QWidget):
         message.setInformativeText(
             f"Versi v{version.version}: {result.rows_after:,} baris tersimpan di workspace."
         )
-        export_now = message.addButton("Export CSV Sekarang", QMessageBox.AcceptRole)
+        export_now = message.addButton("Ekspor CSV sekarang", QMessageBox.AcceptRole)
         message.addButton("Nanti Saja", QMessageBox.ActionRole)
         message.addButton("Batal", QMessageBox.RejectRole)
         message.exec()
@@ -4487,7 +4915,7 @@ class AnalysisPage(QWidget):
         version = self._latest_cleaned_version()
         if version is None:
             QMessageBox.information(
-                self, "Export Cleaned Dataset", "Belum ada dataset bersih di workspace."
+                self, "Ekspor dataset bersih", "Belum ada dataset bersih di ruang kerja."
             )
             return
         self._choose_cleaned_export_path(version.version)
@@ -4510,7 +4938,7 @@ class AnalysisPage(QWidget):
         while True:
             selected_path, _ = QFileDialog.getSaveFileName(
                 self,
-                "Export Cleaned Dataset",
+                "Ekspor dataset bersih",
                 suggested_path,
                 "CSV Files (*.csv)",
             )
@@ -4543,7 +4971,7 @@ class AnalysisPage(QWidget):
 
         project_id = self.main_window.current_project_id
         if project_id is None:
-            QMessageBox.warning(self, "Export Cleaned Dataset", "Project dataset tidak tersedia.")
+            QMessageBox.warning(self, "Ekspor dataset bersih", "Project dataset tidak tersedia.")
             return
         worker = ExportCleanedDatasetWorker(
             self.main_window.version_manager,
@@ -5219,39 +5647,56 @@ class InfoCard(QFrame):
     ):
         super().__init__(parent)
 
-        self.setObjectName("contentCard")
+        self.setObjectName("mlInfoCard")
 
         self.setSizePolicy(
             QSizePolicy.Expanding,
             QSizePolicy.Fixed,
         )
+        self.setMinimumHeight(112)
 
-        layout = QVBoxLayout(self)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(18, 14, 18, 14)
+        layout.setSpacing(16)
 
-        layout.setContentsMargins(
-            20,
-            18,
-            20,
-            18,
+        icon_name, icon_kind = {
+            "Rows": ("figma-overview-upload.svg", "blue"),
+            "Columns": ("figma-overview-dataset.svg", "blue"),
+            "Numeric Features": ("figma-overview-analysis.svg", "purple"),
+            "Primary ML Task": ("figma-overview-ml.svg", "purple"),
+            "Target": ("figma-overview-check.svg", "green"),
+            "Confidence": ("figma-overview-shield.svg", "orange"),
+        }.get(title, ("figma-overview-dataset.svg", "blue"))
+        icon_tile = QFrame()
+        icon_tile.setObjectName("mlMetricIconTile")
+        icon_tile.setProperty("kind", icon_kind)
+        icon_tile.setFixedSize(48, 48)
+        icon_layout = QHBoxLayout(icon_tile)
+        icon_layout.setContentsMargins(0, 0, 0, 0)
+        icon = QLabel()
+        icon.setAlignment(Qt.AlignCenter)
+        icon_path = _resource_path(Path("assets/icons") / icon_name)
+        icon.setPixmap(
+            render_icon_pixmap(icon_path, 22, icon.devicePixelRatioF())
         )
+        icon_layout.addWidget(icon)
+        layout.addWidget(icon_tile)
 
-        layout.setSpacing(6)
+        value_layout = QVBoxLayout()
+        value_layout.setContentsMargins(0, 0, 0, 0)
+        value_layout.setSpacing(1)
 
         title_label = QLabel(
             title.upper()
         )
 
-        title_label.setObjectName(
-            "cardLabel"
-        )
+        title_label.setObjectName("mlMetricLabel")
 
         self.value_label = QLabel(
             value
         )
 
-        self.value_label.setObjectName(
-            "cardValue"
-        )
+        self.value_label.setObjectName("mlMetricValue")
 
         self.value_label.setWordWrap(
             True
@@ -5261,25 +5706,16 @@ class InfoCard(QFrame):
             subtitle
         )
 
-        self.subtitle_label.setObjectName(
-            "cardDescription"
-        )
+        self.subtitle_label.setObjectName("mlMetricDescription")
 
         self.subtitle_label.setWordWrap(
             True
         )
 
-        layout.addWidget(
-            title_label
-        )
-
-        layout.addWidget(
-            self.value_label
-        )
-
-        layout.addWidget(
-            self.subtitle_label
-        )
+        value_layout.addWidget(title_label)
+        value_layout.addWidget(self.value_label)
+        value_layout.addWidget(self.subtitle_label)
+        layout.addLayout(value_layout, 1)
 
     def set_value(
         self,
@@ -5411,7 +5847,7 @@ class TaskCard(QFrame):
         if reasons:
 
             reasons_title = QLabel(
-                "Why this task?"
+                "Mengapa task ini dipilih?"
             )
 
             reasons_title.setObjectName(
@@ -5480,7 +5916,7 @@ class MethodCard(QFrame):
             str(
                 method.get(
                     "method",
-                    "Unknown Method",
+                    "Metode tidak diketahui",
                 )
             )
         )
@@ -5589,7 +6025,7 @@ class MethodCard(QFrame):
         if reasons:
 
             reasons_title = QLabel(
-                "Why this model?"
+                "Mengapa model ini dipilih?"
             )
 
             reasons_title.setObjectName(
@@ -5648,15 +6084,15 @@ class MethodCard(QFrame):
 
         info_layout.addWidget(
             QLabel(
-                f"Scaling: "
-                f"{'Required' if scaling else 'Not required'}"
+                f"Feature Scaling: "
+                f"{'Wajib' if scaling else 'Tidak wajib'}"
             )
         )
 
         info_layout.addWidget(
             QLabel(
                 f"Nonlinear: "
-                f"{'Yes' if nonlinear else 'No'}"
+                f"{'Ya' if nonlinear else 'Tidak'}"
             )
         )
 
@@ -5665,6 +6101,75 @@ class MethodCard(QFrame):
         layout.addLayout(
             info_layout
         )
+
+class MethodRankingRow(QFrame):
+    """Compact empirical result row for the three strongest evaluated methods."""
+
+    def __init__(self, rank: int, method: dict[str, Any], parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setObjectName("mlMethodRankingRow")
+        self.setMinimumHeight(72)
+
+        score_type = str(method.get("score_type") or "")
+        try:
+            score = float(method.get("score", 0))
+        except (TypeError, ValueError):
+            score = 0.0
+        display_score = (
+            score * 100
+            if score_type in {"accuracy", "f1_score"} and abs(score) <= 1
+            else score
+        )
+
+        if score_type == "f1_score":
+            score_text = f"F1 {display_score:.2f}%"
+        elif score_type == "r2_score":
+            score_text = f"R² {score:.4f}"
+        elif score_type == "accuracy":
+            score_text = f"Acc {display_score:.2f}%"
+        elif score_type == "cluster_score":
+            score_text = f"Cluster Score {score:.1f}"
+        elif score_type == "silhouette_score":
+            score_text = f"Silhouette {score:.3f}"
+        elif score_type == "score_spread":
+            score_text = f"Spread {score:.4f}"
+        else:
+            score_text = f"{score:g} match"
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 10, 16, 10)
+        layout.setSpacing(14)
+
+        rank_label = QLabel(f"#{rank}")
+        rank_label.setObjectName("mlMethodRank")
+        rank_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(rank_label)
+
+        identity = QVBoxLayout()
+        identity.setSpacing(2)
+        title = QLabel(str(method.get("method", "Metode tidak diketahui")))
+        title.setObjectName("mlMethodName")
+        category = QLabel(str(method.get("category", "")))
+        category.setObjectName("mlMethodCategory")
+        identity.addWidget(title)
+        identity.addWidget(category)
+        layout.addLayout(identity, 0)
+
+        score_bar = QProgressBar()
+        score_bar.setObjectName("mlMethodScoreBar")
+        score_bar.setRange(0, 100)
+        score_bar.setTextVisible(False)
+        if score_type in {"accuracy", "f1_score"}:
+            score_bar.setValue(max(0, min(100, round(display_score))))
+            score_bar.setToolTip("Hasil validasi model dalam persen.")
+        else:
+            score_bar.hide()
+        layout.addWidget(score_bar, 1)
+
+        score_label = QLabel(score_text)
+        score_label.setObjectName("mlMethodScore")
+        layout.addWidget(score_label)
+
 
 class MethodDetailCard(QFrame):
 
@@ -5701,7 +6206,7 @@ class MethodDetailCard(QFrame):
         title = QLabel(
             method.get(
                 "method",
-                "Method Details",
+                "Detail Metode",
             )
         )
 
@@ -5899,16 +6404,16 @@ class MethodDetailCard(QFrame):
             f"{method.get('interpretability', '-')}"
             "\n"
             "Feature Scaling: "
-            f"{'Required' if method.get('scaling_required') else 'Not required'}"
+            f"{'Wajib' if method.get('scaling_required') else 'Tidak wajib'}"
             "\n"
             "Nonlinear: "
-            f"{'Yes' if method.get('nonlinear') else 'No'}"
+            f"{'Ya' if method.get('nonlinear') else 'Tidak'}"
             "\n"
             "Small Data: "
-            f"{'Suitable' if method.get('small_data') else 'Limited'}"
+            f"{'Sesuai' if method.get('small_data') else 'Terbatas'}"
             "\n"
             "Large Data: "
-            f"{'Suitable' if method.get('large_data') else 'Limited'}"
+            f"{'Sesuai' if method.get('large_data') else 'Terbatas'}"
         )
 
         meta.setObjectName(
@@ -5960,10 +6465,7 @@ class MLIntelligencePage(QWidget):
         )
 
         # Empirical engine: actual model training + validation happens here.
-        self.intelligence_engine = MLIntelligenceEngine(
-            recommender=self.recommender,
-            task_detector=self.detector,
-        )
+        self.intelligence_engine = None
         self._ml_thread: QThread | None = None
         self._ml_worker: MLTrainingWorker | None = None
 
@@ -5986,9 +6488,9 @@ class MLIntelligencePage(QWidget):
         self._root_layout = root_layout
 
         root_layout.setContentsMargins(
-            30,
+            64,
             25,
-            30,
+            20,
             25,
         )
 
@@ -6002,6 +6504,7 @@ class MLIntelligencePage(QWidget):
 
         header = QHBoxLayout()
         self.header_layout = header
+        header.setContentsMargins(0, 0, 22, 0)
 
         title_layout = QVBoxLayout()
 
@@ -6013,19 +6516,15 @@ class MLIntelligencePage(QWidget):
             "ML Intelligence"
         )
 
-        title.setObjectName(
-            "pageTitle"
-        )
+        title.setObjectName("mlPageTitle")
 
         description = QLabel(
-            "Deteksi task machine learning "
+            "Deteksi task Machine Learning "
             "dan rekomendasi metode berdasarkan "
             "struktur serta karakteristik dataset."
         )
 
-        description.setObjectName(
-            "pageDescription"
-        )
+        description.setObjectName("mlPageDescription")
 
         description.setWordWrap(
             True
@@ -6042,18 +6541,18 @@ class MLIntelligencePage(QWidget):
         )
 
         header.addLayout(
-            title_layout
+            title_layout,
+            1,
         )
 
         header.addStretch()
 
-        self.refresh_button = QPushButton(
-            "Run ML"
-        )
+        self.refresh_button = QPushButton("Jalankan ML")
 
         self.refresh_button.setObjectName(
             "primaryButton"
         )
+        self.refresh_button.setProperty("mlRun", "true")
 
         self.refresh_button.clicked.connect(
             self.run_detection
@@ -6089,8 +6588,8 @@ class MLIntelligencePage(QWidget):
 
         self.content_layout.setContentsMargins(
             0,
-            5,
-            10,
+            30,
+            0,
             20,
         )
 
@@ -6111,9 +6610,9 @@ class MLIntelligencePage(QWidget):
     def _apply_responsive_layout(self, width):
         compact = logical_width(width) < 760
         self._root_layout.setContentsMargins(
-            16 if compact else 30,
+            16 if compact else 64,
             16 if compact else 25,
-            16 if compact else 30,
+            16 if compact else 10,
             16 if compact else 25,
         )
         self.header_layout.setDirection(
@@ -6138,7 +6637,7 @@ class MLIntelligencePage(QWidget):
         self.last_method_result = {}
         self.last_intelligence_result = {}
         self._rendered_result_signature = None
-        self.refresh_button.setText("Run ML")
+        self.refresh_button.setText("Jalankan ML")
 
         self.clear_content()
 
@@ -6176,8 +6675,8 @@ class MLIntelligencePage(QWidget):
         )
 
         description = QLabel(
-            "Upload dan analisis dataset terlebih dahulu "
-            "untuk mendapatkan estimasi task machine learning "
+            "Unggah dan analisis dataset terlebih dahulu "
+            "untuk mendapatkan estimasi task Machine Learning "
             "dan rekomendasi metode."
         )
 
@@ -6220,6 +6719,14 @@ class MLIntelligencePage(QWidget):
         if not fingerprint or dataframe is None:
             self.show_empty_state()
             return
+
+        if self.intelligence_engine is None:
+            from app.ml.intelligence import MLIntelligenceEngine
+
+            self.intelligence_engine = MLIntelligenceEngine(
+                recommender=self.recommender,
+                task_detector=self.detector,
+            )
 
         self.refresh_button.setEnabled(False)
         self.refresh_button.setText("Training models...")
@@ -6296,7 +6803,7 @@ class MLIntelligencePage(QWidget):
 
     def _finish_ml_run(self):
         self.refresh_button.setEnabled(True)
-        self.refresh_button.setText("Run ML again" if self.last_task_result else "Run ML")
+        self.refresh_button.setText("Jalankan Ulang ML" if self.last_task_result else "Jalankan ML")
 
     def _cleanup_ml_worker(self):
         self._ml_worker = None
@@ -6578,9 +7085,8 @@ class MLIntelligencePage(QWidget):
 
         status_card = QFrame()
 
-        status_card.setObjectName(
-            "contentCard"
-        )
+        status_card.setObjectName("mlDetectionStatusCard")
+        status_card.setMinimumHeight(150)
 
         status_layout = QVBoxLayout(
             status_card
@@ -6598,7 +7104,7 @@ class MLIntelligencePage(QWidget):
         )
 
         status_title = QLabel(
-            "Detection Status"
+            "Status Deteksi"
         )
 
         status_title.setObjectName(
@@ -6640,33 +7146,51 @@ class MLIntelligencePage(QWidget):
             message
         )
 
-        self.content_layout.addWidget(
-            status_card
-        )
-
-        # ==================================================
-        # PRIMARY TASK ANALYSIS
-        # ==================================================
+        primary_status_row = QHBoxLayout()
+        primary_status_row.setSpacing(18)
+        primary_status_row.setContentsMargins(0, 0, 15, 0)
 
         if primary:
+            primary_summary = QFrame()
+            primary_summary.setObjectName("mlPrimaryTaskSummary")
+            primary_summary.setMinimumHeight(150)
+            summary_layout = QVBoxLayout(primary_summary)
+            summary_layout.setContentsMargins(20, 16, 20, 16)
+            summary_layout.setSpacing(8)
 
-            primary_section = QLabel(
-                "Primary Task Analysis"
-            )
+            summary_header = QHBoxLayout()
+            summary_title = QLabel("PRIMARY TASK ANALYSIS")
+            summary_title.setObjectName("mlSummaryEyebrow")
+            summary_header.addWidget(summary_title)
+            summary_header.addStretch(1)
+            confidence_value = primary.get("confidence", primary.get("score", 0))
+            confidence_badge = QLabel(f"{confidence_value}% confidence")
+            confidence_badge.setObjectName("mlSummaryConfidence")
+            summary_header.addWidget(confidence_badge)
+            summary_layout.addLayout(summary_header)
 
-            primary_section.setObjectName(
-                "sectionTitle"
-            )
+            summary_task = QLabel(str(primary.get("label", primary.get("task", "-"))))
+            summary_task.setObjectName("mlSummaryTaskTitle")
+            summary_layout.addWidget(summary_task)
 
-            self.content_layout.addWidget(
-                primary_section
-            )
+            summary_target = QLabel(f"Target: {primary.get('target') or 'None'}")
+            summary_target.setObjectName("mlSummaryTarget")
+            summary_layout.addWidget(summary_target)
 
-            self.content_layout.addWidget(
-                TaskCard(
-                    primary
-                )
-            )
+            confidence_bar = QProgressBar()
+            confidence_bar.setObjectName("mlSummaryConfidenceBar")
+            confidence_bar.setRange(0, 100)
+            try:
+                confidence_bar.setValue(max(0, min(100, int(float(confidence_value)))))
+            except (TypeError, ValueError):
+                confidence_bar.setValue(0)
+            confidence_bar.setTextVisible(False)
+            summary_layout.addWidget(confidence_bar)
+
+            primary_status_row.addWidget(primary_summary, 7)
+
+        primary_status_row.addWidget(status_card, 3 if primary else 1)
+        self.content_layout.addLayout(primary_status_row)
 
         # ==================================================
         # METHOD RECOMMENDATION
@@ -6683,6 +7207,8 @@ class MLIntelligencePage(QWidget):
         self.content_layout.addWidget(
             recommendation_title
         )
+
+        self.content_layout.addSpacing(8)
 
         recommendation_description = QLabel(
             "Ranking berikut berdasarkan hasil training dan validation "
@@ -6707,28 +7233,15 @@ class MLIntelligencePage(QWidget):
 
         if recommendations:
 
-            for index, method in enumerate(
-                recommendations,
-                start=1,
-            ):
+            for index, method in enumerate(recommendations[:3], start=1):
+                self.content_layout.addWidget(MethodRankingRow(index, method))
 
-                rank_label = QLabel(
-                    f"#{index}"
-                )
+            detail_heading = QLabel("Rincian Evaluasi")
+            detail_heading.setObjectName("sectionTitle")
+            self.content_layout.addWidget(detail_heading)
 
-                rank_label.setObjectName(
-                    "cardLabel"
-                )
-
-                self.content_layout.addWidget(
-                    rank_label
-                )
-
-                self.content_layout.addWidget(
-                    MethodCard(
-                        method
-                    )
-                )
+            for method in recommendations:
+                self.content_layout.addWidget(MethodCard(method))
 
             # ------------------------------------------------
             # TOP METHOD DETAIL
@@ -6785,6 +7298,12 @@ class MLIntelligencePage(QWidget):
             self.content_layout.addWidget(
                 empty_methods
             )
+
+        if primary:
+            primary_detail_title = QLabel("Rincian Task Utama")
+            primary_detail_title.setObjectName("sectionTitle")
+            self.content_layout.addWidget(primary_detail_title)
+            self.content_layout.addWidget(TaskCard(primary))
 
         # ==================================================
         # OTHER POSSIBLE TASKS
@@ -6848,7 +7367,7 @@ class MLIntelligencePage(QWidget):
         )
 
         disclaimer_title = QLabel(
-            "Research Note"
+            "Catatan Riset"
         )
 
         disclaimer_title.setObjectName(
@@ -6856,11 +7375,10 @@ class MLIntelligencePage(QWidget):
         )
 
         disclaimer_text = QLabel(
-            "ML task detection dan method recommendation "
-            "merupakan estimasi berbasis heuristik serta "
-            "knowledge base. Performa aktual metode harus "
-            "divalidasi melalui eksperimen, cross-validation, "
-            "dan metric evaluasi yang sesuai."
+            "Deteksi task ML dan rekomendasi metode merupakan "
+            "estimasi berbasis heuristik dan knowledge base. "
+            "Performa aktual metode harus divalidasi melalui "
+            "eksperimen, cross-validation, dan metrik evaluasi yang sesuai."
         )
 
         disclaimer_text.setObjectName(
@@ -6923,7 +7441,7 @@ class MLIntelligencePage(QWidget):
         )
 
         title = QLabel(
-            "ML Intelligence Error"
+            "Kesalahan ML Intelligence"
         )
 
         title.setObjectName(
@@ -6997,7 +7515,7 @@ class MLIntelligencePage(QWidget):
         }
         self.last_intelligence_result = saved_methods.get("_intelligence_result") or {}
         self.display_result(self.last_task_result, self.last_method_result)
-        self.refresh_button.setText("Run ML again")
+        self.refresh_button.setText("Jalankan Ulang ML")
         return True
 
     def show_ready_state(self):
@@ -7007,11 +7525,11 @@ class MLIntelligencePage(QWidget):
         layout = QVBoxLayout(card)
         layout.setContentsMargins(30, 40, 30, 40)
         layout.setSpacing(10)
-        title = QLabel("Dataset analysis is ready")
+        title = QLabel("Analisis dataset siap dijalankan")
         title.setObjectName("sectionTitle")
         title.setAlignment(Qt.AlignCenter)
         description = QLabel(
-            "Tekan Run ML untuk melatih dan membandingkan seluruh metode "
+            "Pilih Jalankan ML untuk melatih dan membandingkan seluruh metode "
             "yang dikonfigurasi. Proses dapat memerlukan waktu."
         )
         description.setObjectName("cardDescription")
@@ -7099,7 +7617,7 @@ class ResearchPage(QWidget):
 
         self.main_window = main_window
 
-        self.engine = ResearchIntelligenceEngine()
+        self.engine = None
         self.task_detector = MLTaskDetector()
 
         self.research_result: Dict[str, Any] = {}
@@ -7182,9 +7700,7 @@ class ResearchPage(QWidget):
             1,
         )
 
-        self.run_button = QPushButton(
-            "Run Academic Research"
-        )
+        self.run_button = QPushButton("Jalankan Academic Research")
 
         self.run_button.setObjectName(
             "primaryButton"
@@ -7230,7 +7746,7 @@ class ResearchPage(QWidget):
         )
 
         self.dataset_label = QLabel(
-            "Dataset: No dataset loaded"
+            "Dataset: belum dimuat"
         )
 
         self.dataset_label.setObjectName(
@@ -7238,7 +7754,7 @@ class ResearchPage(QWidget):
         )
 
         self.analysis_label = QLabel(
-            "Analysis: Not available"
+            "Analysis: belum tersedia"
         )
 
         self.analysis_label.setObjectName(
@@ -7843,11 +8359,11 @@ class ResearchPage(QWidget):
         )
 
         self.dataset_label.setText(
-            "Dataset: No dataset loaded"
+            "Dataset: belum dimuat"
         )
 
         self.analysis_label.setText(
-            "Analysis: Not available"
+            "Analysis: belum tersedia"
         )
 
         self.paper_table.setRowCount(
@@ -7858,10 +8374,10 @@ class ResearchPage(QWidget):
         )
 
         self.paper_detail.clear()
-        self.paper_count_label.setText("0 papers | 0 need screening")
+        self.paper_count_label.setText("0 paper | 0 perlu disaring")
         self.provider_status_label.setText(
-            "Sources: OpenAlex, Crossref, Semantic Scholar, Europe PMC, and OpenAIRE. "
-            "Scopus requires Elsevier API key/access; UCL Discovery is external-only."
+            "Sumber: OpenAlex, Crossref, Semantic Scholar, Europe PMC, dan OpenAIRE. "
+            "Scopus memerlukan API key atau akses Elsevier; UCL Discovery hanya tersedia melalui situs eksternal."
         )
         self.sinta_status_combo.setCurrentIndex(0)
         self.sinta_period_confirmed.setChecked(False)
@@ -7869,7 +8385,7 @@ class ResearchPage(QWidget):
         self.check_sinta_button.setEnabled(False)
         self.sinta_lookup_progress.setVisible(False)
         self.sinta_lookup_message.setText(
-            "Select a paper and check its journal using ISSN or journal title."
+            "Pilih paper, lalu periksa jurnalnya menggunakan ISSN atau judul jurnal."
         )
 
         self.loading_card.setVisible(False)
@@ -7913,8 +8429,13 @@ class ResearchPage(QWidget):
         if self._research_thread is not None:
             return
 
+        if self.engine is None:
+            from app.research.intelligence import ResearchIntelligenceEngine
+
+            self.engine = ResearchIntelligenceEngine()
+
         self.run_button.setEnabled(False)
-        self.run_button.setText("Researching...")
+        self.run_button.setText("Academic Research sedang berjalan...")
         self.progress.setVisible(True)
         self.loading_card.setVisible(True)
         papers_tool_page = getattr(self.main_window, "papers_tool_page", None)
@@ -7937,7 +8458,11 @@ class ResearchPage(QWidget):
     def _on_research_finished(self, result, ml_result):
         try:
             if result.get("status") not in {"SUCCESS", "PARTIAL"}:
-                QMessageBox.critical(self, "Research Error", str(result.get("error", "Unknown research error.")))
+                QMessageBox.critical(
+                    self,
+                    "Academic Research gagal",
+                    str(result.get("error", "Terjadi kesalahan pada Academic Research.")),
+                )
                 return
             self.research_result = result
             self._last_ml_result = dict(ml_result or {})
@@ -7961,19 +8486,19 @@ class ResearchPage(QWidget):
             self._check_pending_non_sinta_batch()
             self.tabs.setCurrentWidget(self.papers_tab)
         except Exception as error:
-            QMessageBox.critical(self, "Academic Research Error", str(error))
+            QMessageBox.critical(self, "Academic Research gagal", str(error))
         finally:
             self._finish_research()
 
     def _on_research_failed(self, error):
-        QMessageBox.critical(self, "Academic Research Error", str(error))
+        QMessageBox.critical(self, "Academic Research gagal", str(error))
         self._finish_research()
 
     def _finish_research(self):
         self.progress.setVisible(False)
         self.loading_card.setVisible(False)
         self.run_button.setEnabled(True)
-        self.run_button.setText("Run Academic Research")
+        self.run_button.setText("Jalankan Academic Research")
         papers_tool_page = getattr(self.main_window, "papers_tool_page", None)
         if papers_tool_page is not None:
             papers_tool_page.set_research_running(False)
@@ -7991,6 +8516,11 @@ class ResearchPage(QWidget):
         if self.research_result.get("insights_status") != "NOT_COMPUTED":
             if all(self.research_result.get(key) for key in ("landscape", "trend", "gaps")):
                 return
+
+        if self.engine is None:
+            from app.research.intelligence import ResearchIntelligenceEngine
+
+            self.engine = ResearchIntelligenceEngine()
 
         ml_result = self._last_ml_result
         if not ml_result:
@@ -8033,6 +8563,17 @@ class ResearchPage(QWidget):
                 print(f"Warning: hasil Insights tidak dapat disimpan: {error}")
         self.main_window.landscape_tool_page.update_from_result(result)
         self.main_window.gap_tool_page.update_from_result(result)
+        insights_page = getattr(self.main_window, "research_insights_page", None)
+        gap_is_active = (
+            getattr(self.main_window, "_current_page_key", "") == "gap"
+            or (
+                insights_page is not None
+                and insights_page.tabs.currentWidget()
+                is self.main_window.gap_tool_page
+            )
+        )
+        if gap_is_active:
+            self.main_window.gap_tool_page.ensure_explanation()
         if getattr(self.main_window, "_current_page_key", "") == "report":
             self.main_window.report_tool_page.generate_preview(force=True)
 
@@ -8129,12 +8670,12 @@ class ResearchPage(QWidget):
 
         self.dataset_label.setText(
             f"Dataset: {filename} "
-            f"({dataframe.shape[0]:,} rows × "
-            f"{dataframe.shape[1]} columns)"
+            f"({dataframe.shape[0]:,} baris × "
+            f"{dataframe.shape[1]} kolom)"
         )
 
         self.analysis_label.setText(
-            "Analysis: Dataset fingerprint available"
+            "Analysis: Dataset Fingerprint tersedia"
         )
 
     # =========================================================
@@ -8176,22 +8717,22 @@ class ResearchPage(QWidget):
             count = provider_counts.get(provider)
             if state == "NOT_CONFIGURED":
                 requirement = (
-                    "Elsevier key/access needed"
+                    "memerlukan API key atau akses Elsevier"
                     if provider == "Scopus"
-                    else "key/access needed"
+                    else "memerlukan key atau akses"
                 )
                 provider_parts.append(f"{provider}: {requirement}")
             elif state == "DISABLED":
-                provider_parts.append(f"{provider}: off")
+                provider_parts.append(f"{provider}: nonaktif")
             elif state == "ERROR":
-                provider_parts.append(f"{provider}: temporarily unavailable")
+                provider_parts.append(f"{provider}: sementara tidak tersedia")
             elif state == "RATE_LIMITED":
-                provider_parts.append(f"{provider}: rate limited")
+                provider_parts.append(f"{provider}: batas permintaan tercapai")
             elif state == "ENABLED":
                 provider_parts.append(f"{provider} {int(count or 0)}")
         self.provider_status_label.setText(
-            "Candidates before deduplication  |  "
-            + ("  |  ".join(provider_parts) if provider_parts else "No provider status available.")
+            "Kandidat sebelum penghapusan duplikat  |  "
+            + ("  |  ".join(provider_parts) if provider_parts else "Status provider belum tersedia.")
         )
         self._populate_papers(papers)
         self.main_window.papers_tool_page.update_from_result(result)
@@ -10167,7 +10708,7 @@ class ResearchPage(QWidget):
     def _format_section(data, indent=0):
         """Render research data with consistent, readable labels."""
         if not data:
-            return "No data available."
+            return "Data belum tersedia."
 
         prefix = " " * indent
         lines = []
@@ -10242,6 +10783,7 @@ class PapersToolPage(QWidget):
 
     def __init__(self, main_window):
         super().__init__()
+        self.setObjectName("papersToolPage")
         self.main_window = main_window
         self.papers = []
         self.filtered_papers = []
@@ -10272,7 +10814,7 @@ class PapersToolPage(QWidget):
         title.setObjectName("pageTitle")
 
         subtitle = QLabel(
-            "Browse, filter, and inspect papers discovered by Academic Research."
+            "Telusuri, filter, dan periksa paper yang ditemukan melalui Academic Research."
         )
         subtitle.setObjectName("pageSubtitle")
         subtitle.setWordWrap(True)
@@ -10283,16 +10825,16 @@ class PapersToolPage(QWidget):
         header.addLayout(title_layout)
         header.addStretch()
 
-        self.count_label = QLabel("0 papers")
+        self.count_label = QLabel("0 paper")
         self.count_label.setObjectName("topbarStatus")
         header.addWidget(self.count_label)
 
-        self.accreditation_status_label = QLabel("Penilaian jurnal otomatis saat Run")
+        self.accreditation_status_label = QLabel("Penilaian jurnal otomatis saat proses berjalan")
         self.accreditation_status_label.setObjectName("topbarStatus")
         self.accreditation_status_label.setWordWrap(True)
         header.addWidget(self.accreditation_status_label)
 
-        self.run_research_button = QPushButton("Run Academic Research")
+        self.run_research_button = QPushButton("Jalankan Academic Research")
         self.run_research_button.setObjectName("primaryButton")
         self.run_research_button.setMinimumHeight(38)
         self.run_research_button.clicked.connect(self._run_academic_research)
@@ -10491,7 +11033,7 @@ class PapersToolPage(QWidget):
         detail_layout.setContentsMargins(16, 14, 16, 14)
         detail_layout.setSpacing(8)
 
-        detail_title = QLabel("Paper Details")
+        detail_title = QLabel("Detail Paper")
         detail_title.setObjectName("sectionTitle")
 
         self.paper_detail = QTextEdit()
@@ -10499,7 +11041,7 @@ class PapersToolPage(QWidget):
         self.paper_detail.setMinimumHeight(165)
         self.paper_detail.setMaximumHeight(220)
 
-        self.open_source_button = QPushButton("Open Paper Source")
+        self.open_source_button = QPushButton("Buka sumber paper")
         self.open_source_button.setObjectName("secondaryButton")
         self.open_source_button.setEnabled(False)
         self.open_source_button.clicked.connect(self._open_selected_source)
@@ -10537,7 +11079,7 @@ class PapersToolPage(QWidget):
         self.research_progress.setVisible(bool(running))
         self.run_research_button.setEnabled(not running)
         self.run_research_button.setText(
-            "Researching..." if running else "Run Academic Research"
+            "Academic Research sedang berjalan..." if running else "Jalankan Academic Research"
         )
 
     def set_assessment_lookup_status(self, current, total, finished=False):
@@ -10564,11 +11106,11 @@ class PapersToolPage(QWidget):
         self.paper_table.setRowCount(0)
         self.paper_table.setSortingEnabled(True)
         self.paper_detail.setPlainText(
-            "No academic research results available.\n\n"
-            "Run Academic Research first to populate this tool."
+            "Hasil Academic Research belum tersedia.\n\n"
+            "Jalankan Academic Research untuk menampilkan paper di sini."
         )
-        self.count_label.setText("0 papers")
-        self.accreditation_status_label.setText("Penilaian jurnal otomatis saat Run")
+        self.count_label.setText("0 paper")
+        self.accreditation_status_label.setText("Penilaian jurnal otomatis saat proses berjalan")
         self.open_source_button.setEnabled(False)
         self.sinta_batch_button.setEnabled(False)
         self.other_index_button.setEnabled(False)
@@ -11194,6 +11736,7 @@ class ResearchLandscapeToolPage(QWidget):
 
     def __init__(self, main_window):
         super().__init__()
+        self.setObjectName("researchLandscapeToolPage")
         self.main_window = main_window
         self._rendered_result_id = None
         self._build_ui()
@@ -11228,7 +11771,7 @@ class ResearchLandscapeToolPage(QWidget):
         title = QLabel("Research Landscape")
         title.setObjectName("pageTitle")
         subtitle = QLabel(
-            "Explore the methods, topics, and publication structure found in the analyzed literature."
+            "Jelajahi metode, topik, dan pola publikasi dalam literatur yang dianalisis."
         )
         self.subtitle_label = subtitle
         self.title_label = title
@@ -11241,7 +11784,7 @@ class ResearchLandscapeToolPage(QWidget):
         header.addLayout(title_layout, 1)
         header.setAlignment(title_layout, Qt.AlignTop)
 
-        self.refresh_button = QPushButton("Refresh Landscape")
+        self.refresh_button = QPushButton("Perbarui Landscape")
         self.refresh_button.setObjectName("landscapeSearchButton")
         self.refresh_button.setFixedSize(299, 66)
         self.refresh_button.setCursor(Qt.PointingHandCursor)
@@ -11254,7 +11797,7 @@ class ResearchLandscapeToolPage(QWidget):
         root.addWidget(header_widget)
         root.addSpacing(4)
 
-        self.status_label = QLabel("No academic research result available.")
+        self.status_label = QLabel("Hasil Academic Research belum tersedia.")
         self.status_label.setObjectName("landscapeStatus")
         self.status_label.setWordWrap(True)
         root.addWidget(self.status_label)
@@ -11291,8 +11834,8 @@ class ResearchLandscapeToolPage(QWidget):
         title.setObjectName("sectionTitle")
         title.setAlignment(Qt.AlignCenter)
         desc = QLabel(
-            "Run Academic Research terlebih dahulu.\n"
-            "Setelah literature analysis selesai, hasil landscape akan muncul di sini."
+            "Jalankan Academic Research terlebih dahulu.\n"
+            "Hasil Research Landscape akan tampil setelah analisis literatur selesai."
         )
         desc.setObjectName("cardDescription")
         desc.setAlignment(Qt.AlignCenter)
@@ -11302,7 +11845,7 @@ class ResearchLandscapeToolPage(QWidget):
         layout.addWidget(desc)
         self.content.addWidget(card)
         self.content.addStretch()
-        self.status_label.setText("No academic research result available.")
+        self.status_label.setText("Hasil Academic Research belum tersedia.")
 
     def refresh(self):
         result = getattr(self.main_window.research_page, "research_result", {})
@@ -11485,7 +12028,7 @@ class ResearchLandscapeToolPage(QWidget):
                 layout.addLayout(row)
             layout.addStretch(1)
         else:
-            empty = QLabel("No method distribution available.")
+            empty = QLabel("Distribusi metode belum tersedia.")
             empty.setObjectName("landscapeMethodEmpty")
             layout.addWidget(empty)
         return card
@@ -11536,7 +12079,7 @@ class ResearchLandscapeToolPage(QWidget):
         )
 
         self.status_label.setText(
-            f"Landscape loaded from Academic Research | {paper_count} papers analyzed"
+            f"Landscape dimuat dari Academic Research | {paper_count} paper dianalisis"
         )
 
         cards_widget = QWidget()
@@ -11545,7 +12088,7 @@ class ResearchLandscapeToolPage(QWidget):
         self._metrics_layout = cards
         cards.setContentsMargins(0, 0, 0, 0)
         cards.setSpacing(14)
-        cards.addWidget(self._metric_card("Papers", paper_count, "Literature analyzed"))
+        cards.addWidget(self._metric_card("Papers", paper_count, "Literatur dianalisis"))
         cards.addWidget(self._metric_card("Dominan Method", dominant_method, "Most represented method"))
         cards.addWidget(self._metric_card("Latest Publication", latest_year, "Newest publication year"))
         cards.setStretch(0, 445)
@@ -11665,11 +12208,13 @@ class ResearchGapToolPage(QWidget):
 
     def __init__(self, main_window):
         super().__init__()
+        self.setObjectName("researchGapToolPage")
         self.main_window = main_window
         self.research_result: Dict[str, Any] = {}
         self._explanation_thread: QThread | None = None
         self._explanation_worker: ResearchGapExplanationWorker | None = None
         self._attempted_explanation_this_session = False
+        self._explanation_result_identity = None
         self._rendered_result_signature = None
         self._build_ui()
 
@@ -11776,19 +12321,26 @@ class ResearchGapToolPage(QWidget):
         self._apply_responsive_layout(self.width())
 
     def clear_content(self):
-        while self.content.count():
-            item = self.content.takeAt(0)
+        self._clear_layout_items(self.content)
+
+    @staticmethod
+    def _clear_layout_items(layout):
+        while layout.count():
+            item = layout.takeAt(0)
             widget = item.widget()
             if widget:
+                widget.hide()
                 widget.deleteLater()
-            elif item.layout():
-                while item.layout().count():
-                    child = item.layout().takeAt(0)
-                    if child.widget():
-                        child.widget().deleteLater()
+            else:
+                child_layout = item.layout()
+                if child_layout is not None:
+                    ResearchGapToolPage._clear_layout_items(child_layout)
+                    child_layout.deleteLater()
 
     def show_empty_state(self):
         self.research_result = {}
+        self._attempted_explanation_this_session = False
+        self._explanation_result_identity = None
         self._rendered_result_signature = None
         self.status.setText("Jalankan Academic Research terlebih dahulu untuk menemukan kandidat gap.")
         self.explain_button.setEnabled(False)
@@ -11817,7 +12369,12 @@ class ResearchGapToolPage(QWidget):
             self.show_empty_state()
 
     def update_from_result(self, result):
-        self.research_result = result if isinstance(result, dict) else {}
+        incoming_result = result if isinstance(result, dict) else {}
+        result_identity = id(incoming_result)
+        if result_identity != self._explanation_result_identity:
+            self._attempted_explanation_this_session = False
+            self._explanation_result_identity = result_identity
+        self.research_result = incoming_result
         gaps = self.research_result.get("gaps", {})
         explanation = self.research_result.get("gap_explanation")
         signature = (
@@ -11837,7 +12394,10 @@ class ResearchGapToolPage(QWidget):
             items = gaps
         if not isinstance(items, list):
             items = []
-        self.explain_button.setEnabled(bool(self.research_result) and self._explanation_thread is None)
+        insights_ready = self.research_result.get("insights_status") == "READY"
+        self.explain_button.setEnabled(
+            bool(self.research_result) and insights_ready and self._explanation_thread is None
+        )
         self.status.setText(f"{len(self.research_result.get('papers', []))} paper dianalisis; {len(items)} kandidat gap terdeteksi.")
         self.clear_content()
 
@@ -11867,7 +12427,7 @@ class ResearchGapToolPage(QWidget):
             )
         else:
             self._add_explanation_card(
-                "Tekan Buat penjelasan untuk memahami hasil analisis, bukti dan batasannya, serta saran penelitian lanjutan.",
+                "Penjelasan akan disusun otomatis setelah analisis landscape dan kandidat gap selesai. Ringkasan ini memakai paper yang ditemukan dan tetap perlu divalidasi melalui penelusuran pustaka lanjutan.",
                 "menunggu",
             )
 
@@ -11902,9 +12462,12 @@ class ResearchGapToolPage(QWidget):
 
         card = QFrame()
         card.setObjectName("contentCard")
+        card.setProperty("researchGapExplanation", True)
         layout = QVBoxLayout(card)
         layout.setContentsMargins(20, 18, 20, 18)
-        layout.setSpacing(8)
+        layout.setSpacing(10)
+        eyebrow = QLabel("RINGKASAN BERDASARKAN LITERATUR YANG TERSEDIA")
+        eyebrow.setObjectName("gapExplanationEyebrow")
         title = QLabel("Penjelasan dan saran penelitian")
         title.setObjectName("sectionTitle")
         source_names = {
@@ -11928,6 +12491,8 @@ class ResearchGapToolPage(QWidget):
         body.setWordWrap(True)
         body.setTextInteractionFlags(Qt.TextSelectableByMouse)
         body.setText(markdown_document.toHtml())
+        body.setMinimumHeight(60)
+        layout.addWidget(eyebrow)
         layout.addWidget(title)
         layout.addWidget(source_label)
         if reason:
@@ -11964,6 +12529,10 @@ class ResearchGapToolPage(QWidget):
         return card
 
     def ensure_explanation(self):
+        # Do not explain the pre-insights result: the landscape/gap worker must
+        # finish first so this request receives the completed evidence set.
+        if self.research_result.get("insights_status") != "READY":
+            return
         explanation = self.research_result.get("gap_explanation", {})
         needs_generation = not isinstance(explanation, dict) or not explanation.get("text")
         needs_generation = needs_generation or explanation.get("source") == "error"
@@ -11971,7 +12540,11 @@ class ResearchGapToolPage(QWidget):
             self.explain_gaps()
 
     def explain_gaps(self):
-        if not self.research_result or self._explanation_thread is not None:
+        if (
+            not self.research_result
+            or self.research_result.get("insights_status") != "READY"
+            or self._explanation_thread is not None
+        ):
             return
         self._attempted_explanation_this_session = True
         self.explain_button.setEnabled(False)
@@ -12010,7 +12583,10 @@ class ResearchGapToolPage(QWidget):
     def _cleanup_explanation_worker(self):
         self._explanation_worker = None
         self._explanation_thread = None
-        self.explain_button.setEnabled(bool(self.research_result))
+        self.explain_button.setEnabled(
+            bool(self.research_result)
+            and self.research_result.get("insights_status") == "READY"
+        )
         if self.research_result:
             self.update_from_result(self.research_result)
 
@@ -12021,6 +12597,7 @@ class ResearchReportToolPage(QWidget):
 
     def __init__(self, main_window):
         super().__init__()
+        self.setObjectName("researchReportPage")
         self.main_window = main_window
         self.report_generator = ReportGenerator()
         self.research_result: Dict[str, Any] = {}
@@ -12108,6 +12685,7 @@ class ResearchReportToolPage(QWidget):
         root.addWidget(self.loading_card)
 
         self.preview = QTextBrowser()
+        self.preview.setObjectName("researchReportPreview")
         self.preview.setReadOnly(True)
         self.preview.setOpenLinks(False)
         self.preview.setOpenExternalLinks(False)
@@ -12323,7 +12901,7 @@ class ResearchReportToolPage(QWidget):
         except Exception as exc:
             self._finish_report_busy()
             self.status.setText(f"Gagal membuat laporan: {exc}")
-            QMessageBox.warning(self, "Report Generation Error", f"Terjadi kesalahan saat membuat laporan: {exc}")
+            QMessageBox.warning(self, "Gagal membuat laporan", f"Terjadi kesalahan saat membuat laporan: {exc}")
 
     def _start_report_worker(self, worker, operation):
         self._report_operation = operation
@@ -12457,11 +13035,82 @@ class ResearchInsightsPage(QWidget):
             self.gap_page.ensure_explanation()
 
 
+def _load_credits_manifest() -> dict[str, Any]:
+    """Build the visible contributor manifest from the existing project credits."""
+    source_path = _resource_path(Path("data") / "credits.json")
+    with source_path.open("r", encoding="utf-8") as source:
+        credits = json.load(source)
+
+    visible_roles = {
+        "Academic Supervisor",
+        "Software Engineering",
+        "UI/UX Design",
+        "Graphic Design & Web Developer",
+        "Scientific Paper Writing",
+    }
+    contributors = [
+        {"role": section.get("role", ""), "names": section.get("names", [])}
+        for section in credits.get("sections", [])
+        if section.get("role") in visible_roles
+    ]
+    return {
+        "team": credits.get("team", "Metriks Studio"),
+        "project": "Dataset Research",
+        "tagline": "Built with curiosity. Designed to make research easier.",
+        "sections": contributors,
+    }
+
+
+def _credits_manifest_html(manifest: dict[str, Any]) -> str:
+    """Render formatted JSON with stable line-number alignment and token colors."""
+    source = json.dumps(manifest, ensure_ascii=False, indent=2)
+    token_pattern = re.compile(r'("(?:\\.|[^"\\])*")|([{}\[\],:])|(-?\d+(?:\.\d+)?|true|false|null)')
+    rows = []
+    for line_number, line in enumerate(source.splitlines(), start=1):
+        parts = []
+        position = 0
+        for match in token_pattern.finditer(line):
+            parts.append(html_escape(line[position:match.start()]))
+            token = match.group(0)
+            if match.group(1):
+                is_key = line[match.end():].lstrip().startswith(":")
+                color = "#F2BD68" if is_key else "#A9D7FF"
+            elif match.group(2):
+                color = "#63D6E8"
+            else:
+                color = "#B6E379"
+            parts.append(f'<span style="color:{color}">{html_escape(token)}</span>')
+            position = match.end()
+        parts.append(html_escape(line[position:]))
+        code_line = "".join(parts) or "&nbsp;"
+        rows.append(
+            '<tr><td class="line-number">'
+            f"{line_number:02d}"
+            '</td><td class="code-line">'
+            f"{code_line}"
+            "</td></tr>"
+        )
+    return (
+        '<html><head><meta charset="utf-8"><style>'
+        'body{margin:0;background:#1B2029;color:#DCE5F1;}'
+        'table{border-collapse:collapse;width:100%;table-layout:fixed;}'
+        'td{vertical-align:top;padding:1px 0;}'
+        '.line-number{width:42px;padding-right:14px;text-align:right;color:#B6E379;'
+        'font-family:Consolas,"Cascadia Code",monospace;user-select:none;}'
+        '.code-line{padding-right:18px;white-space:pre-wrap;word-wrap:break-word;'
+        'font-family:Consolas,"Cascadia Code",monospace;}'
+        '</style></head><body><table>'
+        + "".join(rows)
+        + "</table></body></html>"
+    )
+
+
 class CopyrightPage(QWidget):
-    """Preview-only copyright details for the team named in the top bar."""
+    """Project credits and copyright information for DORA."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setObjectName("copyrightPage")
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
@@ -12476,34 +13125,59 @@ class CopyrightPage(QWidget):
         scroll.setWidget(container)
         root.addWidget(scroll)
 
-        heading = QLabel("Copyright")
+        eyebrow = QLabel("PROJECT CONTRIBUTORS")
+        eyebrow.setObjectName("creditsEyebrow")
+        content.addWidget(eyebrow)
+
+        heading = QLabel("Credits")
         heading.setObjectName("aboutPageTitle")
         content.addWidget(heading)
 
-        subtitle = QLabel("Informasi hak cipta untuk pratinjau aplikasi.")
+        subtitle = QLabel("Built with curiosity. Designed to make research easier.")
         subtitle.setObjectName("aboutPageSubtitle")
         subtitle.setWordWrap(True)
         content.addWidget(subtitle)
 
-        card = QFrame()
-        card.setObjectName("aboutInfoCard")
-        card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(18, 16, 18, 18)
-        card_layout.setSpacing(8)
+        manifest = _load_credits_manifest()
+        code_panel = QFrame()
+        code_panel.setObjectName("creditsCodePanel")
+        panel_layout = QVBoxLayout(code_panel)
+        panel_layout.setContentsMargins(0, 0, 0, 0)
+        panel_layout.setSpacing(0)
 
-        card_title = QLabel("Hak Cipta")
-        card_title.setObjectName("aboutCardTitle")
-        card_layout.addWidget(card_title)
+        panel_header = QHBoxLayout()
+        panel_header.setContentsMargins(18, 13, 18, 13)
+        panel_header.setSpacing(8)
+        panel_title = QLabel("team-manifest.json")
+        panel_title.setObjectName("creditsPanelTitle")
+        panel_header.addWidget(panel_title)
+        panel_header.addStretch(1)
+        panel_language = QLabel("JSON")
+        panel_language.setObjectName("creditsLanguageBadge")
+        panel_header.addWidget(panel_language)
+        panel_layout.addLayout(panel_header)
 
-        copyright_text = QLabel(
-            "© 2026 Metriks Studio.\n"
-            "Teks sementara untuk pratinjau tampilan."
-        )
-        copyright_text.setObjectName("aboutBody")
-        copyright_text.setWordWrap(True)
-        card_layout.addWidget(copyright_text)
-        card_layout.addStretch(1)
-        content.addWidget(card)
+        code = QTextBrowser()
+        code.setObjectName("creditsManifestCode")
+        code.setReadOnly(True)
+        code.setOpenLinks(False)
+        code.setOpenExternalLinks(False)
+        code.setLineWrapMode(QTextEdit.WidgetWidth)
+        code.setFrameShape(QFrame.NoFrame)
+        code.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        code.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        code.setMinimumHeight(340)
+        code.setHtml(_credits_manifest_html(manifest))
+        panel_layout.addWidget(code, 1)
+        content.addWidget(code_panel, 1)
+
+        footer = QHBoxLayout()
+        footer.setSpacing(10)
+        copyright_mark = QLabel("\u00a9 2026 Metriks Studio. All rights reserved.")
+        copyright_mark.setObjectName("creditsCopyright")
+        copyright_mark.setWordWrap(True)
+        footer.addWidget(copyright_mark, 1)
+        content.addLayout(footer)
         content.addStretch(1)
 
 
@@ -12512,6 +13186,7 @@ class HelpPage(QWidget):
 
     def __init__(self, main_window):
         super().__init__()
+        self.setObjectName("helpPage")
         self.main_window = main_window
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -12531,7 +13206,7 @@ class HelpPage(QWidget):
         self.content.setSpacing(16)
         self.scroll.setWidget(self.container)
 
-        heading = QLabel("Help")
+        heading = QLabel("Bantuan")
         heading.setObjectName("helpPageTitle")
         self.content.addWidget(heading)
 
@@ -12569,30 +13244,30 @@ class HelpPage(QWidget):
             (
                 "1. Muat dataset dari komputer",
                 "Buka Dataset, pilih Upload Dataset, lalu pilih file CSV. Pada jendela konfirmasi, "
-                "periksa nama dataset, pemisah kolom, encoding, dan kolom target. Pastikan pilihan "
-                "First row contains column names sesuai isi file, lalu pilih Upload & Preview.",
+                "periksa nama dataset, pemisah kolom, encoding, dan kolom target. Pastikan baris "
+                "pertama berisi nama kolom, lalu pilih Unggah & Pratinjau.",
                 "Buka Dataset",
                 self.main_window.open_datasets_page,
             ),
             (
                 "2. Cari dataset online",
                 "Buka Dataset Search, ketik kata kunci, pilih Kaggle dataset, Hugging Face dataset, "
-                "atau All providers, lalu tekan Search. Pilih berkas CSV yang tersedia dan tekan "
-                "Download & Analyze untuk mengunduh dan membukanya.",
+                "atau Semua sumber, lalu pilih Cari. Pilih berkas CSV yang tersedia dan pilih "
+                "Impor & Analisis untuk mengunduh dan membukanya.",
                 "Buka Dataset Search",
                 self.main_window.open_dataset_search_page,
             ),
             (
                 "3. Pratinjau dan rapikan data",
                 "Di halaman Dataset, periksa beberapa baris, daftar kolom, nilai kosong, dan duplikat. "
-                "Gunakan pilihan Quick Cleaning yang tersedia bila diperlukan, lalu pilih "
-                "Continue to Analysis.",
+                "Gunakan pilihan pembersihan cepat yang tersedia bila diperlukan, lalu pilih "
+                "Lanjutkan ke Analysis.",
                 "Buka pratinjau Dataset",
                 self.main_window.open_datasets_page,
             ),
             (
                 "4. Jalankan analisis dataset",
-                "Pada Analysis, tekan Run Analysis. Tinjau ringkasan dataset, statistik kolom, "
+                "Pada halaman Analysis, pilih Jalankan Analysis. Tinjau ringkasan dataset, statistik kolom, "
                 "kualitas data, nilai kosong, duplikat, pencilan, dan hubungan antar kolom. "
                 "Gunakan hasilnya untuk menentukan langkah berikutnya.",
                 "Buka Analysis",
@@ -12601,14 +13276,14 @@ class HelpPage(QWidget):
             (
                 "5. Tinjau ML Intelligence",
                 "Setelah dataset dimuat, buka ML Intelligence untuk melihat perkiraan jenis tugas "
-                "machine learning dan metode yang disarankan. Periksa alasan dan keterbatasan "
+                "Machine Learning dan metode yang disarankan. Periksa alasan dan keterbatasan "
                 "rekomendasi sebelum memilih metode penelitian.",
                 "Buka ML Intelligence",
                 self.main_window.open_ml_page,
             ),
             (
                 "6. Cari referensi penelitian",
-                "Setelah analisis tersedia, buka Academic Research dan tekan Run Academic Research. "
+                "Setelah analisis tersedia, buka Academic Research dan pilih Jalankan Academic Research. "
                 "Tinjau kata kunci, query, dan hasil paper. Periksa sumber dan relevansi paper "
                 "sebelum menggunakannya dalam tulisan.",
                 "Buka Academic Research",
@@ -12675,6 +13350,46 @@ class HelpPage(QWidget):
         self._reflow_cards(self.width())
 
 
+class LatestProjectRestoreWorker(QThread):
+    """Load the last project without blocking the startup UI thread."""
+
+    result_ready = Signal(object)
+
+    def __init__(self, repository, version_manager, preferred_project_id, parent=None):
+        super().__init__(parent)
+        self.repository = repository
+        self.version_manager = version_manager
+        self.preferred_project_id = preferred_project_id
+
+    def run(self):
+        try:
+            projects = self.repository.list_projects()
+            if self.preferred_project_id:
+                projects.sort(
+                    key=lambda project: project.get("id") != self.preferred_project_id
+                )
+            for project in projects:
+                project_id = project.get("id")
+                if project_id is None or not self.version_manager.has_versions(project_id):
+                    continue
+                try:
+                    dataframe = self.version_manager.load_current_dataframe(project_id)
+                    workflow_state = self.repository.get_workflow_state(project_id) or {}
+                except Exception as error:
+                    print(f"Warning: could not restore project {project_id}: {error}")
+                    continue
+
+                self.result_ready.emit({
+                    "project": project,
+                    "dataframe": dataframe,
+                    "workflow_state": workflow_state,
+                })
+                return
+            self.result_ready.emit(None)
+        except Exception as error:
+            self.result_ready.emit({"error": str(error)})
+
+
 class MainWindow(QMainWindow):
     """Main application window for Dataset Research.
 
@@ -12683,8 +13398,10 @@ class MainWindow(QMainWindow):
     backend remains completely independent.
     """
 
-    def __init__(self):
+    def __init__(self, startup_splash=None):
         super().__init__()
+        self._startup_splash = startup_splash
+        self._startup_checkpoint("Menyiapkan tampilan DORA…")
 
         application = QApplication.instance()
         self.scale_manager = ScaleManager()
@@ -12698,8 +13415,16 @@ class MainWindow(QMainWindow):
         self._icon_scale_baselines = {}
         self._font_scale_baselines = {}
         self._style_scale_baselines = {}
+        self._scale_widget_flags = {}
+        self._page_scale_hook_cache = {}
+        self._scale_stylesheet_template_cache = {}
         self._scale_refresh_scheduled = False
         self._pending_scale_roots = []
+        self._pending_ui_scale = None
+        self._scale_apply_timer = QTimer(self)
+        self._scale_apply_timer.setSingleShot(True)
+        self._scale_apply_timer.setInterval(32)
+        self._scale_apply_timer.timeout.connect(self._flush_ui_scale)
         self._page_chrome_sync_scheduled = False
         self.scale_manager.scaleChanged.connect(self._apply_ui_scale)
         self._sidebar_manual_state = None
@@ -12722,6 +13447,13 @@ class MainWindow(QMainWindow):
         self._shutdown_idle_checks = 0
         self._session_data_saved = False
         self._startup_restore_complete = False
+        self._project_restore_pending = False
+        self._project_restore_thread = None
+        self._dataset_session_changed = False
+        self._restored_ml_task = {}
+        self._restored_ml_methods = {}
+        self._restored_research_result = {}
+        self._pending_insights_tab = 0
         self._shutdown_timer = QTimer(self)
         self._shutdown_timer.setInterval(50)
         self._shutdown_timer.timeout.connect(self._poll_shutdown)
@@ -12744,16 +13476,41 @@ class MainWindow(QMainWindow):
         )
         self.current_project_id = None
 
+        self._startup_checkpoint("Membangun halaman workspace…")
         self._build_window()
         self._build_view_menu()
         self._build_scale_status()
-        self._apply_widget_scale(self.scale_manager.get_scale())
+        # Only scale the visible chrome and first page during startup. Other
+        # pages are scaled on first navigation, avoiding a full hidden-widget
+        # walk while the application is opening.
+        initial_page = self.pages.get(
+            getattr(self, "_current_page_key", "dashboard"), self.dashboard
+        )
+        initial_host = self.page_hosts.get(id(initial_page), initial_page)
+        initial_scale = self.scale_manager.get_scale()
+        self._apply_widget_scale(
+            initial_scale,
+            [self.sidebar_container, self.topbar, initial_host],
+        )
+        self._apply_active_page_layout(initial_page, initial_scale)
+        self._page_scale_values = {id(initial_page): initial_scale}
         self._initial_widget_scale_applied = True
+        self._startup_checkpoint("Memulihkan dataset dan halaman terakhir…")
         self._restore_latest_project()
         self._restore_window_geometry()
         self._restore_last_page()
         self._startup_restore_complete = True
         get_telemetry().track("app_open", status="started")
+        self._startup_checkpoint("Workspace siap dibuka…")
+
+    def _startup_checkpoint(self, message: str):
+        splash = getattr(self, "_startup_splash", None)
+        if splash is None or not is_qt_object_valid(splash):
+            return
+        splash.set_message(message)
+        application = QApplication.instance()
+        if application is not None:
+            application.processEvents(QEventLoop.ExcludeUserInputEvents)
 
     def _active_worker_threads(self):
         """Return running background workers that could still write session data."""
@@ -12784,10 +13541,13 @@ class MainWindow(QMainWindow):
                 thread = getattr(page, attribute, None)
                 if thread is not None and thread.isRunning():
                     active.append(thread)
+        restore_thread = getattr(self, "_project_restore_thread", None)
+        if restore_thread is not None and restore_thread.isRunning():
+            active.append(restore_thread)
         return active
 
     def _poll_shutdown(self):
-        if self._active_worker_threads():
+        if self._project_restore_pending or self._active_worker_threads():
             self._shutdown_idle_checks = 0
             self.statusBar().showMessage(
                 "Menunggu proses selesai agar progres tersimpan…"
@@ -12890,6 +13650,13 @@ class MainWindow(QMainWindow):
             return
 
         try:
+            application = QApplication.instance()
+            if application is not None:
+                # Keep Qt controls independent from the host OS appearance.
+                # DORA's stylesheet and palette are designed for the light UI.
+                application.setStyle("Fusion")
+                application.styleHints().setColorScheme(Qt.ColorScheme.Light)
+
             assets_root = _resource_path("assets")
             for font_file in (
                 assets_root / "fonts" / "Inter-Variable.ttf",
@@ -12900,6 +13667,7 @@ class MainWindow(QMainWindow):
                     QFontDatabase.addApplicationFont(str(font_file))
 
             stylesheet = qss_path.read_text(encoding="utf-8-sig")
+            self._base_stylesheet_template = stylesheet
             if theme_path.exists():
                 theme = theme_path.read_text(encoding="utf-8")
                 tokens = dict(re.findall(r"/\*\s*@([\w-]+):\s*(.*?)\s*\*/", theme))
@@ -12917,7 +13685,9 @@ class MainWindow(QMainWindow):
                 muted = tokens.get("muted", "#757575")
                 blue = tokens.get("blue", "#006bb8")
                 blue_active = tokens.get("blue-active", "#c9e0ff")
-                palette = self.palette()
+                # Start from Fusion's neutral palette, then apply DORA's light
+                # colors to every state so disabled/inactive controls stay legible.
+                palette = QPalette()
                 role_colors = {
                     QPalette.Window: canvas,
                     QPalette.WindowText: ink,
@@ -12940,10 +13710,8 @@ class MainWindow(QMainWindow):
                 for role in (QPalette.WindowText, QPalette.Text, QPalette.ButtonText):
                     palette.setColor(QPalette.Disabled, role, QColor(muted if role != QPalette.WindowText else body))
                 self.setPalette(palette)
-                application = QApplication.instance()
                 if application is not None:
                     application.setPalette(palette)
-            application = QApplication.instance()
             if application is not None:
                 scale = self.scale_manager.get_scale()
                 stylesheet = build_stylesheet(scale, qss_path)
@@ -12951,6 +13719,7 @@ class MainWindow(QMainWindow):
                     stylesheet += "\n\n" + scale_stylesheet(
                         self._theme_stylesheet_template, scale
                     )
+                self._active_scale_stylesheet = stylesheet
                 application.setStyleSheet(stylesheet)
                 font = QFont(self._base_application_font)
                 font.setPointSizeF(
@@ -12961,30 +13730,161 @@ class MainWindow(QMainWindow):
             print(f"Warning: failed to load stylesheet: {error}")
 
     def _apply_ui_scale(self, scale: float):
-        """Apply stylesheet, font, menu state, and safe window bounds."""
+        """Coalesce rapid zoom events and apply only the newest scale."""
+        self._pending_ui_scale = float(scale)
+        self._scale_apply_timer.start()
+
+    def _flush_ui_scale(self):
+        """Apply the pending scale once the user pauses zoom input."""
+        scale = self._pending_ui_scale
+        self._pending_ui_scale = None
+        if scale is None:
+            return
+
         application = QApplication.instance()
         if application is None:
             return
         previous_scale = float(application.property("uiScale") or scale)
-        self._apply_widget_scale(previous_scale)
+        if abs(previous_scale - scale) < 0.001:
+            # Auto/manual presets may resolve to the same effective scale.
+            self._update_scale_controls()
+            return
+        current_page = self.pages.get(
+            getattr(self, "_current_page_key", "dashboard")
+        )
+        active_host = (
+            self.page_hosts.get(id(current_page), current_page)
+            if current_page is not None else None
+        )
+        scale_roots = [
+            widget for widget in (
+                getattr(self, "sidebar_container", None),
+                getattr(self, "topbar", None),
+                active_host,
+            )
+            if isinstance(widget, QWidget)
+        ]
         application.setProperty("uiScale", scale)
+        stylesheet = self._build_scaled_stylesheet(scale)
+        self._active_scale_stylesheet = stylesheet
+        shared_roots = [
+            getattr(self, "sidebar_container", None),
+            getattr(self, "topbar", None),
+            self.menuBar(),
+            self.statusBar(),
+        ]
+        self._apply_scale_stylesheet(stylesheet, (*shared_roots, active_host))
+        self._apply_widget_scale(scale, scale_roots)
+        if hasattr(self, "sidebar_container"):
+            self._sync_page_chrome(self.width(), self.height())
+        if current_page is not None:
+            self._apply_active_page_layout(current_page, scale)
+            self._page_scale_values[id(current_page)] = scale
+        self._update_scale_controls()
+
+    def _build_scaled_stylesheet(self, scale: float) -> str:
         qss_path = _resource_path("app.qss")
         stylesheet = build_stylesheet(scale, qss_path)
         theme = getattr(self, "_theme_stylesheet_template", "")
         if theme:
             stylesheet += "\n\n" + scale_stylesheet(theme, scale)
-        application.setStyleSheet(stylesheet)
-        font = QFont(self._base_application_font)
-        font.setPointSizeF(self._base_application_font.pointSizeF() * scale)
-        application.setFont(font)
-        self._apply_widget_scale(scale)
-        if hasattr(self, "sidebar_container"):
-            self._sync_page_chrome(self.width(), self.height())
+        return stylesheet
+
+    def _stylesheet_template_for_root(self, root: QWidget) -> str:
+        key = id(root)
+        cached = self._scale_stylesheet_template_cache.get(key)
+        if cached is not None:
+            return cached
+
+        names = {root.objectName()} if root.objectName() else set()
+        classes = set()
+        for widget in (root, *root.findChildren(QWidget)):
+            if widget.objectName():
+                names.add(widget.objectName())
+            meta_object = widget.metaObject()
+            while meta_object is not None:
+                classes.add(meta_object.className())
+                meta_object = meta_object.superClass()
+
+        template = getattr(self, "_base_stylesheet_template", "")
+        theme = getattr(self, "_theme_stylesheet_template", "")
+        if theme:
+            template += "\n\n" + theme
+        template = re.sub(r"/\*.*?\*/", "", template, flags=re.DOTALL)
+        filtered_rules = []
+        for match in re.finditer(r"([^{}]+)\{([^{}]*)\}", template):
+            scaled_declarations = [
+                declaration.strip()
+                for declaration in match.group(2).split(";")
+                if "@px(" in declaration
+                or re.search(r"-?\d+(?:\.\d+)?px\b", declaration)
+            ]
+            if not scaled_declarations:
+                continue
+            selectors = []
+            for selector in match.group(1).split(","):
+                selector = selector.strip()
+                if not selector:
+                    continue
+                object_names = re.findall(r"#([\w-]+)", selector)
+                if object_names:
+                    if any(name in names for name in object_names):
+                        selectors.append(selector)
+                    continue
+                widget_classes = re.findall(r"\bQ[A-Za-z_][\w]*\b", selector)
+                if widget_classes:
+                    if any(name in classes for name in widget_classes):
+                        selectors.append(selector)
+                    continue
+                if selector.startswith("*") or "[" in selector or "." in selector:
+                    selectors.append(selector)
+            if selectors:
+                body = "; ".join(scaled_declarations)
+                filtered_rules.append(",\n".join(selectors) + " {" + body + ";}")
+
+        filtered = "\n".join(filtered_rules)
+        self._scale_stylesheet_template_cache[key] = filtered
+        return filtered
+
+    def _apply_scale_stylesheet(self, stylesheet: str, roots):
+        """Refresh relevant QSS on chrome and the active page only."""
+        application = QApplication.instance()
+        scale = float(
+            application.property("uiScale") if application is not None
+            else self.scale_manager.get_scale()
+        )
         seen = set()
-        for widget in (self, *self.findChildren(QWidget)):
-            if id(widget) in seen:
+        for widget in roots:
+            if (
+                not isinstance(widget, QWidget)
+                or not is_qt_object_valid(widget)
+                or id(widget) in seen
+            ):
                 continue
             seen.add(id(widget))
+            root_template = self._stylesheet_template_for_root(widget)
+            root_stylesheet = scale_stylesheet(root_template, scale)
+            if widget.styleSheet() != root_stylesheet:
+                widget.setStyleSheet(root_stylesheet)
+
+    def _apply_active_page_layout(self, page, scale: float):
+        """Refresh scale-aware layout hooks on the active page only."""
+        page_key = id(page)
+        hooks = self._page_scale_hook_cache.get(page_key)
+        if hooks is None:
+            hooks = []
+            for widget in (page, *page.findChildren(QWidget)):
+                if callable(getattr(widget, "apply_scale", None)) or callable(
+                    getattr(widget, "_apply_responsive_layout", None)
+                ):
+                    hooks.append(widget)
+            self._page_scale_hook_cache[page_key] = hooks
+
+        for widget in hooks:
+            if not is_qt_object_valid(widget):
+                continue
+            if widget is not page and widget.isHidden():
+                continue
             apply_scale = getattr(widget, "apply_scale", None)
             if callable(apply_scale):
                 apply_scale(scale)
@@ -12992,8 +13892,6 @@ class MainWindow(QMainWindow):
                 responsive_layout = getattr(widget, "_apply_responsive_layout", None)
                 if callable(responsive_layout):
                     responsive_layout(widget.width())
-        self._update_scale_controls()
-        self._keep_window_on_screen()
 
     def _apply_widget_scale(self, scale: float, roots=None):
         """Scale fixed widget hints, layout gaps, and explicit icon/font sizes."""
@@ -13038,27 +13936,55 @@ class MainWindow(QMainWindow):
                     self._font_scale_baselines[key] = base_font
 
             min_width, max_width, min_height, max_height = self._widget_scale_baselines[key]
+            if key not in self._scale_widget_flags:
+                icon_size = self._icon_scale_baselines.get(key)
+                base_style = self._style_scale_baselines.get(key, "")
+                self._scale_widget_flags[key] = bool(
+                    min_width > 0 or max_width < max_hint
+                    or min_height > 0 or max_height < max_hint
+                    or (icon_size is not None and not icon_size.isEmpty())
+                    or key in self._font_scale_baselines
+                    or bool(base_style)
+                    or isinstance(widget, QDialog)
+                )
+            if not self._scale_widget_flags[key]:
+                continue
+
             if min_width == max_width and max_width < max_hint:
-                widget.setFixedWidth(max(0, round(min_width * scale)))
+                target_width = max(0, round(min_width * scale))
+                if (widget.minimumWidth(), widget.maximumWidth()) != (target_width, target_width):
+                    widget.setFixedWidth(target_width)
             else:
                 if min_width > 0:
-                    widget.setMinimumWidth(max(0, round(min_width * scale)))
+                    target_min_width = max(0, round(min_width * scale))
+                    if widget.minimumWidth() != target_min_width:
+                        widget.setMinimumWidth(target_min_width)
                 if max_width < max_hint:
-                    widget.setMaximumWidth(max(0, round(max_width * scale)))
+                    target_max_width = max(0, round(max_width * scale))
+                    if widget.maximumWidth() != target_max_width:
+                        widget.setMaximumWidth(target_max_width)
             if min_height == max_height and max_height < max_hint:
-                widget.setFixedHeight(max(0, round(min_height * scale)))
+                target_height = max(0, round(min_height * scale))
+                if (widget.minimumHeight(), widget.maximumHeight()) != (target_height, target_height):
+                    widget.setFixedHeight(target_height)
             else:
                 if min_height > 0:
-                    widget.setMinimumHeight(max(0, round(min_height * scale)))
+                    target_min_height = max(0, round(min_height * scale))
+                    if widget.minimumHeight() != target_min_height:
+                        widget.setMinimumHeight(target_min_height)
                 if max_height < max_hint:
-                    widget.setMaximumHeight(max(0, round(max_height * scale)))
+                    target_max_height = max(0, round(max_height * scale))
+                    if widget.maximumHeight() != target_max_height:
+                        widget.setMaximumHeight(target_max_height)
 
             icon_size = self._icon_scale_baselines.get(key)
             icon_size_setter = getattr(widget, "setIconSize", None)
             if icon_size is not None and not icon_size.isEmpty() and callable(icon_size_setter):
-                icon_size_setter(
-                    QSize(round(icon_size.width() * scale), round(icon_size.height() * scale))
+                target_icon_size = QSize(
+                    round(icon_size.width() * scale), round(icon_size.height() * scale)
                 )
+                if widget.iconSize() != target_icon_size:
+                    icon_size_setter(target_icon_size)
             base_font = self._font_scale_baselines.get(key)
             if base_font is not None:
                 scaled_font = QFont(base_font)
@@ -13066,11 +13992,14 @@ class MainWindow(QMainWindow):
                     scaled_font.setPointSizeF(base_font.pointSizeF() * scale)
                 elif base_font.pixelSize() > 0:
                     scaled_font.setPixelSize(max(1, round(base_font.pixelSize() * scale)))
-                widget.setFont(scaled_font)
+                if widget.font() != scaled_font:
+                    widget.setFont(scaled_font)
 
             base_style = self._style_scale_baselines.get(key)
             if base_style:
-                widget.setStyleSheet(scale_stylesheet(base_style, scale))
+                scaled_style = scale_stylesheet(base_style, scale)
+                if widget.styleSheet() != scaled_style:
+                    widget.setStyleSheet(scaled_style)
 
             if isinstance(widget, QDialog):
                 screen = widget.screen() or QApplication.primaryScreen()
@@ -13078,14 +14007,24 @@ class MainWindow(QMainWindow):
                     available = screen.availableGeometry()
                     max_dialog_width = max(1, round(available.width() * 0.9))
                     max_dialog_height = max(1, round(available.height() * 0.9))
-                    widget.setMinimumSize(
+                    min_size = QSize(
                         min(widget.minimumWidth(), max_dialog_width),
                         min(widget.minimumHeight(), max_dialog_height),
                     )
-                    widget.setMaximumSize(
+                    max_size = QSize(
                         min(widget.maximumWidth(), max_dialog_width),
                         min(widget.maximumHeight(), max_dialog_height),
                     )
+                    if widget.minimumSize() != min_size:
+                        widget.setMinimumSize(min_size)
+                    if widget.maximumSize() != max_size:
+                        widget.setMaximumSize(max_size)
+                    if widget.objectName() == "uploadDatasetDialog":
+                        width = min(round(max_width * scale), max_dialog_width)
+                        height = min(round(max_height * scale), max_dialog_height)
+                        target_size = QSize(max(1, width), max(1, height))
+                        if widget.size() != target_size:
+                            widget.resize(target_size)
 
         for layout in layouts:
             key = id(layout)
@@ -13096,20 +14035,92 @@ class MainWindow(QMainWindow):
                     layout.spacing(),
                 )
             left, top, right, bottom, spacing = self._layout_scale_baselines[key]
-            layout.setContentsMargins(*(
+            target_margins = tuple(
                 value if value < 0 else round(value * scale)
                 for value in (left, top, right, bottom)
-            ))
+            )
+            current_margins = layout.contentsMargins()
+            if tuple(
+                (current_margins.left(), current_margins.top(),
+                 current_margins.right(), current_margins.bottom())
+            ) != target_margins:
+                layout.setContentsMargins(*target_margins)
             if spacing >= 0:
-                layout.setSpacing(round(spacing * scale))
+                target_spacing = round(spacing * scale)
+                if layout.spacing() != target_spacing:
+                    layout.setSpacing(target_spacing)
 
     def _refresh_new_widget_scale(self):
         self._scale_refresh_scheduled = False
         roots, self._pending_scale_roots = self._pending_scale_roots, []
-        self._apply_widget_scale(self.scale_manager.get_scale(), roots)
+        candidates = [root for root in roots if is_qt_object_valid(root)]
+        roots = []
+        for candidate in candidates:
+            if any(
+                existing is candidate or existing.isAncestorOf(candidate)
+                for existing in roots
+            ):
+                continue
+            roots = [
+                existing for existing in roots
+                if not candidate.isAncestorOf(existing)
+            ]
+            roots.append(candidate)
+
+        # A new child only changes the relevant page's scale hooks. Keep other
+        # pages' cached hook lists intact instead of forcing full rescans.
+        seen_pages = set()
+        for page in getattr(self, "pages", {}).values():
+            page_key = id(page)
+            if page_key in seen_pages:
+                continue
+            seen_pages.add(page_key)
+            host = getattr(self, "page_hosts", {}).get(page_key, page)
+            if any(
+                root is page or page.isAncestorOf(root)
+                or root is host or host.isAncestorOf(root)
+                for root in roots
+            ):
+                self._page_scale_hook_cache.pop(page_key, None)
+
+        scale = self.scale_manager.get_scale()
+        self._apply_widget_scale(scale, roots)
+        stylesheet = getattr(self, "_active_scale_stylesheet", "")
+        if stylesheet:
+            style_roots = [
+                getattr(self, "sidebar_container", None),
+                getattr(self, "topbar", None),
+                self.menuBar(),
+                self.statusBar(),
+                *getattr(self, "page_hosts", {}).values(),
+            ]
+            affected_roots = []
+            for style_root in style_roots:
+                if not isinstance(style_root, QWidget):
+                    continue
+                if any(
+                    root is style_root or style_root.isAncestorOf(root)
+                    for root in roots
+                ):
+                    affected_roots.append(style_root)
+                    self._scale_stylesheet_template_cache.pop(id(style_root), None)
+            for root in roots:
+                widget = root
+                while isinstance(widget, QWidget) and widget is not self:
+                    if isinstance(widget, QDialog):
+                        affected_roots.append(widget)
+                        self._scale_stylesheet_template_cache.pop(id(widget), None)
+                        break
+                    widget = widget.parentWidget()
+            self._apply_scale_stylesheet(stylesheet, affected_roots)
 
     def _build_view_menu(self):
         view_menu = self.menuBar().addMenu("View")
+        # Keep the sidebar control in the application chrome so it remains
+        # available after the entire navigation rail has been hidden.
+        self.menuBar().setCornerWidget(
+            self.sidebar_toggle_button, Qt.TopLeftCorner
+        )
         zoom_in = QAction("Zoom In", self)
         zoom_in.setShortcuts(["Ctrl+=", "Ctrl++"])
         zoom_in.triggered.connect(self.scale_manager.zoom_in)
@@ -13225,10 +14236,12 @@ class MainWindow(QMainWindow):
         max_height = max(1, round(available.height() * 0.9))
         width = min(max_width, max(self.minimumWidth(), self.width()))
         height = min(max_height, max(self.minimumHeight(), self.height()))
-        self.resize(width, height)
+        if (width, height) != (self.width(), self.height()):
+            self.resize(width, height)
         x = min(max(self.x(), available.left()), available.right() - width + 1)
         y = min(max(self.y(), available.top()), available.bottom() - height + 1)
-        self.move(x, y)
+        if (x, y) != (self.x(), self.y()):
+            self.move(x, y)
 
     def _set_sidebar_expanded(self, expanded: bool):
         self._sidebar_manual_state = not expanded
@@ -13295,16 +14308,18 @@ class MainWindow(QMainWindow):
 
         root_layout.addWidget(content, 1)
 
+        self._startup_checkpoint("Memuat Overview…")
         self.dashboard = DashboardPage(self)
+        self._startup_checkpoint("Memuat alur dataset…")
         self.upload_page = UploadPage(self)
         self.dataset_search_page = DatasetSearchPage(self)
         self.dataset_preview_page = DatasetPreviewPage(self)
         self.datasets_tabs = QTabWidget()
         self.datasets_tabs.setObjectName("datasetsTabs")
         self.datasets_tabs.setAttribute(Qt.WA_StyledBackground, True)
-        self.datasets_tabs.addTab(self.upload_page, "Upload from computer")
-        self.datasets_tabs.addTab(self.dataset_search_page, "Find online")
-        self.datasets_tabs.addTab(self.dataset_preview_page, "Preview")
+        self.datasets_tabs.addTab(self.upload_page, "Unggah dari komputer")
+        self.datasets_tabs.addTab(self.dataset_search_page, "Cari online")
+        self.datasets_tabs.addTab(self.dataset_preview_page, "Pratinjau")
         self.datasets_tabs.tabBar().setVisible(False)
         self.datasets_tab_pages = self.datasets_tabs.findChild(QStackedWidget)
         if self.datasets_tab_pages is not None:
@@ -13318,23 +14333,95 @@ class MainWindow(QMainWindow):
         datasets_layout.setSpacing(0)
         datasets_layout.addWidget(self.datasets_tabs)
 
-        self.analysis_page = AnalysisPage(self)
-        self.editor_analysis_page = EditorAnalysisPage(self)
-        self.node_editor_page = None
-        if NODE_EDITOR_UI_ENABLED:
-            from app.ui.node_editor import NodeEditorPage
-
-            self.node_editor_page = NodeEditorPage(self)
-        self.ml_page = MLIntelligencePage(self)
-        self.research_page = ResearchPage(self)
-        self.papers_tool_page = PapersToolPage(self)
-        self.research_page.hide()
-        self.landscape_tool_page = ResearchLandscapeToolPage(self)
-        self.gap_tool_page = ResearchGapToolPage(self)
-        self.research_insights_page = ResearchInsightsPage(
-            self.landscape_tool_page, self.gap_tool_page
+        self._startup_checkpoint("Menyiapkan analisis…")
+        self.analysis_page = None
+        self._analysis_build_scheduled = False
+        self._analysis_placeholder = QWidget()
+        self._analysis_placeholder.setObjectName("analysisLoadingPlaceholder")
+        analysis_placeholder_layout = QVBoxLayout(self._analysis_placeholder)
+        analysis_placeholder_layout.setContentsMargins(32, 32, 32, 32)
+        analysis_placeholder_layout.addStretch(1)
+        analysis_placeholder_message = QLabel(
+            "Dataset Analysis akan disiapkan saat dibuka."
         )
-        self.report_tool_page = ResearchReportToolPage(self)
+        analysis_placeholder_message.setObjectName("emptyState")
+        analysis_placeholder_message.setAlignment(Qt.AlignCenter)
+        analysis_placeholder_layout.addWidget(analysis_placeholder_message)
+        analysis_placeholder_layout.addStretch(1)
+        self._startup_checkpoint("Analisis siap; menyiapkan halaman lain…")
+        self.editor_analysis_page = None
+        self._editor_analysis_build_scheduled = False
+        self._editor_analysis_placeholder = QWidget()
+        self._editor_analysis_placeholder.setObjectName(
+            "editorAnalysisLoadingPlaceholder"
+        )
+        placeholder_layout = QVBoxLayout(self._editor_analysis_placeholder)
+        placeholder_layout.setContentsMargins(32, 32, 32, 32)
+        placeholder_layout.addStretch(1)
+        placeholder_message = QLabel("Editor Analysis akan disiapkan saat dibuka.")
+        placeholder_message.setObjectName("emptyState")
+        placeholder_message.setAlignment(Qt.AlignCenter)
+        placeholder_layout.addWidget(placeholder_message)
+        placeholder_layout.addStretch(1)
+        self.node_editor_page = None
+        self._node_editor_build_scheduled = False
+        if NODE_EDITOR_UI_ENABLED:
+            self._node_editor_placeholder = QWidget()
+            self._node_editor_placeholder.setObjectName(
+                "nodeEditorLoadingPlaceholder"
+            )
+            node_placeholder_layout = QVBoxLayout(self._node_editor_placeholder)
+            node_placeholder_layout.setContentsMargins(32, 32, 32, 32)
+            node_placeholder_layout.addStretch(1)
+            node_placeholder_message = QLabel(
+                "Node Editor akan disiapkan saat dibuka."
+            )
+            node_placeholder_message.setObjectName("emptyState")
+            node_placeholder_message.setAlignment(Qt.AlignCenter)
+            node_placeholder_layout.addWidget(node_placeholder_message)
+            node_placeholder_layout.addStretch(1)
+        self._startup_checkpoint("Menyiapkan tools riset…")
+        # These tools contain large tables, charts, and report widgets. Keep
+        # lightweight placeholders in the stack and build each tool only when
+        # the user opens it.
+        self.ml_page = None
+        self.research_page = None
+        self.papers_tool_page = None
+        self.landscape_tool_page = None
+        self.gap_tool_page = None
+        self.research_insights_page = None
+        self.report_tool_page = None
+        self._ml_page_build_scheduled = False
+        self._research_page_build_scheduled = False
+        self._insights_page_build_scheduled = False
+        self._report_page_build_scheduled = False
+
+        def deferred_page(object_name, message):
+            page = QWidget()
+            page.setObjectName(object_name)
+            layout = QVBoxLayout(page)
+            layout.setContentsMargins(32, 32, 32, 32)
+            layout.addStretch(1)
+            label = QLabel(message)
+            label.setObjectName("emptyState")
+            label.setAlignment(Qt.AlignCenter)
+            layout.addWidget(label)
+            layout.addStretch(1)
+            return page
+
+        self._ml_placeholder = deferred_page(
+            "mlLoadingPlaceholder", "ML Intelligence akan disiapkan saat dibuka."
+        )
+        self._research_placeholder = deferred_page(
+            "researchLoadingPlaceholder", "Academic Research akan disiapkan saat dibuka."
+        )
+        self._insights_placeholder = deferred_page(
+            "insightsLoadingPlaceholder", "Research Insights akan disiapkan saat dibuka."
+        )
+        self._report_placeholder = deferred_page(
+            "reportLoadingPlaceholder", "Research Report akan disiapkan saat dibuka."
+        )
+        self._startup_checkpoint("Menyiapkan halaman bantuan…")
         self.about_page = AboutPage()
         self.copyright_page = CopyrightPage()
         self.help_page = HelpPage(self)
@@ -13343,24 +14430,24 @@ class MainWindow(QMainWindow):
             "dashboard": self.dashboard,
             "dataset": self.datasets_page,
             "dataset_search": self.datasets_page,
-            "analysis": self.analysis_page,
-            "editor_analysis": self.editor_analysis_page,
-            "ml": self.ml_page,
-            "research": self.papers_tool_page,
-            "papers": self.papers_tool_page,
-            "insights": self.research_insights_page,
+            "analysis": self._analysis_placeholder,
+            "editor_analysis": self._editor_analysis_placeholder,
+            "ml": self._ml_placeholder,
+            "research": self._research_placeholder,
+            "papers": self._research_placeholder,
+            "insights": self._insights_placeholder,
             # Landscape and gap are tabs inside Research Insights. Reusing
             # their parent page here keeps Qt from pulling the tab widgets
             # out into separate entries in the main page stack.
-            "landscape": self.research_insights_page,
-            "gap": self.research_insights_page,
-            "report": self.report_tool_page,
+            "landscape": self._insights_placeholder,
+            "gap": self._insights_placeholder,
+            "report": self._report_placeholder,
             "about": self.about_page,
             "copyright": self.copyright_page,
             "help": self.help_page,
         }
-        if self.node_editor_page is not None:
-            self.pages["node_editor"] = self.node_editor_page
+        if NODE_EDITOR_UI_ENABLED:
+            self.pages["node_editor"] = self._node_editor_placeholder
 
         self.page_hosts = {}
         for page in self.pages.values():
@@ -13388,7 +14475,7 @@ class MainWindow(QMainWindow):
             table.setTextElideMode(Qt.ElideRight)
 
         self._page_titles = {
-            "dashboard": "Dashboard",
+            "dashboard": "Overview",
             "dataset": "Datasets",
             "dataset_search": "Dataset Search",
             "analysis": "Dataset Analysis",
@@ -13400,11 +14487,11 @@ class MainWindow(QMainWindow):
             "landscape": "Research Landscape",
             "gap": "Research Gap",
             "report": "Research Report",
-            "about": "About",
-            "copyright": "Copyright",
-            "help": "Help",
+            "about": "Tentang DORA",
+            "copyright": "Credits",
+            "help": "Bantuan",
         }
-        if self.node_editor_page is not None:
+        if NODE_EDITOR_UI_ENABLED:
             self._page_titles["node_editor"] = "Node Editor"
 
         for widget in (root, content, self.page_stack, self.datasets_page, self.datasets_tabs, self.datasets_tab_pages):
@@ -13416,11 +14503,12 @@ class MainWindow(QMainWindow):
             if id(page) not in seen_page_ids:
                 seen_page_ids.add(id(page))
                 self._apply_canvas_background(page)
+        self._startup_checkpoint("Merapikan navigasi…")
         for scroll_area in self.findChildren(QScrollArea):
             self._apply_canvas_background(scroll_area)
             self._apply_canvas_background(scroll_area.viewport())
 
-        self.open_dashboard()
+        self._show_page("dashboard")
 
     # =========================================================
     # SIDEBAR
@@ -13451,6 +14539,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(0)
 
         brand = QHBoxLayout()
+        self.sidebar_brand_layout = brand
         brand.setSpacing(18)
         brand.setContentsMargins(22, 0, 0, 0)
         logo = QLabel("D")
@@ -13462,7 +14551,15 @@ class MainWindow(QMainWindow):
         if logo_path.exists():
             pixmap = QPixmap(str(logo_path)).copy(275, 130, 560, 650)
             if not pixmap.isNull():
-                logo.setPixmap(pixmap.scaled(82, 82, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                ratio = max(1.0, logo.devicePixelRatioF())
+                logo_pixmap = pixmap.scaled(
+                    round(82 * ratio),
+                    round(82 * ratio),
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation,
+                )
+                logo_pixmap.setDevicePixelRatio(ratio)
+                logo.setPixmap(logo_pixmap)
 
         brand_text_container = QWidget()
         self.brand_text_container = brand_text_container
@@ -13470,8 +14567,10 @@ class MainWindow(QMainWindow):
         brand_text.setContentsMargins(0, 0, 0, 0)
         brand_text.setSpacing(2)
         title = QLabel("DORA")
+        self.sidebar_brand_title = title
         title.setObjectName("brandTitle")
         subtitle = QLabel("Data Overview & Research Assistant")
+        self.sidebar_brand_subtitle = subtitle
         subtitle.setObjectName("brandSubtitle")
         subtitle.setWordWrap(True)
         brand_text_container.setMaximumWidth(276)
@@ -13487,7 +14586,7 @@ class MainWindow(QMainWindow):
         self.sidebar_section_labels = []
         self.sidebar_group_cards = []
         self.sidebar_group_layouts = []
-        self._add_nav_section(layout, "WORKSPACE")
+        self._add_nav_section(layout, "RUANG KERJA")
         layout.itemAt(layout.count() - 1).widget().setFixedHeight(32)
         layout.addSpacing(2)
         self._add_nav_group(layout, 238, 15, 8, (
@@ -13498,7 +14597,7 @@ class MainWindow(QMainWindow):
             ("dashboard", "overview.svg", "Overview"),
         ))
         layout.addSpacing(8)
-        self._add_nav_section(layout, "RESEARCH TOOLS")
+        self._add_nav_section(layout, "RISET & PUBLIKASI")
         layout.itemAt(layout.count() - 1).widget().setFixedHeight(32)
         layout.addSpacing(15)
         self._add_nav_group(layout, 152, 6, 17, (
@@ -13507,7 +14606,7 @@ class MainWindow(QMainWindow):
             ("report", "research-report.svg", "Research Report"),
         ))
         layout.addSpacing(11)
-        self._add_nav_section(layout, "OPTIONAL TOOLS")
+        self._add_nav_section(layout, "ALAT TAMBAHAN")
         layout.itemAt(layout.count() - 1).widget().setFixedHeight(32)
         layout.addSpacing(2)
         optional_tools = [
@@ -13529,9 +14628,9 @@ class MainWindow(QMainWindow):
 
         self.sidebar_footer_buttons = {}
         for key, label, icon_name, width, callback in (
-            ("about", "About", "overview-about.svg", 116, self.open_about),
-            ("copyright", "Copyright", "copyright.svg", 146, self.open_copyright),
-            ("help", "Help", "help.svg", 104, self.open_help),
+            ("about", "Tentang", "overview-about.svg", 116, self.open_about),
+            ("copyright", "Credits", "copyright.svg", 116, self.open_copyright),
+            ("help", "Bantuan", "help.svg", 104, self.open_help),
         ):
             button = QPushButton(label)
             button.setObjectName("overviewSidebarLink")
@@ -13547,6 +14646,11 @@ class MainWindow(QMainWindow):
             button.clicked.connect(callback)
             footer_layout.addWidget(button)
             self.sidebar_footer_buttons[key] = button
+
+        self.sidebar_copyright_label = QLabel("© 2026 DORA\nBuilt by Meks Studio")
+        self.sidebar_copyright_label.setObjectName("sidebarCopyrightLabel")
+        self.sidebar_copyright_label.hide()
+        footer_layout.addWidget(self.sidebar_copyright_label)
 
         self.sidebar_footer = footer
 
@@ -13566,7 +14670,7 @@ class MainWindow(QMainWindow):
         self.sidebar_group_layouts.append(group_layout)
         for key, icon, text in entries:
             button = self._add_nav_button(group_layout, key, icon, text)
-            button.setFixedHeight(48 if height >= 260 else 43)
+            button.setFixedHeight(28)
         apply_card_shadow(card)
         parent_layout.addWidget(card)
 
@@ -13594,29 +14698,26 @@ class MainWindow(QMainWindow):
         icon_label.setFixedSize(30, 30)
         icon_label.setAlignment(Qt.AlignCenter)
         icon_path = _resource_path(Path("assets") / "icons" / icon)
+        button.setProperty("iconPath", str(icon_path))
         if icon_path.exists():
-            pixmap = QPixmap(str(icon_path))
-            if not pixmap.isNull():
-                icon_size = {
-                    "dataset_search": (24, 24),
-                    "dataset": (30, 30),
-                    "analysis": (24, 24),
-                    "editor_analysis": (24, 24),
-                    "ml": (24, 24),
-                    "dashboard": (26, 26),
-                    "research": (30, 24),
-                    "papers": (30, 30),
-                    "landscape": (30, 30),
-                    "gap": (30, 30),
-                    "report": (30, 30),
-                }.get(key, (24, 24))
-                icon_label.setPixmap(
-                    pixmap.scaled(
-                        *icon_size,
-                        Qt.KeepAspectRatio,
-                        Qt.SmoothTransformation,
-                    )
+            icon_size = {
+                "dataset_search": (24, 24),
+                "dataset": (30, 30),
+                "analysis": (24, 24),
+                "editor_analysis": (24, 24),
+                "ml": (24, 24),
+                "dashboard": (26, 26),
+                "research": (30, 24),
+                "papers": (30, 30),
+                "landscape": (30, 30),
+                "gap": (30, 30),
+                "report": (30, 30),
+            }.get(key, (24, 24))
+            icon_label.setPixmap(
+                render_icon_pixmap(
+                    icon_path, QSize(*icon_size), icon_label.devicePixelRatioF()
                 )
+            )
 
         text_label = QLabel(text)
         text_label.setObjectName("navText")
@@ -13632,7 +14733,7 @@ class MainWindow(QMainWindow):
 
         callbacks = {
             "dashboard": self.open_dashboard,
-            "dataset": self.open_datasets_page,
+            "dataset": self.open_upload_page,
             "dataset_search": self.open_dataset_search_page,
             "analysis": self.open_analysis_page,
             "editor_analysis": self.open_editor_analysis_page,
@@ -13669,14 +14770,23 @@ class MainWindow(QMainWindow):
         layout.setSpacing(13)
         self.topbar_layout = layout
         self.sidebar_toggle_button = QToolButton()
-        self.sidebar_toggle_button.setText(chr(0x2630))
+        menu_glyph = QPixmap(48, 48)
+        menu_glyph.fill(Qt.transparent)
+        painter = QPainter(menu_glyph)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(QPen(QColor("#2563A6"), 4, Qt.SolidLine, Qt.RoundCap))
+        for y in (12, 24, 36):
+            painter.drawLine(9, y, 39, y)
+        painter.end()
+        self.sidebar_toggle_button.setIcon(QIcon(menu_glyph))
+        self.sidebar_toggle_button.setIconSize(QSize(18, 18))
         self.sidebar_toggle_button.setObjectName("sidebarToggleButton")
-        self.sidebar_toggle_button.setAccessibleName("Toggle Sidebar")
-        self.sidebar_toggle_button.setToolTip("Show or hide the sidebar")
+        self.sidebar_toggle_button.setAccessibleName("Tampilkan atau sembunyikan sidebar")
+        self.sidebar_toggle_button.setToolTip("Tampilkan atau sembunyikan sidebar")
         self.sidebar_toggle_button.setCheckable(True)
         self.sidebar_toggle_button.setChecked(True)
         self.sidebar_toggle_button.clicked.connect(self._toggle_sidebar)
-        layout.addWidget(self.sidebar_toggle_button)
+        self.sidebar_toggle_button.setFixedSize(34, 34)
         self.page_title = QLabel("Dashboard")
         self.page_title.setObjectName("topbarTitle")
         self.page_title.hide()
@@ -13719,11 +14829,11 @@ class MainWindow(QMainWindow):
             and isinstance(event.child(), QWidget)
             and isinstance(watched, QWidget)
             and watched_is_window_widget
-            and not self._scale_refresh_scheduled
         ):
             self._pending_scale_roots.append(event.child())
-            self._scale_refresh_scheduled = True
-            QTimer.singleShot(0, self._refresh_new_widget_scale)
+            if not self._scale_refresh_scheduled:
+                self._scale_refresh_scheduled = True
+                QTimer.singleShot(0, self._refresh_new_widget_scale)
         if (
             event.type() == QEvent.Wheel
             and event.modifiers() & Qt.ControlModifier
@@ -13750,58 +14860,201 @@ class MainWindow(QMainWindow):
         page_key = getattr(self, "_current_page_key", "dashboard")
         overview_mode = page_key == "dashboard"
         about_mode = page_key == "about"
+        analysis_mode = page_key == "analysis"
+        # Keep one shared navigation shell across routes. Individual page content can
+        # use its own responsive layout, but the sidebar should not change model.
+        page4_shell_mode = True
         scale = self.scale_manager.get_scale()
+        analysis_frame = analysis_mode and window_width >= 1850 and window_height >= 1000
+        analysis_px = (lambda value: int(value)) if analysis_frame else self.scale_manager.px
         narrow_window = window_width / max(scale, 0.01) < 900
+        manual_hidden = self._sidebar_manual_state is True
         compact = (
-            self._sidebar_manual_state
-            if self._sidebar_manual_state is not None
-            else narrow_window
+            narrow_window
+            if self._sidebar_manual_state is None
+            else False
         )
         sidebar_width = (
-            self.scale_manager.px(76)
+            self.scale_manager.px(190)
             if compact
+            else self.scale_manager.px(178) if page4_shell_mode
+            else analysis_px(237) if analysis_mode
             else 418 if about_mode and window_width >= self.scale_manager.px(1366)
             else min(self.scale_manager.px(418), max(self.scale_manager.px(240), round(window_width * 0.23)))
         )
-        if self.sidebar_container.width() != sidebar_width:
-            self.sidebar_container.setFixedWidth(sidebar_width)
+        if manual_hidden:
+            # Hiding the widget removes the complete navigation rail from the
+            # root layout, allowing the page stack to reclaim its full width.
+            self.sidebar_container.hide()
+            if self.sidebar_container.width() != 0:
+                self.sidebar_container.setFixedWidth(0)
+        else:
+            if self.sidebar_container.width() != sidebar_width:
+                self.sidebar_container.setFixedWidth(sidebar_width)
+            self.sidebar_container.show()
         if hasattr(self, "sidebar_menu_action"):
             self.sidebar_menu_action.blockSignals(True)
-            self.sidebar_menu_action.setChecked(not compact)
+            self.sidebar_menu_action.setChecked(not manual_hidden)
             self.sidebar_menu_action.blockSignals(False)
         if hasattr(self, "sidebar_toggle_button"):
             self.sidebar_toggle_button.blockSignals(True)
-            self.sidebar_toggle_button.setChecked(not compact)
+            # In automatic compact mode, leave the hamburger unchecked so a
+            # click expands the rail; an explicit hide also stays unchecked.
+            self.sidebar_toggle_button.setChecked(not compact and not manual_hidden)
             self.sidebar_toggle_button.blockSignals(False)
+            toggle_size = self.scale_manager.px(34)
+            if self.sidebar_toggle_button.size() != QSize(toggle_size, toggle_size):
+                self.sidebar_toggle_button.setFixedSize(toggle_size, toggle_size)
+        if page4_shell_mode:
+            sidebar_margins = (8 if compact else 12, 24, 8 if compact else 16, 12)
+        elif analysis_mode:
+            sidebar_margins = (8, 22, 8, 16)
+        else:
+            sidebar_margins = (
+                8 if compact else 11,
+                20 if compact else 70,
+                8 if compact else 14,
+                16 if compact else 44,
+            )
         self.sidebar_layout.setContentsMargins(
-            self.scale_manager.px(8 if compact else 11),
-            self.scale_manager.px(20 if compact else 70),
-            self.scale_manager.px(8 if compact else 14),
-            self.scale_manager.px(16 if compact else 44),
+            *((self.scale_manager.px(value) if page4_shell_mode else analysis_px(value)) for value in sidebar_margins)
         )
         self.sidebar_logo.setFixedSize(
-            self.scale_manager.px(48 if compact else 82),
-            self.scale_manager.px(48 if compact else 82),
+            self.scale_manager.px(42 if compact else 58),
+            self.scale_manager.px(42 if compact else 58),
         )
-        for group_index, (group, group_layout) in enumerate(zip(self.sidebar_group_cards, self.sidebar_group_layouts)):
-            group_layout.setContentsMargins(
-            self.scale_manager.px(4 if compact else (35 if about_mode else 41)),
-            self.scale_manager.px(10 if compact else (15 if group_index == 0 else 6)),
-            self.scale_manager.px(4 if compact else (15 if about_mode else 9)),
-            self.scale_manager.px(10 if compact else (8 if group_index == 0 else 17)),
+        self.sidebar_brand_layout.setContentsMargins(
+            analysis_px(8 if analysis_mode and not compact else 22) if not page4_shell_mode else 0,
+            0,
+            0,
+            0,
+        )
+        self.sidebar_brand_layout.setSpacing(
+            analysis_px(10 if analysis_mode and not compact else 18) if not page4_shell_mode else self.scale_manager.px(9)
+        )
+        brand_spacer = self.sidebar_layout.itemAt(1)
+        if brand_spacer is not None and brand_spacer.spacerItem() is not None:
+                brand_spacer.spacerItem().changeSize(
+                0,
+                self.scale_manager.px(8 if page4_shell_mode else 16),
+                QSizePolicy.Minimum,
+                QSizePolicy.Fixed,
             )
-            group.setProperty("compact", compact)
-            group.style().unpolish(group)
-            group.style().polish(group)
+        for group_index, (group, group_layout) in enumerate(zip(self.sidebar_group_cards, self.sidebar_group_layouts)):
+            if page4_shell_mode:
+                group_layout.setContentsMargins(0, 0, 0, 0)
+                group_layout.setSpacing(self.scale_manager.px(3))
+                group.setFixedHeight(
+                    self.scale_manager.px((180, 92, 104)[min(group_index, 2)])
+                )
+            else:
+                group_layout.setContentsMargins(
+                    analysis_px(4 if compact else (8 if analysis_mode else 35 if about_mode else 41)),
+                    analysis_px(10 if compact else (8 if analysis_mode else 15 if group_index == 0 else 6)),
+                    analysis_px(4 if compact else (8 if analysis_mode else 15 if about_mode else 9)),
+                    analysis_px(10 if compact else (8 if analysis_mode else 8 if group_index == 0 else 17)),
+                )
+                if not page4_shell_mode:
+                    group.setFixedHeight(self.scale_manager.px((238, 152, 104)[min(group_index, 2)]))
+            changed = False
+            for name, value in (("compact", compact), ("figmaAnalysis", False), ("figmaPage4", page4_shell_mode)):
+                if group.property(name) != value:
+                    group.setProperty(name, value)
+                    changed = True
+            if changed:
+                group.style().unpolish(group)
+                group.style().polish(group)
         for button in getattr(self, "nav_buttons", {}).values():
+            if page4_shell_mode:
+                button.setFixedHeight(self.scale_manager.px(28))
             row = button.layout()
             if row is not None:
-                row.setContentsMargins(11 if about_mode else 5, 0, 0, 0)
+                row.setContentsMargins(
+                    self.scale_manager.px(11) if page4_shell_mode else 3 if analysis_mode else 11 if about_mode else 5,
+                    0,
+                    0,
+                    0,
+                )
+                row.setSpacing(self.scale_manager.px(8) if page4_shell_mode else analysis_px(8 if analysis_mode else 25))
+                icon = button.findChild(QLabel, "navIcon")
+                if icon is not None:
+                    icon_size = self.scale_manager.px(20) if page4_shell_mode else analysis_px(30)
+                    icon.setFixedSize(icon_size, icon_size)
+                    icon_path = button.property("iconPath")
+                    if icon_path and Path(icon_path).exists():
+                        active_tint = "#0861EF" if button.property("active") else "#24344D"
+                        if (
+                            icon.property("renderedTint") != active_tint
+                            or icon.property("renderedIconSize") != icon_size
+                        ):
+                            icon.setPixmap(
+                                render_icon_pixmap(
+                                    icon_path,
+                                    icon_size - 1,
+                                    icon.devicePixelRatioF(),
+                                    tint=active_tint,
+                                )
+                            )
+                            icon.setProperty("renderedTint", active_tint)
+                            icon.setProperty("renderedIconSize", icon_size)
+        if page4_shell_mode:
+            for section_label in self.sidebar_section_labels:
+                section_label.setFixedHeight(self.scale_manager.px(24))
         sidebar = self.sidebar_scroll.widget()
-        sidebar.setProperty("figmaAbout", about_mode)
-        sidebar.style().unpolish(sidebar)
-        sidebar.style().polish(sidebar)
-        self.brand_text_container.setVisible(not compact)
+        sidebar_changed = False
+        for name, value in (("figmaAbout", False), ("figmaAnalysis", False), ("figmaPage4", page4_shell_mode)):
+            if sidebar.property(name) != value:
+                sidebar.setProperty(name, value)
+                sidebar_changed = True
+        if sidebar_changed:
+            sidebar.style().unpolish(sidebar)
+            sidebar.style().polish(sidebar)
+        for widget in (
+            self.sidebar_brand_title,
+            self.sidebar_brand_subtitle,
+            self.sidebar_logo,
+            *self.sidebar_section_labels,
+            *self.nav_text_widgets,
+            *self.nav_buttons.values(),
+        ):
+            changed = False
+            for name, value in (("figmaAnalysis", False), ("figmaPage4", page4_shell_mode)):
+                if widget.property(name) != value:
+                    widget.setProperty(name, value)
+                    changed = True
+            if changed:
+                widget.style().unpolish(widget)
+                widget.style().polish(widget)
+        if page4_shell_mode:
+            logo_path = _resource_path("assets/logo.jpg")
+            logo_key = (
+                self.sidebar_logo.width(),
+                self.sidebar_logo.height(),
+                round(self.sidebar_logo.devicePixelRatioF(), 2),
+            )
+            if logo_path.exists() and getattr(self, "_sidebar_logo_render_key", None) != logo_key:
+                pixmap = QPixmap(str(logo_path)).copy(275, 130, 560, 650)
+                if not pixmap.isNull():
+                    ratio = max(1.0, self.sidebar_logo.devicePixelRatioF())
+                    logo_pixmap = pixmap.scaled(
+                        round(self.sidebar_logo.width() * ratio),
+                        round(self.sidebar_logo.height() * ratio),
+                        Qt.KeepAspectRatio,
+                        Qt.SmoothTransformation,
+                    )
+                    logo_pixmap.setDevicePixelRatio(ratio)
+                    self.sidebar_logo.setPixmap(logo_pixmap)
+                    self._sidebar_logo_render_key = logo_key
+            section_names = ("RUANG KERJA", "RISET & PUBLIKASI", "ALAT TAMBAHAN")
+            for label, text in zip(self.sidebar_section_labels, section_names):
+                label.setText(text)
+            self._reorder_page4_workspace_navigation(True)
+        else:
+            section_names = ("RUANG KERJA", "RISET & PUBLIKASI", "ALAT TAMBAHAN")
+            for label, text in zip(self.sidebar_section_labels, section_names):
+                label.setText(text)
+            self._reorder_page4_workspace_navigation(False)
+        self.brand_text_container.setVisible(True)
         for label in self.nav_text_widgets:
             label.setVisible(not compact)
         for label in self.sidebar_section_labels:
@@ -13813,38 +15066,65 @@ class MainWindow(QMainWindow):
             else 78 if window_height / max(scale, 0.01) < 620 else 124
         )
         self.topbar.setFixedHeight(self.scale_manager.px(base_topbar_height))
+        # The menu bar and status bar stay in the same place across routes. The
+        # page title and navigation controls live in the page/sidebar now.
+        self.topbar.setVisible(False)
+        self.menuBar().setVisible(True)
+        self.statusBar().setVisible(True)
         self.topbar_layout.setContentsMargins(
             self.scale_manager.px(12 if compact_topbar else 34),
             0 if compact_topbar else self.scale_manager.px(4),
             self.scale_manager.px(12 if compact_topbar else 127),
             0,
         )
-        self.topbar_version_container.setVisible(True)
+        self.topbar_version_container.setVisible(False)
         self.sidebar_footer.setVisible(True)
+        self.sidebar_footer_buttons["about"].setVisible(True)
+        self.sidebar_copyright_label.setVisible(False)
+        if page4_shell_mode:
+            help_button = self.sidebar_footer_buttons["help"]
+            self.sidebar_footer_layout.removeWidget(help_button)
+            self.sidebar_footer_layout.insertWidget(0, help_button)
+            self.sidebar_footer_layout.setContentsMargins(self.scale_manager.px(31), 0, 0, 0)
+        else:
+            help_button = self.sidebar_footer_buttons["help"]
+            self.sidebar_footer_layout.removeWidget(help_button)
+            self.sidebar_footer_layout.insertWidget(2, help_button)
+            self.sidebar_footer_layout.setContentsMargins(
+                analysis_px(4 if compact else (16 if analysis_mode else 35 if about_mode else 41)),
+                0,
+                0,
+                0,
+            )
         for key, button in self.sidebar_footer_buttons.items():
+            button.setProperty("figmaPage4", page4_shell_mode)
             button.setProperty("compact", compact)
             button.setText("" if compact else button.property("labelText"))
             button.setFixedSize(
-                self.scale_manager.px(40 if compact else button.property("preferredWidth")),
-                self.scale_manager.px(40),
+                analysis_px(40 if compact else button.property("preferredWidth")),
+                analysis_px(40),
             )
             button.setIconSize(
-                QSize(self.scale_manager.px(20), self.scale_manager.px(20))
+                QSize(analysis_px(20), analysis_px(20))
                 if compact
-                else QSize(self.scale_manager.px(24), self.scale_manager.px(24))
+                else QSize(analysis_px(24), analysis_px(24))
             )
             button.setProperty("active", page_key == key)
+            if page4_shell_mode:
+                button.setGraphicsEffect(None)
+            else:
+                apply_card_shadow(button)
             button.style().unpolish(button)
             button.style().polish(button)
-        self.sidebar_footer_layout.setContentsMargins(
-            self.scale_manager.px(4 if compact else (35 if about_mode else 41)),
-            0,
-            0,
-            0,
+        self.sidebar_footer_layout.setSpacing(analysis_px(4 if compact else 6))
+        self.sidebar_footer.setFixedHeight(
+            self.scale_manager.px(164) if page4_shell_mode
+            else analysis_px(132 if compact else 136)
         )
-        self.sidebar_footer_layout.setSpacing(self.scale_manager.px(4 if compact else 6))
-        self.sidebar_footer.setFixedHeight(self.scale_manager.px(132 if compact else 136))
-        self.overview_topbar_frame.setVisible(overview_mode)
+        for key, button in self.sidebar_footer_buttons.items():
+            if key == "help":
+                button.setText("Bantuan")
+        self.overview_topbar_frame.setVisible(False)
         self.topbar.setProperty("overviewMode", overview_mode)
         self.topbar.style().unpolish(self.topbar)
         self.topbar.style().polish(self.topbar)
@@ -13854,6 +15134,46 @@ class MainWindow(QMainWindow):
                 max(0, self.topbar.width() - self.scale_manager.px(25)),
                 self.scale_manager.px(130),
             )
+        if analysis_mode and hasattr(self, "analysis_page"):
+            page = self.analysis_page
+            page._refresh_analysis_layout(page.width())
+            QTimer.singleShot(0, self._apply_analysis_frame_geometry)
+
+    def _reorder_page4_workspace_navigation(self, page4_mode: bool):
+        """Keep workspace navigation in one shared order across routes."""
+        if not getattr(self, "sidebar_group_layouts", None):
+            return
+        if getattr(self, "_workspace_navigation_mode", None) == page4_mode:
+            return
+        group_layout = self.sidebar_group_layouts[0]
+        original = ("dataset_search", "dataset", "analysis", "ml", "dashboard")
+        page4 = (
+            "dashboard", "dataset_search", "dataset", "analysis",
+            "ml",
+        )
+        ordered_keys = page4 if page4_mode else original
+        buttons = [self.nav_buttons[key] for key in ordered_keys if key in self.nav_buttons]
+        for button in buttons:
+            group_layout.removeWidget(button)
+        for position, button in enumerate(buttons):
+            group_layout.insertWidget(position, button)
+            button.setFixedHeight(
+                self.scale_manager.px(28 if page4_mode else 43)
+            )
+        if self.sidebar_group_cards:
+            self.sidebar_group_cards[0].setFixedHeight(
+                self.scale_manager.px(180 if page4_mode else 238)
+            )
+        self._workspace_navigation_mode = page4_mode
+
+    def _apply_analysis_frame_geometry(self):
+        """Reapply target-frame geometry after deferred widget scaling settles."""
+        if getattr(self, "_current_page_key", None) != "analysis":
+            return
+        page = getattr(self, "analysis_page", None)
+        if page is None:
+            return
+        page._refresh_analysis_layout(page.width())
 
     # =========================================================
     # NAVIGATION
@@ -13861,50 +15181,285 @@ class MainWindow(QMainWindow):
 
     def _show_page(self, key):
         page = self.pages[key]
-        self.page_stack.setCurrentWidget(self.page_hosts.get(id(page), page))
+        target = self.page_hosts.get(id(page), page)
+        if target is not self.page_stack.currentWidget():
+            self._cancel_page_transition()
+            # Keep native widget painting during navigation. Applying an
+            # opacity effect to the stacked window forces Qt to rasterize the
+            # complete page and causes stutters on chart- and table-heavy views.
+            self.page_stack.setCurrentWidget(target)
         self._current_page_key = key
+        current_scale = self.scale_manager.get_scale()
+        page_scales = getattr(self, "_page_scale_values", {})
+        if abs(page_scales.get(id(page), -1.0) - current_scale) >= 0.001:
+            stylesheet = getattr(self, "_active_scale_stylesheet", "")
+            if not stylesheet:
+                stylesheet = self._build_scaled_stylesheet(current_scale)
+                self._active_scale_stylesheet = stylesheet
+            self._apply_scale_stylesheet(stylesheet, (target,))
+            self._apply_widget_scale(current_scale, [target])
+            self._apply_active_page_layout(page, current_scale)
+            page_scales[id(page)] = current_scale
+            self._page_scale_values = page_scales
         if getattr(self, "_startup_restore_complete", False):
             self.scale_manager.settings.setValue("last_page_key", key)
         self.page_title.setText(self._page_titles[key])
         self.set_active_button("dashboard" if key == "about" else key)
         self._sync_page_chrome(self.width(), self.height())
 
+    def _cancel_page_transition(self):
+        animation = getattr(self, "_page_transition_animation", None)
+        if animation is not None:
+            animation.stop()
+            animation.deleteLater()
+            self._page_transition_animation = None
+        if self.page_stack.graphicsEffect() is not None:
+            self.page_stack.setGraphicsEffect(None)
+        self._page_transition_effect = None
+
     def open_dashboard(self):
+        self.dashboard.refresh_summary()
         self._show_page("dashboard")
 
     def open_upload_page(self):
-        self.datasets_tabs.setCurrentWidget(self.upload_page)
+        if self.current_dataset is not None:
+            # Keep the established dataset preview as the main Dataset view.
+            # The spreadsheet-style upload preview remains outside this route.
+            self.dataset_preview_page.update_dataset(
+                self.current_dataset,
+                self._current_filename(),
+            )
+            self.dataset_preview_page._select_tab(0)
+            self.datasets_tabs.setCurrentWidget(self.dataset_preview_page)
+        else:
+            self.upload_page.update_loaded_state(None, "")
+            self.datasets_tabs.setCurrentWidget(self.upload_page)
         self._show_page("dataset")
 
     def open_datasets_page(self):
-        target = self.dataset_preview_page if self.current_dataset is not None else self.upload_page
-        self.datasets_tabs.setCurrentWidget(target)
-        self._show_page("dataset")
+        # Open the existing dataset preview when data is loaded, or the upload
+        # workflow when the application has no active dataset.
+        self.open_upload_page()
 
     def open_analysis_page(self):
+        if self.analysis_page is None:
+            self._show_page("analysis")
+            if not self._analysis_build_scheduled:
+                self._analysis_build_scheduled = True
+                QTimer.singleShot(0, self._create_analysis_page)
+            return
         if self.current_dataset is not None:
             self.analysis_page.update_dataset(
                 self.current_dataset,
                 self._current_filename(),
             )
-            if self.analysis_result:
-                self.analysis_page.display_results(self.analysis_result)
         self._show_page("analysis")
 
+    def _create_analysis_page(self):
+        self._analysis_build_scheduled = False
+        if self.analysis_page is not None:
+            return
+
+        page = AnalysisPage(self)
+        self.analysis_page = page
+        if self.current_dataset is not None:
+            page.update_dataset(self.current_dataset, self._current_filename())
+        self._replace_lazy_page("analysis", page)
+
     def open_editor_analysis_page(self):
+        if self.editor_analysis_page is None:
+            self._show_page("editor_analysis")
+            if not self._editor_analysis_build_scheduled:
+                self._editor_analysis_build_scheduled = True
+                QTimer.singleShot(0, self._create_editor_analysis_page)
+            return
         self.editor_analysis_page.set_dataset(
             self.current_dataset,
             self._current_filename() if self.current_dataset is not None else "",
         )
         self._show_page("editor_analysis")
 
+    def _create_editor_analysis_page(self):
+        self._editor_analysis_build_scheduled = False
+        if self.editor_analysis_page is not None:
+            return
+
+        from app.ui.editor_analysis_page import EditorAnalysisPage
+
+        page = EditorAnalysisPage(self)
+        page.set_dataset(
+            self.current_dataset,
+            self._current_filename() if self.current_dataset is not None else "",
+        )
+
+        self.editor_analysis_page = page
+        self._replace_lazy_page("editor_analysis", page)
+
+    def _replace_lazy_page(self, key, page):
+        placeholder = self.pages[key]
+        old_host = self.page_hosts.pop(id(placeholder), placeholder)
+        old_index = self.page_stack.indexOf(old_host)
+        was_current = self.page_stack.currentWidget() is old_host
+        if old_index >= 0:
+            self.page_stack.removeWidget(old_host)
+        self._page_scale_values.pop(id(placeholder), None)
+        self._page_scale_hook_cache.pop(id(placeholder), None)
+        self._scale_stylesheet_template_cache.pop(id(placeholder), None)
+        self._scale_stylesheet_template_cache.pop(id(old_host), None)
+
+        page.setMinimumWidth(0)
+        page.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        page.setProperty("pageWidget", True)
+        host = page
+        if not page.findChildren(QScrollArea):
+            host = QScrollArea()
+            host.setObjectName("responsivePageScroll")
+            host.setWidgetResizable(True)
+            host.setFrameShape(QFrame.NoFrame)
+            host.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            host.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            host.setWidget(page)
+        host.setProperty("pageWidget", True)
+        self._apply_canvas_background(page)
+        for page_key, current_page in tuple(self.pages.items()):
+            if current_page is placeholder:
+                self.pages[page_key] = page
+        self.page_hosts[id(page)] = host
+        self.page_stack.insertWidget(max(0, old_index), host)
+        old_host.deleteLater()
+        if was_current:
+            self._show_page(key)
+
     def open_node_editor_page(self):
+        if not NODE_EDITOR_UI_ENABLED:
+            return
         if self.node_editor_page is None:
+            self._show_page("node_editor")
+            if not self._node_editor_build_scheduled:
+                self._node_editor_build_scheduled = True
+                QTimer.singleShot(0, self._create_node_editor_page)
             return
         self.node_editor_page.prepare_for_open()
         self._show_page("node_editor")
 
+    def _create_node_editor_page(self):
+        self._node_editor_build_scheduled = False
+        if self.node_editor_page is not None:
+            return
+        from app.ui.node_editor import NodeEditorPage
+
+        page = NodeEditorPage(self)
+        page.prepare_for_open()
+        self.node_editor_page = page
+        self._replace_lazy_page("node_editor", page)
+
+    def _schedule_page_build(self, key, flag_name, builder_name):
+        self._show_page(key)
+        if getattr(self, flag_name):
+            return
+        setattr(self, flag_name, True)
+        QTimer.singleShot(0, getattr(self, builder_name))
+
+    def _create_ml_page(self):
+        self._ml_page_build_scheduled = False
+        if self.ml_page is not None:
+            return
+        page = MLIntelligencePage(self)
+        self.ml_page = page
+        task_result = self._restored_ml_task
+        methods_result = self._restored_ml_methods
+        if task_result and methods_result:
+            page.last_task_result = task_result
+            page.last_method_result = {
+                key: value for key, value in methods_result.items()
+                if key != "_intelligence_result"
+            }
+            page.last_intelligence_result = methods_result.get(
+                "_intelligence_result"
+            ) or {}
+            page.display_result(task_result, page.last_method_result)
+        self._replace_lazy_page("ml", page)
+        self.open_ml_page()
+
+    def _ensure_research_engine(self):
+        if self.research_page is not None:
+            return self.research_page
+        page = ResearchPage(self)
+        page.hide()
+        if self._restored_research_result:
+            page._last_ml_result = dict(self._restored_ml_task or {})
+            page.restore_result(self._restored_research_result)
+        self.research_page = page
+        return page
+
+    def _create_research_page(self):
+        self._research_page_build_scheduled = False
+        if self.papers_tool_page is not None:
+            return
+        self._ensure_research_engine()
+        page = PapersToolPage(self)
+        result = self.research_page.research_result
+        if result:
+            page.update_from_result(result)
+        self.papers_tool_page = page
+        requested_key = (
+            self._current_page_key
+            if self._current_page_key in {"research", "papers"}
+            else "research"
+        )
+        self._replace_lazy_page(requested_key, page)
+        if requested_key == "papers":
+            self.open_papers_tool()
+        else:
+            self.open_research_page()
+
+    def _create_insights_page(self):
+        self._insights_page_build_scheduled = False
+        if self.research_insights_page is not None:
+            return
+        self._ensure_research_engine()
+        landscape_page = ResearchLandscapeToolPage(self)
+        gap_page = ResearchGapToolPage(self)
+        result = self.research_page.research_result
+        if result:
+            landscape_page.update_from_result(result)
+            gap_page.update_from_result(result)
+        else:
+            landscape_page.show_empty_state()
+            gap_page.show_empty_state()
+        self.landscape_tool_page = landscape_page
+        self.gap_tool_page = gap_page
+        page = ResearchInsightsPage(landscape_page, gap_page)
+        self.research_insights_page = page
+        requested_key = (
+            self._current_page_key
+            if self._current_page_key in {"insights", "landscape", "gap"}
+            else "insights"
+        )
+        self._replace_lazy_page(requested_key, page)
+        page.tabs.setCurrentWidget(
+            gap_page if self._pending_insights_tab == 1 else landscape_page
+        )
+        self.open_insights_page()
+        if requested_key == "landscape":
+            self.open_landscape_tool()
+        elif requested_key == "gap":
+            self.open_gap_tool()
+
+    def _create_report_page(self):
+        self._report_page_build_scheduled = False
+        if self.report_tool_page is not None:
+            return
+        self._ensure_research_engine()
+        page = ResearchReportToolPage(self)
+        self.report_tool_page = page
+        self._replace_lazy_page("report", page)
+        self.open_report_tool()
+
     def open_ml_page(self):
+        if self.ml_page is None:
+            self._schedule_page_build("ml", "_ml_page_build_scheduled", "_create_ml_page")
+            return
         if self.current_dataset is None:
             self.ml_page.show_empty_state()
         elif self.ml_page.last_task_result and self.ml_page.last_method_result:
@@ -13921,6 +15476,11 @@ class MainWindow(QMainWindow):
         self._show_page("ml")
 
     def open_research_page(self):
+        if self.papers_tool_page is None:
+            self._schedule_page_build(
+                "research", "_research_page_build_scheduled", "_create_research_page"
+            )
+            return
         if self.current_dataset is None or not self.analysis_result:
             self.research_page.show_empty_state()
         self._show_page("research")
@@ -13930,6 +15490,11 @@ class MainWindow(QMainWindow):
         self._show_page("dataset_search")
 
     def open_papers_tool(self):
+        if self.papers_tool_page is None:
+            self._schedule_page_build(
+                "papers", "_research_page_build_scheduled", "_create_research_page"
+            )
+            return
         if not self.analysis_result or not self.research_page.research_result:
             self.research_page.show_empty_state()
         else:
@@ -13937,6 +15502,11 @@ class MainWindow(QMainWindow):
         self._show_page("papers")
 
     def open_insights_page(self):
+        if self.research_insights_page is None:
+            self._schedule_page_build(
+                "insights", "_insights_page_build_scheduled", "_create_insights_page"
+            )
+            return
         result = self.research_page.research_result
         if result:
             self.landscape_tool_page.update_from_result(result)
@@ -13951,16 +15521,33 @@ class MainWindow(QMainWindow):
         self.research_page.ensure_insights()
 
     def open_landscape_tool(self):
+        self._pending_insights_tab = 0
+        if self.research_insights_page is None:
+            self._schedule_page_build(
+                "landscape", "_insights_page_build_scheduled", "_create_insights_page"
+            )
+            return
         self.open_insights_page()
         self.research_insights_page.tabs.setCurrentWidget(self.landscape_tool_page)
         self._show_page("landscape")
 
     def open_gap_tool(self):
+        self._pending_insights_tab = 1
+        if self.research_insights_page is None:
+            self._schedule_page_build(
+                "gap", "_insights_page_build_scheduled", "_create_insights_page"
+            )
+            return
         self.open_insights_page()
         self.research_insights_page.tabs.setCurrentWidget(self.gap_tool_page)
         self._show_page("gap")
 
     def open_report_tool(self):
+        if self.report_tool_page is None:
+            self._schedule_page_build(
+                "report", "_report_page_build_scheduled", "_create_report_page"
+            )
+            return
         has_data = (
             self.current_dataset is not None
             or bool(self.analysis_result)
@@ -13985,8 +15572,7 @@ class MainWindow(QMainWindow):
         self._show_page("about")
 
     def open_copyright(self):
-        show_credits_overlay(self)
-        self._apply_widget_scale(self.scale_manager.get_scale())
+        self._show_page("copyright")
 
     def open_help(self):
         self._show_page("help")
@@ -14009,11 +15595,32 @@ class MainWindow(QMainWindow):
     def set_active_button(self, key):
         for name, button in self.nav_buttons.items():
             active = name == key
+            if button.property("active") == active:
+                continue
             button.setProperty("active", active)
             style = button.style()
             style.unpolish(button)
             style.polish(button)
             button.update()
+            text_label = button.findChild(QLabel, "navText")
+            if text_label is not None:
+                text_label.setProperty("active", active)
+                text_style = text_label.style()
+                text_style.unpolish(text_label)
+                text_style.polish(text_label)
+                text_label.update()
+            icon = button.findChild(QLabel, "navIcon")
+            icon_path = button.property("iconPath")
+            if icon is not None and icon_path and Path(icon_path).exists():
+                icon_size = max(1, min(icon.width(), icon.height()) - 1)
+                tint = "#0861EF" if active else "#24344D"
+                icon.setPixmap(
+                    render_icon_pixmap(
+                        icon_path, icon_size, icon.devicePixelRatioF(), tint=tint
+                    )
+                )
+                icon.setProperty("renderedTint", tint)
+                icon.setProperty("renderedIconSize", icon_size + 1)
 
     # =========================================================
     # DATASET STATE
@@ -14079,101 +15686,107 @@ class MainWindow(QMainWindow):
         return self.current_project_id
 
     def _restore_latest_project(self):
-        """Restore the newest usable local project and its completed features."""
-        projects = self.repository.list_projects()
+        """Start restoring the latest project without delaying the first paint."""
         try:
             preferred_project_id = int(self.scale_manager.settings.value("active_project_id", 0) or 0)
         except (TypeError, ValueError):
             preferred_project_id = 0
-        if preferred_project_id:
-            projects.sort(key=lambda project: project.get("id") != preferred_project_id)
-        for project in projects:
-            project_id = project.get("id")
-            if project_id is None or not self.version_manager.has_versions(project_id):
-                continue
-            try:
-                dataframe = self.version_manager.load_current_dataframe(project_id)
-            except Exception as error:
-                print(f"Warning: could not restore project {project_id}: {error}")
-                continue
+        self._project_restore_pending = True
+        worker = LatestProjectRestoreWorker(
+            self.repository,
+            self.version_manager,
+            preferred_project_id,
+            self,
+        )
+        self._project_restore_thread = worker
+        self.statusBar().showMessage("Memulihkan dataset terakhir di latar belakang…")
+        worker.result_ready.connect(self._apply_restored_project)
+        worker.finished.connect(self._project_restore_finished)
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
 
-            self.current_project_id = project_id
-            self.current_dataset = dataframe
-            original_path = project.get("dataset_path")
-            version = self.version_manager.get_current_version(project_id)
-            version_path = version.file_path if version else None
-            self.current_file_path = (
-                original_path
-                if original_path and original_path != "in-memory" and Path(original_path).exists()
-                else version_path
-            )
-            filename = project.get("dataset_name") or project.get("name") or "Dataset"
-            state = self.repository.get_workflow_state(project_id) or {}
-
-            self.analysis_result = state.get("analysis") or {}
-            self.dashboard.update_dataset(dataframe, filename)
-            self.dataset_preview_page.update_dataset(dataframe, filename)
-            self.analysis_page.update_dataset(dataframe, filename)
-            if self.analysis_result:
-                self.analysis_page.display_results(self.analysis_result)
-
-            task_result = state.get("ml_task") or {}
-            methods_result = state.get("ml_methods") or {}
-            if task_result and methods_result:
-                self.ml_page.last_task_result = task_result
-                self.ml_page.last_method_result = {
-                    key: value for key, value in methods_result.items()
-                    if key != "_intelligence_result"
-                }
-                self.ml_page.last_intelligence_result = methods_result.get("_intelligence_result") or {}
-                self.ml_page.display_result(task_result, self.ml_page.last_method_result)
-            elif self.analysis_result:
-                self.ml_page.update_dataset()
-
-            research_result = state.get("research") or {}
-            if research_result:
-                self.research_page._last_ml_result = dict(task_result or {})
-                self.research_page.restore_result(research_result)
-
-            self.dashboard.update_workflow_state(
-                has_dataset=True,
-                analysis_done=bool(self.analysis_result),
-                ml_done=bool(task_result and methods_result),
-            )
-            self.scale_manager.settings.setValue("active_project_id", project_id)
-
+    @Slot(object)
+    def _apply_restored_project(self, snapshot):
+        self._project_restore_pending = False
+        self.statusBar().clearMessage()
+        if self._dataset_session_changed:
+            return
+        if snapshot is None:
+            return
+        if snapshot.get("error"):
+            print(f"Warning: could not restore local project: {snapshot['error']}")
             return
 
+        project = snapshot["project"]
+        project_id = project.get("id")
+        dataframe = snapshot["dataframe"]
+        state = snapshot["workflow_state"]
+        self.current_project_id = project_id
+        self.current_dataset = dataframe
+        original_path = project.get("dataset_path")
+        version = self.version_manager.get_current_version(project_id)
+        version_path = version.file_path if version else None
+        self.current_file_path = (
+            original_path
+            if original_path and original_path != "in-memory" and Path(original_path).exists()
+            else version_path
+        )
+        filename = project.get("dataset_name") or project.get("name") or "Dataset"
+
+        self.analysis_result = state.get("analysis") or {}
+        self.dashboard.update_dataset(dataframe, filename)
+        if self._current_page_key == "dataset":
+            self.dataset_preview_page.update_dataset(dataframe, filename)
+            self.dataset_preview_page._select_tab(0)
+            self.datasets_tabs.setCurrentWidget(self.dataset_preview_page)
+        if self.analysis_page is not None:
+            self.analysis_page.update_dataset(dataframe, filename)
+
+        task_result = state.get("ml_task") or {}
+        methods_result = state.get("ml_methods") or {}
+        self._restored_ml_task = task_result
+        self._restored_ml_methods = methods_result
+        if self.ml_page is not None and task_result and methods_result:
+            self.ml_page.last_task_result = task_result
+            self.ml_page.last_method_result = {
+                key: value for key, value in methods_result.items()
+                if key != "_intelligence_result"
+            }
+            self.ml_page.last_intelligence_result = methods_result.get("_intelligence_result") or {}
+            self.ml_page.display_result(task_result, self.ml_page.last_method_result)
+        elif self.ml_page is not None and self.analysis_result:
+            self.ml_page.update_dataset()
+
+        research_result = state.get("research") or {}
+        self._restored_research_result = research_result
+        if self.research_page is not None and research_result:
+            self.research_page._last_ml_result = dict(task_result or {})
+            self.research_page.restore_result(research_result)
+
+        self.dashboard.update_workflow_state(
+            has_dataset=True,
+            analysis_done=bool(self.analysis_result),
+            ml_done=bool(task_result and methods_result),
+        )
+        self.scale_manager.settings.setValue("active_project_id", project_id)
+
+    @Slot()
+    def _project_restore_finished(self):
+        self._project_restore_thread = None
+        self.statusBar().clearMessage()
+
     def _restore_last_page(self):
-        key = str(self.scale_manager.settings.value("last_page_key", "dashboard") or "dashboard")
-        if key not in self.pages:
-            key = "dashboard"
-        page_openers = {
-            "dashboard": self.open_dashboard,
-            "dataset": self.open_datasets_page,
-            "dataset_search": self.open_dataset_search_page,
-            "analysis": self.open_analysis_page,
-            "editor_analysis": self.open_editor_analysis_page,
-            "node_editor": self.open_node_editor_page,
-            "ml": self.open_ml_page,
-            "research": self.open_research_page,
-            "papers": self.open_papers_tool,
-            "insights": self.open_insights_page,
-            "landscape": self.open_landscape_tool,
-            "gap": self.open_gap_tool,
-            "report": self.open_report_tool,
-            "about": self.open_about,
-            "copyright": self.open_copyright,
-            "help": self.open_help,
-        }
-        try:
-            page_openers.get(key, self.open_dashboard)()
-        except Exception as error:
-            print(f"Warning: could not restore page {key!r}: {error}")
-            self.open_dashboard()
+        # Launch into the main workspace every time. The previous route is
+        # still saved during shutdown for diagnostics and future preferences,
+        # but should not reopen a heavy tool over the Overview on startup.
+        self._show_page("dashboard")
 
     def update_dataset_state(self):
+        self._dataset_session_changed = True
         self.analysis_result = {}
+        self._restored_ml_task = {}
+        self._restored_ml_methods = {}
+        self._restored_research_result = {}
 
         try:
             self._ensure_current_project()
@@ -14192,16 +15805,22 @@ class MainWindow(QMainWindow):
             filename,
         )
 
-        self.analysis_page.update_dataset(
-            self.current_dataset,
-            filename,
-        )
+        if self.analysis_page is not None:
+            self.analysis_page.update_dataset(
+                self.current_dataset,
+                filename,
+            )
 
-        self.ml_page.show_empty_state()
-        self.research_page.show_empty_state()
-        self.landscape_tool_page.show_empty_state()
-        self.gap_tool_page.show_empty_state()
-        self.report_tool_page.show_empty_state()
+        if self.ml_page is not None:
+            self.ml_page.show_empty_state()
+        if self.research_page is not None:
+            self.research_page.show_empty_state()
+        if self.landscape_tool_page is not None:
+            self.landscape_tool_page.show_empty_state()
+        if self.gap_tool_page is not None:
+            self.gap_tool_page.show_empty_state()
+        if self.report_tool_page is not None:
+            self.report_tool_page.show_empty_state()
         self.dashboard.update_workflow_state(
             has_dataset=self.current_dataset is not None,
             analysis_done=False,
@@ -14223,6 +15842,8 @@ class MainWindow(QMainWindow):
         )
         self.current_dataset = dataframe
         self.update_dataset_state()
+        if self.analysis_page is None:
+            self._create_analysis_page()
         self.analysis_page.run_analysis()
 
     # =========================================================
@@ -14232,7 +15853,7 @@ class MainWindow(QMainWindow):
     def prepare_dataset_analysis(self):
         dataframe = self.current_dataset
         if dataframe is None:
-            raise ValueError("No dataset is currently loaded.")
+            raise ValueError("Belum ada dataset yang dimuat.")
 
         if self.current_file_path and Path(self.current_file_path).exists():
             if self.current_project_id is None:
@@ -14285,11 +15906,16 @@ class MainWindow(QMainWindow):
             "analysis_completed", feature_name="dataset_analysis",
             status="completed", duration_ms=duration_ms,
         )
-        self.ml_page.last_task_result = {}
-        self.ml_page.last_method_result = {}
-        self.ml_page.last_intelligence_result = {}
-        self.ml_page.show_ready_state()
-        self.research_page.show_empty_state()
+        self._restored_ml_task = {}
+        self._restored_ml_methods = {}
+        self._restored_research_result = {}
+        if self.ml_page is not None:
+            self.ml_page.last_task_result = {}
+            self.ml_page.last_method_result = {}
+            self.ml_page.last_intelligence_result = {}
+            self.ml_page.show_ready_state()
+        if self.research_page is not None:
+            self.research_page.show_empty_state()
         self.dashboard.update_workflow_state(
             has_dataset=True, analysis_done=True, ml_done=False
         )

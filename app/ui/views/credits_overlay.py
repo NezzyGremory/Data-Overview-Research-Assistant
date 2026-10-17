@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import weakref
 
-from PySide6.QtCore import QEasingCurve, QEvent, QPoint, QPropertyAnimation, Qt
+from PySide6.QtCore import QEasingCurve, QEvent, QPoint, QPropertyAnimation, Qt, Slot
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -17,6 +18,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from shiboken6 import isValid as is_qt_object_valid
 
 from app.ui.scale import scale_stylesheet
 
@@ -32,6 +34,37 @@ def _load_credits() -> dict:
     with _CREDITS_PATH.open("r", encoding="utf-8") as source:
         credits = json.load(source)
     return credits
+
+
+def _release_overlay_reference(parent_ref, generation: int) -> None:
+    """Release a closed overlay without clearing a newer instance."""
+    parent = parent_ref()
+    if parent is None:
+        return
+    pending = getattr(parent, "_closing_credits_overlays", [])
+    parent._closing_credits_overlays = [
+        overlay for overlay in pending
+        if getattr(overlay, "_credits_overlay_generation", None) != generation
+    ]
+    if getattr(parent, "_credits_overlay_generation", None) == generation:
+        parent._credits_overlay = None
+        parent._credits_overlay_generation = None
+
+
+def _overlay_callback(overlay: "CreditsOverlay", method_name: str, *, pass_args=False):
+    """Connect a Qt signal without registering a dynamic slot on the widget."""
+    overlay_ref = weakref.ref(overlay)
+
+    def invoke(*args):
+        target = overlay_ref()
+        if target is None or not is_qt_object_valid(target):
+            return
+        callback = getattr(target, method_name, None)
+        if callback is None:
+            return
+        callback(*args) if pass_args else callback()
+
+    return invoke
 
 
 class CreditsOverlay(QWidget):
@@ -67,7 +100,7 @@ class CreditsOverlay(QWidget):
         self.skip_button = QPushButton("×  Skip")
         self.skip_button.setObjectName("creditsSkip")
         self.skip_button.setCursor(Qt.PointingHandCursor)
-        self.skip_button.clicked.connect(self.close_overlay)
+        self.skip_button.clicked.connect(_overlay_callback(self, "close_overlay"))
         top_bar.addWidget(self.skip_button, 0, Qt.AlignRight | Qt.AlignTop)
         root.addLayout(top_bar)
 
@@ -166,6 +199,7 @@ class CreditsOverlay(QWidget):
             stylesheet,
         )
 
+    @Slot(float)
     def apply_scale(self, scale: float) -> None:
         """Refresh overlay dimensions when the application zoom changes."""
         self.setStyleSheet(scale_stylesheet(self._resolve_stylesheet(), scale))
@@ -190,7 +224,9 @@ class CreditsOverlay(QWidget):
         self.content.adjustSize()
         content_height = self.content.sizeHint().height()
         self.content.resize(max(self.viewport.width(), 1), content_height)
-        start_y = self.viewport.height()
+        # Start close enough to the viewport that clicking Copyright gives
+        # immediate visible feedback while the long credits roll continues.
+        start_y = round(self.viewport.height() * 0.12)
         end_y = self._footer_end_position(content_height)
         if restart and self._scroll_started:
             animation = self._scroll_animation
@@ -231,7 +267,7 @@ class CreditsOverlay(QWidget):
         animation.setStartValue(QPoint(0, start_y))
         animation.setEndValue(QPoint(0, end_y))
         animation.setEasingCurve(QEasingCurve.Linear)
-        animation.finished.connect(self._finish_roll)
+        animation.finished.connect(_overlay_callback(self, "_finish_roll"))
         self._scroll_animation = animation
         self._scroll_started = True
         animation.start()
@@ -245,7 +281,7 @@ class CreditsOverlay(QWidget):
         animation.setStartValue(self._opacity.opacity())
         animation.setEndValue(0.0)
         animation.setEasingCurve(QEasingCurve.InOutCubic)
-        animation.finished.connect(self.close_overlay)
+        animation.finished.connect(_overlay_callback(self, "close_overlay"))
         self._fade_animation = animation
         animation.start()
 
@@ -256,14 +292,32 @@ class CreditsOverlay(QWidget):
             animation.deleteLater()
             setattr(self, attribute, None)
 
-    def close_overlay(self, *_):
+    @Slot()
+    def close_overlay(self):
         if self._closing:
             return
         self._closing = True
         self._stop_animation("_scroll_animation")
         self._stop_animation("_fade_animation")
         parent = self.parentWidget()
+        scale_manager = getattr(self, "_scale_manager", None)
+        scale_callback = getattr(self, "_scale_callback", None)
+        if scale_manager is not None:
+            try:
+                if scale_callback is not None:
+                    scale_manager.scaleChanged.disconnect(scale_callback)
+            except (RuntimeError, TypeError):
+                pass
+            self._scale_callback = None
         if parent is not None:
+            pending = getattr(parent, "_closing_credits_overlays", [])
+            if not any(
+                getattr(overlay, "_credits_overlay_generation", None)
+                == getattr(self, "_credits_overlay_generation", None)
+                for overlay in pending
+            ):
+                pending.append(self)
+                parent._closing_credits_overlays = pending
             parent.removeEventFilter(self)
         self.hide()
         self.deleteLater()
@@ -293,18 +347,34 @@ class CreditsOverlay(QWidget):
 def show_credits_overlay(parent: QWidget) -> CreditsOverlay:
     """Show one overlay instance and follow the parent window's geometry."""
     existing = getattr(parent, "_credits_overlay", None)
-    if existing is not None and not existing._closing:
+    if (
+        existing is not None
+        and is_qt_object_valid(existing)
+        and not existing._closing
+    ):
         existing.raise_()
         existing.setFocus(Qt.OtherFocusReason)
         return existing
 
     overlay = CreditsOverlay(parent)
+    generation = int(getattr(parent, "_credits_overlay_generation_counter", 0)) + 1
+    parent._credits_overlay_generation_counter = generation
+    parent._credits_overlay_generation = generation
+    overlay._credits_overlay_generation = generation
     scale_manager = getattr(parent, "scale_manager", None)
     if scale_manager is not None:
-        scale_manager.scaleChanged.connect(overlay.apply_scale)
+        overlay._scale_manager = scale_manager
+        overlay._scale_callback = _overlay_callback(
+            overlay, "apply_scale", pass_args=True
+        )
+        scale_manager.scaleChanged.connect(overlay._scale_callback)
     parent._credits_overlay = overlay
     parent.installEventFilter(overlay)
-    overlay.destroyed.connect(lambda: setattr(parent, "_credits_overlay", None))
+    parent_ref = weakref.ref(parent)
+    overlay.destroyed.connect(
+        lambda *_args, owner_ref=parent_ref, token=generation:
+            _release_overlay_reference(owner_ref, token)
+    )
 
     overlay.setGeometry(parent.rect())
     overlay.show()

@@ -4,24 +4,42 @@
 <meta charset="utf-8">
 <title>Laporan Penelitian - {{ dataset_name }}</title>
 <style>
-body { font-family: 'Times New Roman', Times, serif; font-size: 11pt; color: #172033; line-height: 1.35; }
-h1 { font-size: 23pt; text-align: center; margin: 70pt 0 10pt; }
-h2 { font-size: 15pt; margin: 22pt 0 8pt; border-bottom: 1px solid #667085; padding-bottom: 4pt; }
-h3 { font-size: 12pt; margin: 13pt 0 4pt; }
-p { margin: 4pt 0 8pt; }
-.cover { text-align: center; margin-bottom: 36pt; }
-.cover p { text-align: center; }
+@page { size: A4; margin: 18mm; }
+html { font-size: 12pt; }
+body {
+  font-family: 'Times New Roman', Times, serif;
+  font-size: 12pt;
+  color: #172033;
+  line-height: 1.5;
+  text-align: justify;
+  orphans: 3;
+  widows: 3;
+}
+h1, h2, h3 { color: #172033; page-break-after: avoid; break-after: avoid; }
+h1 { font-size: 20pt; line-height: 1.2; text-align: center; margin: 0 0 16pt; }
+h2 { font-size: 14pt; line-height: 1.25; margin: 20pt 0 8pt; border-bottom: 1px solid #9AA7B7; padding-bottom: 4pt; }
+h3 { font-size: 12pt; line-height: 1.3; margin: 14pt 0 5pt; }
+p { margin: 0 0 8pt; }
+ol, ul { margin: 4pt 0 10pt; padding-left: 22pt; }
+li { margin: 0 0 4pt; }
+a { color: #173D78; text-decoration: underline; }
+.cover { text-align: center; margin: 80pt 0 0; page-break-after: avoid; }
+.cover h1 { font-size: 22pt; letter-spacing: .4pt; margin: 0 0 18pt; }
+.cover h2 { border: 0; font-size: 17pt; margin: 0 0 12pt; padding: 0; }
+.cover p { text-align: center; margin: 0 0 8pt; }
 .meta { color: #45546a; }
-.summary { border-collapse: collapse; width: 100%; margin: 8pt 0 14pt; }
-.summary td { border-bottom: 1px solid #b8c0cc; padding: 5pt 7pt; }
+.summary { border-collapse: collapse; width: 100%; margin: 10pt 0 16pt; page-break-inside: avoid; break-inside: avoid; }
+.summary th { text-align: left; background: #EEF3F8; font-weight: bold; }
+.summary td, .summary th { border: 1px solid #B8C0CC; padding: 6pt 8pt; vertical-align: top; }
 .summary td:first-child { font-weight: bold; width: 38%; }
-.finding { margin: 8pt 0 14pt; padding-left: 8pt; border-left: 2px solid #98a5b5; }
-.paper { margin: 8pt 0 13pt; }
-.pagebreak { page-break-before: always; }
+.finding { margin: 9pt 0 15pt; padding: 2pt 0 2pt 9pt; border-left: 2px solid #98A5B5; page-break-inside: avoid; break-inside: avoid; }
+.paper { margin: 8pt 0 14pt; page-break-inside: avoid; break-inside: avoid; }
+.pagebreak { page-break-before: always; break-before: page; }
 .center { text-align: center; }
-.chart { text-align: center; margin: 10pt 0 16pt; }
-.chart img { width: 650px; }
-.caption { font-size: 10pt; font-style: italic; }
+.chart { text-align: center; margin: 12pt 0 18pt; page-break-inside: avoid; break-inside: avoid; }
+.chart img, img { max-width: 100%; height: auto; }
+.caption { font-size: 10pt; font-style: italic; text-align: center; }
+tr, figure { page-break-inside: avoid; break-inside: avoid; }
 </style>
 </head>
 <body>
@@ -88,35 +106,35 @@ p { margin: 4pt 0 8pt; }
 
 {% if ml_readiness_available %}
 <h2>Data Quality Summary</h2>
-<p><b>Summary:</b> {{ readiness_quality_summary }}</p>
+<p><b>Ringkasan:</b> {{ readiness_quality_summary }}</p>
 <table class="summary"><tbody>
 {% for item in readiness_quality_rows %}<tr><td>{{ item.check }}</td><td>{{ item.value }}</td></tr>{% endfor %}
 </tbody></table>
 
 {% if readiness_class_balance.applicable %}<h2>Class Balance</h2>
-<p><b>Summary:</b> {{ readiness_class_balance.summary or 'Not applicable for this dataset' }}{% if readiness_class_balance.imbalance_ratio is not none %}<br><b>Imbalance Ratio:</b> {{ '%.2f'|format(readiness_class_balance.imbalance_ratio) }}:1<br><b>Status:</b> {{ readiness_class_balance.status }}{% endif %}</p>
-{% if readiness_class_balance.classes %}<table class="summary"><thead><tr><th>Class</th><th>Count</th><th>Percentage</th></tr></thead><tbody>
+<p><b>Ringkasan:</b> {{ readiness_class_balance.summary or 'Tidak berlaku untuk dataset ini.' }}{% if readiness_class_balance.imbalance_ratio is not none %}<br><b>Rasio Ketidakseimbangan:</b> {{ '%.2f'|format(readiness_class_balance.imbalance_ratio) }}:1<br><b>Status:</b> {{ readiness_class_balance.status }}{% endif %}</p>
+{% if readiness_class_balance.classes %}<table class="summary"><thead><tr><th>Class</th><th>Jumlah</th><th>Persentase</th></tr></thead><tbody>
 {% for item in readiness_class_balance.classes %}<tr><td>{{ item.class }}</td><td>{{ item.count }}</td><td>{{ '%.1f'|format(item.percentage) }}%</td></tr>{% endfor %}
 </tbody></table>{% endif %}{% endif %}
 
 <h2>Preprocessing Recommendation</h2>
-<p><b>Summary:</b> {{ readiness_preprocessing_summary }}</p>
-{% if readiness_preprocessing_rows %}<table class="summary"><thead><tr><th>Area</th><th>Columns or Scope</th><th>Recommendation</th></tr></thead><tbody>
+<p><b>Ringkasan:</b> {{ readiness_preprocessing_summary }}</p>
+{% if readiness_preprocessing_rows %}<table class="summary"><thead><tr><th>Bagian</th><th>Kolom atau Cakupan</th><th>Rekomendasi</th></tr></thead><tbody>
 {% for item in readiness_preprocessing_rows %}<tr><td>{{ item.area }}</td><td>{{ item.scope }}</td><td>{{ item.recommendation }}</td></tr>{% endfor %}
-</tbody></table>{% else %}<p>Not applicable for this dataset</p>{% endif %}
-<p><b>Leakage Control:</b> {{ readiness_fit_note }}</p>
+</tbody></table>{% else %}<p>Tidak berlaku untuk dataset ini.</p>{% endif %}
+<p><b>Pengendalian Leakage:</b> {{ readiness_fit_note }}</p>
 
 <h2>Feature Selection Hints</h2>
-<p><b>Summary:</b> {{ readiness_feature_summary }}</p>
-{% if readiness_feature_rows %}<table class="summary"><thead><tr><th>Hint</th><th>Feature</th><th>Result</th></tr></thead><tbody>
+<p><b>Ringkasan:</b> {{ readiness_feature_summary }}</p>
+{% if readiness_feature_rows %}<table class="summary"><thead><tr><th>Petunjuk</th><th>Feature</th><th>Hasil</th></tr></thead><tbody>
 {% for item in readiness_feature_rows %}<tr><td>{{ item.hint }}</td><td>{{ item.feature }}</td><td>{{ item.result }}</td></tr>{% endfor %}
-</tbody></table>{% else %}<p>Not applicable for this dataset</p>{% endif %}
+</tbody></table>{% else %}<p>Tidak berlaku untuk dataset ini.</p>{% endif %}
 {% if readiness_feature_importance_note %}<p>{{ readiness_feature_importance_note }}</p>{% endif %}
 
 <h2>ML Pipeline Checklist</h2>
-{% if readiness_pipeline_checklist %}<table class="summary"><thead><tr><th>Stage</th><th>Status</th><th>Details</th></tr></thead><tbody>
+{% if readiness_pipeline_checklist %}<table class="summary"><thead><tr><th>Tahap</th><th>Status</th><th>Rincian</th></tr></thead><tbody>
 {% for item in readiness_pipeline_checklist %}<tr><td>{{ item.stage }}</td><td>{{ item.status }}</td><td>{{ item.details }}</td></tr>{% endfor %}
-</tbody></table>{% else %}<p>Not applicable for this dataset</p>{% endif %}
+</tbody></table>{% else %}<p>Tidak berlaku untuk dataset ini.</p>{% endif %}
 {% if readiness_summary_note %}<p>{{ readiness_summary_note }}</p>{% endif %}
 {% endif %}
 

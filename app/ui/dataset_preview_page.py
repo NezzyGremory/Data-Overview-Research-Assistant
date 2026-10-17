@@ -8,17 +8,20 @@ import pandas as pd
 from app.ui.scale import logical_width
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSize, Qt
-from PySide6.QtGui import QIcon, QKeySequence, QPixmap
+from PySide6.QtGui import QBrush, QColor, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QAbstractItemView,
     QBoxLayout,
+    QComboBox,
     QFrame,
     QGridLayout,
     QHeaderView,
     QHBoxLayout,
     QLabel,
     QLayout,
+    QLineEdit,
+    QMenu,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -28,26 +31,67 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.ui.style_utils import render_icon_pixmap
+
 from app.ui.style_utils import apply_card_shadow
 
 
 class DataFrameTableModel(QAbstractTableModel):
     """Expose a DataFrame to Qt without copying every cell into widgets."""
 
-    def __init__(self, dataframe: pd.DataFrame | None = None, parent=None):
+    def __init__(
+        self,
+        dataframe: pd.DataFrame | None = None,
+        parent=None,
+        *,
+        include_index: bool = False,
+        row_offset: int = 0,
+        correlation_heatmap: bool = False,
+        detailed_headers: bool = True,
+    ):
         super().__init__(parent)
         self._dataframe = dataframe if dataframe is not None else pd.DataFrame()
+        self._include_index = include_index
+        self._row_offset = row_offset
+        self._correlation_heatmap = correlation_heatmap
+        self._detailed_headers = detailed_headers
 
     def rowCount(self, parent=QModelIndex()):
         return 0 if parent.isValid() else len(self._dataframe.index)
 
     def columnCount(self, parent=QModelIndex()):
-        return 0 if parent.isValid() else len(self._dataframe.columns)
+        if parent.isValid():
+            return 0
+        return len(self._dataframe.columns) + int(self._include_index)
 
     def data(self, index, role=Qt.DisplayRole):
-        if not index.isValid() or role != Qt.DisplayRole:
+        if not index.isValid():
             return None
-        value = self._dataframe.iat[index.row(), index.column()]
+
+        if self._correlation_heatmap and index.column() > 0:
+            try:
+                value = float(self._dataframe.iat[index.row(), index.column()])
+            except (TypeError, ValueError, IndexError):
+                value = float("nan")
+            if role == Qt.BackgroundRole and pd.notna(value):
+                if index.column() == index.row() + 1:
+                    return QBrush(QColor("#155EEF"))
+                strength = min(abs(value), 1.0)
+                if value > 0:
+                    return QBrush(QColor(21, 94, 239, 24 + round(strength * 75)))
+                if value < 0:
+                    return QBrush(QColor(239, 68, 68, 22 + round(strength * 72)))
+            if role == Qt.ForegroundRole and index.column() == index.row() + 1:
+                return QBrush(QColor("#FFFFFF"))
+
+        if role != Qt.DisplayRole:
+            return None
+        if self._include_index and index.column() == 0:
+            return str(self._row_offset + index.row() + 1)
+        column = index.column() - int(self._include_index)
+        if not 0 <= column < len(self._dataframe.columns):
+            return None
+        value = self._dataframe.iat[index.row(), column]
         try:
             if pd.isna(value):
                 return ""
@@ -60,16 +104,25 @@ class DataFrameTableModel(QAbstractTableModel):
     def headerData(self, section, orientation, role=Qt.DisplayRole):
         if role != Qt.DisplayRole:
             return None
-        if orientation == Qt.Horizontal and 0 <= section < len(self._dataframe.columns):
+        if orientation == Qt.Horizontal and 0 <= section < len(self._dataframe.columns) + int(self._include_index):
+            if self._include_index:
+                if section == 0:
+                    return "#"
+                section -= 1
             name = str(self._dataframe.columns[section])
-            return "Gender" if name == "Sex" else name
+            if not self._detailed_headers:
+                return name
+            series = self._dataframe.iloc[:, section]
+            detail = "# numeric" if pd.api.types.is_numeric_dtype(series.dtype) else "Text"
+            return f"{name}\n{detail}"
         if orientation == Qt.Vertical and 0 <= section < len(self._dataframe.index):
             return str(section + 1)
         return None
 
-    def set_dataframe(self, dataframe: pd.DataFrame | None):
+    def set_dataframe(self, dataframe: pd.DataFrame | None, *, row_offset: int = 0):
         self.beginResetModel()
         self._dataframe = dataframe if dataframe is not None else pd.DataFrame()
+        self._row_offset = row_offset
         self.endResetModel()
 
 
@@ -104,6 +157,9 @@ class DatasetPreviewPage(QWidget):
         self._main_window = parent
         self._dataset_name = ""
         self._dataframe: pd.DataFrame | None = None
+        self._current_page = 0
+        self._page_size = 10
+        self._filtered_dataframe = pd.DataFrame()
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -122,7 +178,7 @@ class DatasetPreviewPage(QWidget):
         root = QVBoxLayout(container)
         root.setSizeConstraint(QLayout.SetNoConstraint)
         self.root_layout = root
-        root.setContentsMargins(36, 22, 25, 20)
+        root.setContentsMargins(20, 9, 19, 20)
         root.setSpacing(0)
 
         header = QFrame()
@@ -133,48 +189,56 @@ class DatasetPreviewPage(QWidget):
         header_layout.setContentsMargins(0, 0, 0, 2)
         title_block = QVBoxLayout()
         title_block.setSpacing(4)
-        title = QLabel("Dataset")
+        title = QLabel("Dataset Preview")
         title.setObjectName("pageTitle")
         title_block.addWidget(title)
-        self.summary = QLabel("Upload, preview and clean your CSV before analysis.")
+        self.summary = QLabel(
+            "Lihat dan jelajahi data Anda sebelum melakukan analisis lebih lanjut."
+        )
         self.summary.setObjectName("pageSubtitle")
         self.summary.setWordWrap(True)
         self.summary.setMinimumWidth(0)
         self.summary.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         title_block.addWidget(self.summary)
+        self.breadcrumb = QLabel("Dataset  ›  Pratinjau")
+        self.breadcrumb.setObjectName("datasetPreviewBreadcrumb")
+        title_block.addWidget(self.breadcrumb)
         header_layout.addLayout(title_block, 1)
-        self.header_upload_button = QPushButton("Upload Dataset")
-        self.header_upload_button.setObjectName("datasetPreviewUploadButton")
-        self.header_upload_button.setText("")
-        self.header_upload_button.setFixedSize(253, 61)
-        self.header_upload_button.setAccessibleName("Upload Dataset")
-        upload_button_layout = QHBoxLayout(self.header_upload_button)
-        upload_button_layout.setContentsMargins(19, 0, 14, 0)
-        upload_button_layout.setSpacing(16)
-        upload_icon = QLabel()
-        upload_icon.setObjectName("datasetPreviewUploadIcon")
-        upload_icon.setFixedSize(32, 24)
-        upload_icon_path = Path(__file__).resolve().parent / "assets" / "icons" / "upload.svg"
-        upload_icon.setPixmap(QPixmap(str(upload_icon_path)).scaled(32, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        upload_button_layout.addWidget(upload_icon)
-        upload_text = QLabel("Upload Dataset")
-        upload_text.setObjectName("datasetPreviewUploadText")
-        upload_button_layout.addWidget(upload_text)
-        upload_button_layout.addStretch(1)
-        self.header_upload_button.clicked.connect(self._open_upload)
-        upload_action = QWidget()
-        self.upload_action = upload_action
-        upload_action.setFixedSize(253, 78)
-        upload_action_layout = QVBoxLayout(upload_action)
-        upload_action_layout.setContentsMargins(0, 10, 0, 0)
-        upload_action_layout.setSpacing(0)
-        upload_action_layout.addWidget(self.header_upload_button, 0, Qt.AlignTop)
-        header_layout.addWidget(upload_action)
-        header.setFixedHeight(78)
+        actions = QHBoxLayout()
+        self.header_actions = actions
+        actions.setContentsMargins(0, 1, 0, 0)
+        actions.setSpacing(12)
+        icon_root = Path(__file__).resolve().parent / "assets" / "icons"
+        self.header_upload_button = QPushButton("Ganti Dataset")
+        self.header_upload_button.setObjectName("datasetPreviewActionButton")
+        self.header_upload_button.setIcon(QIcon(str(icon_root / "file-arrow-up.svg")))
+        self.header_upload_button.setIconSize(QSize(16, 16))
+        self.header_upload_button.setFixedSize(131, 40)
+        self.header_upload_button.setAccessibleName("Ganti Dataset")
+        self.header_upload_button.clicked.connect(self._replace_file)
+        actions.addWidget(self.header_upload_button)
+        self.clean_button = QPushButton("Bersihkan Data")
+        self.clean_button.setObjectName("datasetPreviewActionButton")
+        self.clean_button.setIcon(QIcon(str(icon_root / "about-dataset.svg")))
+        self.clean_button.setIconSize(QSize(16, 16))
+        self.clean_button.setFixedSize(139, 40)
+        self.clean_button.clicked.connect(self._open_cleaning_actions)
+        actions.addWidget(self.clean_button)
+        self.continue_button = QPushButton("Lanjut ke Analisis")
+        self.continue_button.setObjectName("datasetPreviewContinueButton")
+        self.continue_button.setIcon(QIcon(str(icon_root / "arrow-right.svg")))
+        self.continue_button.setIconSize(QSize(16, 16))
+        self.continue_button.setFixedSize(178, 40)
+        if self._main_window is not None:
+            self.continue_button.clicked.connect(self._main_window.open_analysis_page)
+        actions.addWidget(self.continue_button)
+        header_layout.addLayout(actions)
+        header_layout.setAlignment(actions, Qt.AlignTop)
+        header.setFixedHeight(74)
         root.addWidget(header)
-        root.addSpacing(28)
 
         overview = QWidget()
+        self.overview = overview
         overview.setObjectName("datasetPreviewOverview")
         self.overview_layout = QGridLayout(overview)
         self.overview_layout.setContentsMargins(0, 0, 0, 0)
@@ -183,45 +247,48 @@ class DatasetPreviewPage(QWidget):
         file_card = QFrame()
         self.file_card = file_card
         file_card.setObjectName("datasetPreviewFileCard")
-        file_card.setMinimumHeight(176)
+        file_card.setMinimumHeight(109)
+        file_card.setMaximumHeight(109)
         file_layout = QVBoxLayout(file_card)
         self.file_layout = file_layout
-        file_layout.setContentsMargins(35, 21, 34, 14)
-        file_layout.setSpacing(17)
+        file_layout.setContentsMargins(0, 0, 0, 0)
+        file_layout.setSpacing(0)
         file_identity = QFrame()
         self.file_identity = file_identity
         file_identity.setObjectName("datasetPreviewFileIdentity")
-        file_identity.setFixedHeight(76)
+        file_identity.setFixedHeight(109)
         identity_layout = QHBoxLayout(file_identity)
-        identity_layout.setContentsMargins(16, 0, 12, 0)
-        identity_layout.setSpacing(14)
+        identity_layout.setContentsMargins(30, 0, 12, 0)
+        identity_layout.setSpacing(19)
         file_icon = QLabel()
         file_icon.setObjectName("datasetPreviewFileIcon")
-        file_icon.setFixedSize(40, 40)
+        file_icon.setFixedSize(46, 56)
         file_icon.setAlignment(Qt.AlignCenter)
         icon_path = Path(__file__).resolve().parent / "assets" / "icons" / "file-text.svg"
-        file_icon.setPixmap(QPixmap(str(icon_path)).scaled(25, 25, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        file_icon.setPixmap(
+            render_icon_pixmap(icon_path, 29, file_icon.devicePixelRatioF())
+        )
         file_icon.setToolTip("CSV")
         identity_layout.addWidget(file_icon, 0, Qt.AlignVCenter)
         file_text_layout = QVBoxLayout()
         file_text_layout.setSpacing(2)
-        self.file_name = QLabel("No dataset loaded")
+        self.file_name = QLabel("Belum ada dataset yang dimuat")
         self.file_name.setObjectName("datasetPreviewFileName")
-        self.file_name.setWordWrap(True)
-        self.file_details = QLabel("Select a CSV file to preview your dataset.")
+        self.file_name.setWordWrap(False)
+        self.file_details = QLabel("Pilih file CSV untuk melihat pratinjau dataset.")
         self.file_details.setObjectName("datasetPreviewFileDetails")
         self.file_details.setWordWrap(True)
         file_text_layout.addWidget(self.file_name)
         file_text_layout.addWidget(self.file_details)
         identity_layout.addLayout(file_text_layout, 1)
-        self.loaded_badge = QLabel("● Loaded")
+        self.loaded_badge = QLabel("✓ Tersedia")
         self.loaded_badge.setObjectName("datasetPreviewLoadedBadge")
         identity_layout.addWidget(self.loaded_badge, 0, Qt.AlignVCenter)
         file_layout.addWidget(file_identity)
         file_actions = QHBoxLayout()
         self.file_actions = file_actions
         file_actions.setContentsMargins(0, 0, 0, 0)
-        self.replace_button = QPushButton("Replace file")
+        self.replace_button = QPushButton("Ganti file")
         self.replace_button.setObjectName("secondaryButton")
         self.replace_button.setFixedSize(162, 46)
         self.replace_button.setIcon(QIcon(str(Path(__file__).resolve().parent / "assets" / "icons" / "reload.svg")))
@@ -229,7 +296,7 @@ class DatasetPreviewPage(QWidget):
         self.replace_button.clicked.connect(self._replace_file)
         file_actions.addWidget(self.replace_button)
         file_actions.addStretch(1)
-        self.upload_new_button = QPushButton("Upload new")
+        self.upload_new_button = QPushButton("Unggah baru")
         self.upload_new_button.setObjectName("secondaryButton")
         self.upload_new_button.setFixedSize(162, 46)
         self.upload_new_button.setIcon(QIcon(str(Path(__file__).resolve().parent / "assets" / "icons" / "upload-small.svg")))
@@ -237,19 +304,22 @@ class DatasetPreviewPage(QWidget):
         self.upload_new_button.clicked.connect(self._open_upload)
         file_actions.addWidget(self.upload_new_button)
         file_layout.addLayout(file_actions)
+        file_layout.removeItem(file_actions)
+        self.replace_button.hide()
+        self.upload_new_button.hide()
         apply_card_shadow(file_card)
         self.overview_layout.addWidget(file_card, 0, 0)
 
         self.metric_cards = []
         self.metric_descriptions = {}
-        self.rows_value = self._create_metric_card(self.overview_layout, "ROWS", "—", "Records")
-        self.columns_value = self._create_metric_card(self.overview_layout, "COLUMNS", "—", "Features")
+        self.rows_value = self._create_metric_card(self.overview_layout, "ROWS", "—", "Baris")
+        self.columns_value = self._create_metric_card(self.overview_layout, "COLUMNS", "—", "Kolom")
         self.missing_value = self._create_metric_card(self.overview_layout, "MISSING CELLS", "—", "")
-        self.duplicates_value = self._create_metric_card(self.overview_layout, "DUPLICATES", "—", "Identical rows")
+        self.duplicates_value = self._create_metric_card(self.overview_layout, "DUPLICATES", "—", "Baris identik")
+        self.file_size_value = self._create_metric_card(self.overview_layout, "FILE SIZE", "—", "Ukuran file")
         root.addWidget(overview)
-        overview.setMinimumHeight(176)
-        root.addSpacing(9)
-
+        overview.setMinimumHeight(109)
+        overview.setMaximumHeight(109)
         tabs = QFrame()
         tabs.setObjectName("datasetPreviewTabs")
         tabs_layout = QHBoxLayout(tabs)
@@ -267,9 +337,16 @@ class DatasetPreviewPage(QWidget):
         self.tab_strip_layout.setContentsMargins(0, 0, 0, 0)
         self.tab_strip_layout.setSpacing(0)
         self.tab_buttons: list[QPushButton] = []
-        for index, text in enumerate(("Data Preview", "Data Quality", "Columns", "Missing Values", "Outliers", "Correlation")):
+        tab_icons = (
+            "file-text.svg", "overview-quality.svg", "about-dataset.svg",
+            "overview-quality-folder.svg", "overview-quality.svg", "analysis.svg",
+        )
+        icon_root = Path(__file__).resolve().parent / "assets" / "icons"
+        for index, text in enumerate(("Data Preview", "Kualitas Data", "Informasi Kolom", "Missing Values", "Deteksi Outlier", "Korelasi")):
             button = QPushButton(text)
             button.setObjectName("datasetPreviewTab")
+            button.setIcon(QIcon(str(icon_root / tab_icons[index])))
+            button.setIconSize(QSize(13, 13))
             button.setProperty("active", index == 0)
             button.setCheckable(False)
             self.tab_buttons.append(button)
@@ -279,42 +356,64 @@ class DatasetPreviewPage(QWidget):
         self.tab_strip.adjustSize()
         self.tabs_scroll.setWidget(self.tab_strip)
         tabs_layout.addWidget(self.tabs_scroll)
-        tabs.setFixedHeight(54)
+        tabs.setFixedHeight(45)
         root.addWidget(tabs)
-        root.addSpacing(15)
-
         body = QHBoxLayout()
         self.body_layout = body
         body.setContentsMargins(0, 0, 0, 0)
-        body.setSpacing(21)
+        body.setSpacing(14)
         preview_card = QFrame()
         self.preview_card = preview_card
         preview_card.setObjectName("datasetPreviewTableCard")
         preview_card.setMinimumWidth(0)
         preview_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         preview_layout = QVBoxLayout(preview_card)
-        preview_layout.setContentsMargins(0, 20, 0, 16)
-        preview_layout.setSpacing(24)
+        preview_layout.setContentsMargins(12, 12, 12, 10)
+        preview_layout.setSpacing(7)
         table_heading_widget = QWidget()
         self.table_heading_widget = table_heading_widget
-        table_heading_widget.setFixedHeight(30)
+        table_heading_widget.setFixedHeight(48)
         table_heading = QHBoxLayout(table_heading_widget)
-        table_heading.setContentsMargins(24, 0, 18, 0)
-        table_heading.setSpacing(0)
-        preview_title = QLabel("Data Preview")
+        table_heading.setContentsMargins(2, 0, 2, 0)
+        table_heading.setSpacing(8)
+        preview_title = QLabel("Pratinjau Data")
         self.preview_title = preview_title
         preview_title.setObjectName("datasetPreviewSectionTitle")
-        preview_title.setFixedHeight(30)
-        table_heading.addWidget(preview_title)
-        table_heading.addStretch(1)
-        self.row_count_label = QLabel("0 rows")
+        preview_title.setFixedHeight(22)
+        title_block = QVBoxLayout()
+        title_block.setContentsMargins(0, 0, 0, 0)
+        title_block.setSpacing(1)
+        title_block.addWidget(preview_title)
+        self.row_count_label = QLabel("Memuat dataset aktif")
         self.row_count_label.setObjectName("datasetPreviewCount")
-        self.row_count_label.hide()
+        title_block.addWidget(self.row_count_label)
+        table_heading.addLayout(title_block)
+        table_heading.addStretch(1)
+        self.table_search = QLineEdit()
+        self.table_search.setObjectName("datasetPreviewTableSearch")
+        self.table_search.setPlaceholderText("Cari dalam data...")
+        self.table_search.setClearButtonEnabled(True)
+        self.table_search.setFixedWidth(178)
+        self.table_search.addAction(
+            QIcon(str(icon_root / "search.svg")), QLineEdit.LeadingPosition
+        )
+        self.table_search.textChanged.connect(self._filter_table)
+        table_heading.addWidget(self.table_search)
+        rows_label = QLabel("Tampilkan")
+        rows_label.setObjectName("datasetPreviewControlLabel")
+        table_heading.addWidget(rows_label)
+        self.page_size_combo = QComboBox()
+        self.page_size_combo.setObjectName("datasetPreviewPageSize")
+        self.page_size_combo.addItems(("10", "25", "50"))
+        self.page_size_combo.setFixedWidth(64)
+        self.page_size_combo.currentTextChanged.connect(self._set_page_size)
+        table_heading.addWidget(self.page_size_combo)
+        table_heading.addWidget(QLabel("baris"))
         preview_layout.addWidget(table_heading_widget)
 
         self.table = DatasetTableView()
         self.table.setObjectName("datasetPreviewTable")
-        self.model = DataFrameTableModel(parent=self.table)
+        self.model = DataFrameTableModel(parent=self.table, include_index=True)
         self.table.setModel(self.model)
         self.table.setAlternatingRowColors(False)
         self.table.setSelectionBehavior(QAbstractItemView.SelectItems)
@@ -324,7 +423,7 @@ class DatasetPreviewPage(QWidget):
         self.table.setCornerButtonEnabled(False)
         self.table.setSortingEnabled(False)
         self.table.verticalHeader().setVisible(False)
-        self.table.verticalHeader().setDefaultSectionSize(34)
+        self.table.verticalHeader().setDefaultSectionSize(27)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
         self.table.horizontalHeader().setDefaultSectionSize(123)
         self.table.horizontalHeader().setMinimumSectionSize(48)
@@ -336,34 +435,79 @@ class DatasetPreviewPage(QWidget):
         self.table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         preview_layout.addWidget(self.table, 1)
-        self.empty_state = QLabel("No dataset loaded")
+        self.empty_state = QLabel("Belum ada dataset yang dimuat")
         self.empty_state.setObjectName("emptyState")
         self.empty_state.setAlignment(Qt.AlignCenter)
         self.empty_state.setMinimumHeight(100)
         self.empty_state.hide()
         preview_layout.addWidget(self.empty_state, 0, Qt.AlignTop)
+        pagination = QHBoxLayout()
+        pagination.setContentsMargins(4, 0, 2, 0)
+        pagination.setSpacing(6)
+        self.pagination_label = QLabel("Menampilkan 0 data")
+        self.pagination_label.setObjectName("datasetPreviewPaginationLabel")
+        pagination.addWidget(self.pagination_label, 1)
+        self.previous_page_button = QPushButton("‹")
+        self.previous_page_button.setObjectName("datasetPreviewPageButton")
+        self.previous_page_button.setProperty("arrow", True)
+        self.previous_page_button.setFixedSize(30, 30)
+        self.previous_page_button.clicked.connect(lambda: self._change_page(-1))
+        pagination.addWidget(self.previous_page_button)
+        self.pagination_pages_layout = QHBoxLayout()
+        self.pagination_pages_layout.setContentsMargins(0, 0, 0, 0)
+        self.pagination_pages_layout.setSpacing(6)
+        self.pagination_page_buttons = []
+        pagination.addLayout(self.pagination_pages_layout)
+        self.next_page_button = QPushButton("›")
+        self.next_page_button.setObjectName("datasetPreviewPageButton")
+        self.next_page_button.setProperty("arrow", True)
+        self.next_page_button.setFixedSize(30, 30)
+        self.next_page_button.clicked.connect(lambda: self._change_page(1))
+        pagination.addWidget(self.next_page_button)
+        preview_layout.addLayout(pagination)
         apply_card_shadow(preview_card)
-        body.addWidget(preview_card, 7)
+        preview_left_column = QVBoxLayout()
+        preview_left_column.setContentsMargins(0, 0, 0, 0)
+        preview_left_column.setSpacing(15)
+        preview_left_column.addWidget(preview_card, 1)
+        self.tips_card = self._create_exploration_tips()
+        preview_left_column.addWidget(self.tips_card)
+        preview_card.setFixedHeight(469)
+        body.addLayout(preview_left_column, 8)
+        body.setAlignment(preview_left_column, Qt.AlignTop)
 
         columns_card = QFrame()
         self.columns_card = columns_card
         columns_card.setObjectName("datasetPreviewColumnsCard")
-        columns_card.setMinimumWidth(250)
-        columns_card.setMaximumWidth(420)
+        columns_card.setMinimumWidth(280)
+        columns_card.setMaximumWidth(350)
+        columns_card.setMinimumWidth(350)
         columns_card.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
         columns_layout = QVBoxLayout(columns_card)
         columns_layout.setContentsMargins(0, 0, 0, 0)
         columns_layout.setSpacing(0)
         columns_heading = QHBoxLayout()
-        columns_title = QLabel("Column Identification")
+        columns_title = QLabel("Informasi Kolom")
         columns_title.setObjectName("datasetPreviewSectionTitle")
         columns_heading.addWidget(columns_title)
         columns_heading.addStretch(1)
-        self.column_count_label = QLabel("Missing")
+        self.show_all_columns_button = QPushButton("Lihat Semua")
+        self.show_all_columns_button.setObjectName("datasetPreviewShowAll")
+        self.show_all_columns_button.clicked.connect(lambda: self._select_tab(2))
+        columns_heading.addWidget(self.show_all_columns_button)
+        self.column_count_label = QLabel("0")
         self.column_count_label.setObjectName("datasetPreviewCount")
         columns_heading.addWidget(self.column_count_label)
-        columns_heading.setContentsMargins(24, 6, 22, 8)
+        columns_heading.setContentsMargins(16, 12, 16, 8)
         columns_layout.addLayout(columns_heading)
+        column_info_header = QHBoxLayout()
+        column_info_header.setContentsMargins(16, 0, 16, 7)
+        column_info_header.setSpacing(8)
+        for label_text, stretch in (("Kolom", 4), ("Tipe", 3), ("Informasi", 6)):
+            label = QLabel(label_text)
+            label.setObjectName("datasetPreviewColumnInfoHeader")
+            column_info_header.addWidget(label, stretch)
+        columns_layout.addLayout(column_info_header)
         self.columns_scroll = QScrollArea()
         self.columns_scroll.setObjectName("datasetPreviewColumnsScroll")
         self.columns_scroll.setWidgetResizable(True)
@@ -401,26 +545,7 @@ class DatasetPreviewPage(QWidget):
             if title == "Data Quality":
                 self.quality_summary = summary
         root.addWidget(self.content_stack, 1)
-        root.addSpacing(15)
-
-        footer = QFrame()
-        self.footer = footer
-        footer.setObjectName("datasetPreviewFooter")
-        footer_layout = QHBoxLayout(footer)
-        self.footer_layout = footer_layout
-        footer_layout.setContentsMargins(24, 0, 20, 0)
-        footer_label = QLabel("Quick Cleaning:")
-        footer_label.setObjectName("datasetPreviewFooterText")
-        footer_layout.addWidget(footer_label, 1)
-        self.continue_button = QPushButton("Continue to Analysis  →")
-        self.continue_button.setObjectName("primaryButton")
-        self.continue_button.setMinimumSize(247, 40)
-        if self._main_window is not None:
-            self.continue_button.clicked.connect(self._main_window.open_analysis_page)
-        footer_layout.addWidget(self.continue_button)
-        root.addWidget(footer)
-        footer.setFixedHeight(61)
-        apply_card_shadow(footer)
+        self.footer = None
         self.update_dataset(None)
         self.page_scroll.setWidget(container)
         outer.addWidget(self.page_scroll)
@@ -429,10 +554,202 @@ class DatasetPreviewPage(QWidget):
 
     def _select_tab(self, index: int):
         self.content_stack.setCurrentIndex(index)
+        self.tips_card.setVisible(index == 0)
+        self.columns_card.setVisible(index == 0)
+        if index != 0:
+            self.content_stack.currentWidget().setProperty("activePreviewState", True)
         for tab_index, button in enumerate(self.tab_buttons):
             button.setProperty("active", tab_index == index)
             button.style().unpolish(button)
             button.style().polish(button)
+
+    def _create_exploration_tips(self):
+        icon_root = Path(__file__).resolve().parent / "assets" / "icons"
+        card = QFrame()
+        card.setObjectName("datasetPreviewTipsCard")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(14, 10, 14, 12)
+        layout.setSpacing(10)
+        heading = QHBoxLayout()
+        title = QLabel("Tips Eksplorasi Data")
+        title.setObjectName("datasetPreviewTipsTitle")
+        heading.addWidget(title)
+        heading.addStretch(1)
+        guide = QPushButton("Lihat Panduan Lengkap  →")
+        guide.setObjectName("datasetPreviewGuideButton")
+        guide.clicked.connect(
+            getattr(self._main_window, "open_help", lambda: None)
+            if self._main_window is not None else lambda: None
+        )
+        heading.addWidget(guide)
+        layout.addLayout(heading)
+        steps = QHBoxLayout()
+        steps.setContentsMargins(0, 0, 0, 0)
+        steps.setSpacing(8)
+        for number, title_text, body_text, icon_name in (
+            ("1.", "Periksa struktur data", "Lihat tipe data, nilai unik, dan Missing Values.", "file-text.svg"),
+            ("2.", "Gunakan tab Analisis", "Lakukan analisis statistik, korelasi, dan deteksi outlier.", "analysis.svg"),
+            ("3.", "Bersihkan data (opsional)", "Tangani Missing Values dan duplikat sebelum membuat model.", "about-dataset.svg"),
+            ("4.", "Lanjut ke ML Intelligence", "Pilih target variabel dan bangun model machine learning.", "ml-intelligence.svg"),
+        ):
+            item = QFrame()
+            item.setObjectName("datasetPreviewTipItem")
+            item_layout = QHBoxLayout(item)
+            item_layout.setContentsMargins(8, 8, 7, 8)
+            item_layout.setSpacing(8)
+            icon = QLabel()
+            icon.setObjectName("datasetPreviewTipIcon")
+            icon.setFixedSize(28, 28)
+            icon.setAlignment(Qt.AlignCenter)
+            icon.setPixmap(
+                render_icon_pixmap(
+                    icon_root / icon_name, 16, icon.devicePixelRatioF()
+                )
+            )
+            item_layout.addWidget(icon, 0, Qt.AlignTop)
+            text_layout = QVBoxLayout()
+            text_layout.setContentsMargins(0, 0, 0, 0)
+            text_layout.setSpacing(3)
+            heading_label = QLabel(f"{number} {title_text}")
+            heading_label.setObjectName("datasetPreviewTipHeading")
+            heading_label.setWordWrap(True)
+            body_label = QLabel(body_text)
+            body_label.setObjectName("datasetPreviewTipBody")
+            body_label.setWordWrap(True)
+            text_layout.addWidget(heading_label)
+            text_layout.addWidget(body_label)
+            item_layout.addLayout(text_layout, 1)
+            steps.addWidget(item, 1)
+        layout.addLayout(steps, 1)
+        card.setFixedHeight(173)
+        return card
+
+    def _open_cleaning_actions(self):
+        if self._main_window is None or self._dataframe is None:
+            return
+        analysis_page = getattr(self._main_window, "analysis_page", None)
+        if analysis_page is None:
+            return
+        menu = QMenu(self)
+        actions = (
+            ("Imputasi Missing Values", "_handle_impute_missing"),
+            ("Hapus baris dengan Missing Values", "_handle_drop_missing"),
+            ("Hapus baris duplikat", "_handle_remove_duplicates"),
+        )
+        can_version = bool(
+            getattr(self._main_window, "version_manager", None)
+            and getattr(self._main_window, "current_project_id", None)
+        )
+        for label, handler_name in actions:
+            action = menu.addAction(label)
+            handler = getattr(analysis_page, handler_name, None)
+            action.setEnabled(can_version and callable(handler))
+            if callable(handler):
+                action.triggered.connect(handler)
+        if not can_version:
+            menu.addSection("Simpan dataset sebagai project untuk membuat versi bersih")
+        menu.exec(self.clean_button.mapToGlobal(self.clean_button.rect().bottomLeft()))
+
+    def _filter_table(self, query: str):
+        dataframe = self._dataframe
+        if dataframe is None:
+            self._filtered_dataframe = pd.DataFrame()
+        elif not query.strip():
+            self._filtered_dataframe = dataframe
+        else:
+            normalized_query = query.strip().casefold()
+            matches = dataframe.astype(str).apply(
+                lambda column: column.str.casefold().str.contains(
+                    normalized_query, regex=False, na=False
+                )
+            )
+            self._filtered_dataframe = dataframe.loc[matches.any(axis=1)]
+        self._current_page = 0
+        self._apply_table_page()
+
+    def _set_page_size(self, value: str):
+        try:
+            self._page_size = max(1, int(value))
+        except (TypeError, ValueError):
+            self._page_size = 10
+        self._current_page = 0
+        self._apply_table_page()
+
+    def _change_page(self, offset: int):
+        total_pages = max(
+            1,
+            (len(self._filtered_dataframe) + self._page_size - 1) // self._page_size,
+        )
+        self._current_page = min(max(self._current_page + offset, 0), total_pages - 1)
+        self._apply_table_page()
+
+    def _apply_table_page(self):
+        dataframe = self._filtered_dataframe
+        row_start = self._current_page * self._page_size
+        row_end = min(row_start + self._page_size, len(dataframe))
+        self.model.set_dataframe(
+            dataframe.iloc[row_start:row_end],
+            row_offset=row_start,
+        )
+        total_pages = max(1, (len(dataframe) + self._page_size - 1) // self._page_size)
+        self._render_pagination(total_pages)
+        self.previous_page_button.setEnabled(self._current_page > 0)
+        self.next_page_button.setEnabled(self._current_page + 1 < total_pages)
+        if len(dataframe):
+            self.pagination_label.setText(
+                f"Menampilkan {row_start + 1}–{row_end} dari {len(dataframe):,} baris"
+            )
+            total_columns = self._dataframe.shape[1] if self._dataframe is not None else 0
+            self.row_count_label.setText(
+                f"Menampilkan {row_start + 1}–{row_end} dari total "
+                f"{len(dataframe):,} baris dan {total_columns:,} kolom."
+            )
+        else:
+            self.pagination_label.setText("Tidak ada baris yang cocok")
+            self.row_count_label.setText("Tidak ada baris yang cocok dengan pencarian.")
+        self._configure_preview_columns(dataframe)
+
+    def _render_pagination(self, total_pages: int):
+        while self.pagination_pages_layout.count():
+            item = self.pagination_pages_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        current = self._current_page
+        if total_pages <= 7:
+            visible_pages: list[int | None] = list(range(total_pages))
+        elif current < 4:
+            visible_pages = [0, 1, 2, 3, 4, None, total_pages - 1]
+        elif current >= total_pages - 4:
+            visible_pages = [0, None, *range(total_pages - 5, total_pages)]
+        else:
+            visible_pages = [0, None, current - 1, current, current + 1, None, total_pages - 1]
+        self.pagination_page_buttons = []
+        for page in visible_pages:
+            if page is None:
+                label = QLabel("…")
+                label.setObjectName("datasetPreviewPaginationEllipsis")
+                label.setAlignment(Qt.AlignCenter)
+                label.setFixedWidth(20)
+                self.pagination_pages_layout.addWidget(label)
+                continue
+            button = QPushButton(str(page + 1))
+            button.setObjectName("datasetPreviewPageButton")
+            button.setProperty("active", page == current)
+            button.setFixedSize(32, 32)
+            button.clicked.connect(
+                lambda checked=False, target_page=page: self._go_to_page(target_page)
+            )
+            self.pagination_page_buttons.append(button)
+            self.pagination_pages_layout.addWidget(button)
+
+    def _go_to_page(self, page: int):
+        total_pages = max(
+            1,
+            (len(self._filtered_dataframe) + self._page_size - 1) // self._page_size,
+        )
+        self._current_page = min(max(int(page), 0), total_pages - 1)
+        self._apply_table_page()
 
     def _create_analysis_page(self, title: str, description: str):
         page = QWidget()
@@ -445,10 +762,24 @@ class DatasetPreviewPage(QWidget):
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(18, 14, 18, 16)
         card_layout.setSpacing(8)
-        heading = QLabel(title)
+        display_title = {
+            "Data Quality": "Data Quality",
+            "Columns": "Informasi Kolom",
+            "Missing Values": "Missing Values",
+            "Outliers": "Deteksi Outlier",
+            "Correlation": "Korelasi",
+        }.get(title, title)
+        heading = QLabel(display_title)
         heading.setObjectName("datasetPreviewSectionTitle")
         card_layout.addWidget(heading)
-        description_label = QLabel(description)
+        display_descriptions = {
+            "Data Quality": "Ringkasan kelengkapan dan konsistensi dataset.",
+            "Columns": "Tipe, jumlah nilai unik, dan contoh isi setiap kolom.",
+            "Missing Values": "Kolom yang memiliki nilai kosong.",
+            "Outliers": "Perkiraan outlier numerik berdasarkan rentang IQR.",
+            "Correlation": "Korelasi antar kolom numerik (Pearson).",
+        }
+        description_label = QLabel(display_descriptions.get(title, description))
         description_label.setObjectName("datasetPreviewAnalysisDescription")
         description_label.setWordWrap(True)
         card_layout.addWidget(description_label)
@@ -457,6 +788,10 @@ class DatasetPreviewPage(QWidget):
             summary.setObjectName("datasetPreviewAnalysisSummary")
             summary.setWordWrap(True)
             card_layout.addWidget(summary)
+        if title == "Data Quality":
+            card.setMaximumWidth(820)
+            card_layout.setContentsMargins(15, 12, 15, 12)
+            card_layout.setSpacing(6)
         table = DatasetTableView()
         table.setObjectName("datasetPreviewAnalysisTable")
         table.setAlternatingRowColors(True)
@@ -465,6 +800,8 @@ class DatasetPreviewPage(QWidget):
         table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         table.setWordWrap(False)
         table.verticalHeader().setVisible(False)
+        table.verticalHeader().setDefaultSectionSize(27)
+        table.horizontalHeader().setFixedHeight(34)
         table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         table.horizontalHeader().setStretchLastSection(True)
         card_layout.addWidget(table, 1)
@@ -487,27 +824,27 @@ class DatasetPreviewPage(QWidget):
 
     def _apply_responsive_layout(self, width: int):
         compact = logical_width(width) < 760
+        self.root_layout.setSpacing(0)
         self.root_layout.setContentsMargins(
-            12 if compact else 36,
-            14 if compact else 22,
-            12 if compact else 25,
-            14 if compact else 29,
+            12 if compact else 20,
+            14 if compact else 1,
+            12 if compact else 19,
+            14 if compact else 20,
         )
+        narrow = logical_width(width) < 620
         self.header_layout.setDirection(
-            QBoxLayout.TopToBottom if logical_width(width) < 620 else QBoxLayout.LeftToRight
+            QBoxLayout.TopToBottom if narrow else QBoxLayout.LeftToRight
         )
-        self.header.setFixedHeight(126 if logical_width(width) < 620 else 78)
-        self.header_upload_button.setFixedSize(
-            190 if logical_width(width) < 620 else 253,
-            46 if logical_width(width) < 620 else 63,
+        self.header_actions.setDirection(
+            QBoxLayout.TopToBottom if narrow else QBoxLayout.LeftToRight
         )
-        self.upload_action.setFixedSize(190 if logical_width(width) < 620 else 253, 126 if logical_width(width) < 620 else 78)
-        self.file_actions.setDirection(
-            QBoxLayout.TopToBottom if logical_width(width) < 430 else QBoxLayout.LeftToRight
-        )
-        self.file_actions.setSpacing(8 if logical_width(width) < 430 else 0)
-        self.file_card.setMinimumHeight(230 if logical_width(width) < 430 else 176)
-        columns = 5 if logical_width(width) >= 1100 else 2 if logical_width(width) >= 620 else 1
+        self.header.setFixedHeight(210 if narrow else 74)
+        self.header_upload_button.setFixedSize(190 if narrow else 131, 40)
+        self.clean_button.setFixedSize(190 if narrow else 139, 40)
+        self.continue_button.setFixedSize(190 if narrow else 178, 40)
+        self.file_card.setMinimumHeight(109)
+        self.file_card.setMaximumHeight(109)
+        columns = 6 if logical_width(width) >= 1100 else 3 if logical_width(width) >= 700 else 2
         if columns != self._layout_columns:
             for column in range(self.overview_layout.columnCount()):
                 self.overview_layout.setColumnMinimumWidth(column, 0)
@@ -515,14 +852,14 @@ class DatasetPreviewPage(QWidget):
             self.overview_layout.removeWidget(self.file_card)
             for card in self.metric_cards:
                 self.overview_layout.removeWidget(card)
-            if columns == 5:
+            if columns == 6:
                 self.overview_layout.addWidget(self.file_card, 0, 0)
                 for index, card in enumerate(self.metric_cards, start=1):
                     self.overview_layout.addWidget(card, 0, index)
-                self.overview_layout.setColumnStretch(0, 2995)
-                for column in range(1, columns):
-                    self.overview_layout.setColumnStretch(column, 1000)
-                self.overview_layout.setHorizontalSpacing(14)
+                self.overview_layout.setColumnStretch(0, 380)
+                for column, stretch in enumerate((152, 138, 154, 154, 169), start=1):
+                    self.overview_layout.setColumnStretch(column, stretch)
+                self.overview_layout.setHorizontalSpacing(0)
             else:
                 self.overview_layout.addWidget(self.file_card, 0, 0, 1, columns)
                 for index, card in enumerate(self.metric_cards):
@@ -531,27 +868,36 @@ class DatasetPreviewPage(QWidget):
                     )
                 for column in range(columns):
                     self.overview_layout.setColumnStretch(column, 1)
-                self.overview_layout.setHorizontalSpacing(12)
+                self.overview_layout.setHorizontalSpacing(8)
             self.overview_layout.invalidate()
             self._layout_columns = columns
+
+        overview_rows = 1 if columns == 6 else 3
+        self.overview.setMinimumHeight(109 if overview_rows == 1 else 109 * overview_rows + 12 * (overview_rows - 1))
+        self.overview.setMaximumHeight(self.overview.minimumHeight())
 
         self.body_layout.setDirection(
             QBoxLayout.TopToBottom if logical_width(width) < 1000 else QBoxLayout.LeftToRight
         )
         if logical_width(width) < 1000:
+            self.preview_card.setMinimumHeight(360)
+            self.preview_card.setMaximumHeight(16777215)
+            self.columns_card.setMinimumHeight(220)
+            self.columns_card.setMaximumHeight(16777215)
             self.columns_card.setMaximumWidth(16777215)
             self.columns_card.setMinimumWidth(0)
-            self.columns_card.setMinimumHeight(220)
+            self.tips_card.setMinimumHeight(173)
+            self.content_stack.setMinimumHeight(520)
+            self.content_stack.setMaximumHeight(16777215)
         else:
+            self.preview_card.setFixedHeight(469)
             self.columns_card.setMinimumWidth(250)
             self.columns_card.setMaximumWidth(420)
-            self.columns_card.setMinimumHeight(0)
-        self.footer_layout.setDirection(
-            QBoxLayout.TopToBottom if logical_width(width) < 520 else QBoxLayout.LeftToRight
-        )
-        self.footer.setFixedHeight(92 if logical_width(width) < 520 else 61)
-        self.content_stack.setMinimumHeight(470 if logical_width(width) >= 1000 else 520)
-        self.tabs_scroll.setMinimumHeight(54)
+            self.columns_card.setFixedHeight(674)
+            self.columns_card.setFixedWidth(350)
+            self.tips_card.setMinimumHeight(173)
+            self.content_stack.setFixedHeight(674)
+        self.tabs_scroll.setMinimumHeight(45)
         self.tab_strip.adjustSize()
         self.file_layout.invalidate()
         self.root_layout.invalidate()
@@ -565,21 +911,47 @@ class DatasetPreviewPage(QWidget):
     def _create_metric_card(self, layout, title, value, description):
         card = QFrame()
         card.setObjectName("datasetPreviewMetricCard")
-        card.setMinimumHeight(176)
-        card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(20, 24, 20, 18)
-        card_layout.setSpacing(9)
-        heading = QLabel(title)
+        card.setMinimumHeight(83)
+        card_layout = QHBoxLayout(card)
+        card_layout.setContentsMargins(13, 12, 9, 12)
+        card_layout.setSpacing(10)
+        icon = QLabel()
+        icon.setObjectName("datasetPreviewMetricIcon")
+        icon.setFixedSize(49, 50)
+        icon.setAlignment(Qt.AlignCenter)
+        icon_names = {
+            "ROWS": "file-text.svg",
+            "COLUMNS": "dataset.svg",
+            "MISSING CELLS": "overview-quality.svg",
+            "DUPLICATES": "overview-quality-folder.svg",
+            "FILE SIZE": "file-text.svg",
+        }
+        icon_path = Path(__file__).resolve().parent / "assets" / "icons" / icon_names.get(title, "file-text.svg")
+        icon.setPixmap(
+            render_icon_pixmap(icon_path, 23, icon.devicePixelRatioF())
+        )
+        card_layout.addWidget(icon, 0, Qt.AlignVCenter)
+        details = QVBoxLayout()
+        details.setContentsMargins(0, 0, 0, 0)
+        details.setSpacing(1)
+        display_titles = {
+            "ROWS": "BARIS",
+            "COLUMNS": "KOLOM",
+            "MISSING CELLS": "MISSING VALUES",
+            "DUPLICATES": "DUPLIKAT",
+            "FILE SIZE": "UKURAN FILE",
+        }
+        heading = QLabel(display_titles.get(title, title))
         heading.setObjectName("datasetPreviewMetricTitle")
         value_label = QLabel(value)
         value_label.setObjectName("datasetPreviewMetricValue")
-        card_layout.addWidget(heading)
-        card_layout.addWidget(value_label)
+        details.addWidget(heading)
+        details.addWidget(value_label)
         description_label = QLabel(description)
         description_label.setObjectName("datasetPreviewMetricDescription")
-        card_layout.addWidget(description_label)
+        details.addWidget(description_label)
+        card_layout.addLayout(details, 1)
         self.metric_descriptions[title] = description_label
-        card_layout.addStretch(1)
         self.metric_cards.append(card)
         layout.addWidget(card, 1, len(self.metric_cards) - 1)
         apply_card_shadow(card)
@@ -596,10 +968,9 @@ class DatasetPreviewPage(QWidget):
     @staticmethod
     def _column_type(column: str, series: pd.Series) -> str:
         name = column.lower()
-        if name == "passengerid" or name.endswith("_id") or name == "id":
-            return "ID"
         if name in {"target", "survived", "label", "class"}:
-            return "Target"
+            kind = "Numeric" if pd.api.types.is_numeric_dtype(series.dtype) else "Categorical"
+            return f"{kind} (Target)"
         if name in {"name", "ticket", "cabin", "description", "text"}:
             return "Text"
         if pd.api.types.is_bool_dtype(series.dtype):
@@ -607,7 +978,7 @@ class DatasetPreviewPage(QWidget):
         if pd.api.types.is_string_dtype(series.dtype):
             return "Categorical"
         if pd.api.types.is_numeric_dtype(series.dtype):
-            return "Categorical" if name == "pclass" else "Numeric"
+            return "Numeric"
         if pd.api.types.is_object_dtype(series.dtype) or isinstance(series.dtype, pd.CategoricalDtype):
             return "Categorical"
         return "Numeric"
@@ -622,41 +993,58 @@ class DatasetPreviewPage(QWidget):
     def _populate_column_rows(self, dataframe: pd.DataFrame):
         self._clear_column_rows()
         row_count = max(len(dataframe.index), 1)
-        titanic_row_heights = (34, 36, 34, 36, 37, 36, 36, 34, 36, 36, 37, 36)
-        is_titanic_preview = {
-            "passengerid", "survived", "pclass"
-        }.issubset({str(name).casefold() for name in dataframe.columns}) and len(dataframe.columns) >= 10
-        for row_index, column in enumerate(dataframe.columns):
+        self.column_count_label.setText(f"{len(dataframe.columns)} kolom")
+        for row_index, column in enumerate(dataframe.columns[:6]):
             name = str(column)
-            missing = float(dataframe[column].isna().sum()) / row_count * 100
+            series = dataframe[column]
+            missing = int(series.isna().sum())
+            non_null = series.dropna()
+            unique_count = int(non_null.nunique())
             row = QFrame()
             row.setObjectName("datasetPreviewColumnRow")
             row_layout = QHBoxLayout(row)
-            row_layout.setContentsMargins(24, 0, 22, 0)
-            row_layout.setSpacing(10)
-            display_name = "Gender" if name == "Sex" else name
-            column_name = QLabel(display_name)
+            row_layout.setContentsMargins(16, 6, 16, 6)
+            row_layout.setSpacing(8)
+            column_name = QLabel(name)
             column_name.setObjectName("datasetPreviewColumnName")
-            column_name.setToolTip(name if display_name != name else "")
             column_name.setMinimumWidth(0)
-            row_layout.addWidget(column_name, 1)
-            kind = QLabel(self._column_type(name, dataframe[column]))
-            kind.setObjectName("datasetPreviewTypeBadge")
-            kind.setProperty("columnType", kind.text().lower())
-            kind.setAlignment(Qt.AlignCenter)
-            kind.setFixedWidth(83)
-            row_layout.addWidget(kind)
-            missing_text = QLabel(f"{missing:.1f}%")
-            missing_text.setObjectName("datasetPreviewMissingValue")
-            missing_text.setProperty("hasMissing", missing > 0)
-            missing_text.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            missing_text.setFixedWidth(48)
-            row_layout.addWidget(missing_text)
-            row.setFixedHeight(
-                titanic_row_heights[row_index]
-                if is_titanic_preview and row_index < len(titanic_row_heights)
-                else 35
+            row_layout.addWidget(column_name, 4)
+            kind = QLabel(self._column_type(name, series))
+            kind.setObjectName("datasetPreviewColumnType")
+            kind.setProperty(
+                "columnType",
+                "target" if "(Target)" in kind.text() else kind.text().lower(),
             )
+            kind.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            kind.setMaximumHeight(22)
+            row_layout.addWidget(kind, 3)
+            details = QLabel()
+            details.setObjectName("datasetPreviewColumnInformation")
+            details.setWordWrap(True)
+            if pd.api.types.is_numeric_dtype(series.dtype):
+                numeric_values = pd.to_numeric(non_null, errors="coerce").dropna()
+                if numeric_values.empty:
+                    detail_text = f"{unique_count:,} unik · {missing:,} Missing Values"
+                else:
+                    detail_text = (
+                        f"{unique_count:,} unik · {missing:,} Missing Values\n"
+                        f"Rentang: {numeric_values.min():g} – {numeric_values.max():g}"
+                    )
+            elif unique_count <= 6:
+                value_counts = non_null.astype(str).value_counts().head(2)
+                distribution = ", ".join(
+                    f"{value}: {count:,} ({count / row_count * 100:.1f}%)"
+                    for value, count in value_counts.items()
+                )
+                detail_text = f"{unique_count:,} unik · {missing:,} Missing Values"
+                if distribution:
+                    detail_text += f"\n{distribution}"
+            else:
+                sample = ", ".join(non_null.astype(str).head(3).tolist())
+                detail_text = f"{unique_count:,} unik · {missing:,} Missing Values\n{sample}"
+            details.setText(detail_text)
+            row_layout.addWidget(details, 6)
+            row.setMinimumHeight(55)
             self.columns_content_layout.addWidget(row)
         self.columns_content_layout.addStretch(1)
 
@@ -666,31 +1054,40 @@ class DatasetPreviewPage(QWidget):
         is_titanic = {
             "passengerid", "survived", "pclass"
         }.issubset(normalized) and len(names) >= 10
-        hidden_names = {"sibsp", "parch", "ticket", "cabin"} if is_titanic else set()
         widths = {
-            "passengerid": 123,
-            "survived": 95,
-            "pclass": 77,
-            "name": 278,
-            "sex": 83,
-            "gender": 83,
-            "age": 57,
-            "fare": 131,
-            "embarked": 103,
+            "passengerid": 72,
+            "survived": 58,
+            "pclass": 45,
+            "name": 130,
+            "sex": 50,
+            "gender": 50,
+            "age": 44,
+            "sibsp": 40,
+            "parch": 42,
+            "ticket": 94,
+            "fare": 58,
+            "cabin": 55,
+            "embarked": 54,
         }
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.Interactive)
+        self.table.setColumnHidden(0, False)
+        self.table.setColumnWidth(0, 24)
         for index, name in enumerate(names):
             lowered = name.casefold()
-            self.table.setColumnHidden(index, lowered in hidden_names)
+            self.table.setColumnHidden(index + 1, False)
             if lowered in widths:
-                self.table.setColumnWidth(index, widths[lowered])
+                self.table.setColumnWidth(index + 1, widths[lowered])
             elif not is_titanic:
-                self.table.setColumnWidth(index, 140)
+                self.table.setColumnWidth(index + 1, 90)
 
     def _set_analysis_table(self, title: str, dataframe: pd.DataFrame):
         table = self.analysis_tables[title]
-        table.setModel(DataFrameTableModel(dataframe, table))
+        table.setModel(DataFrameTableModel(
+            dataframe,
+            table,
+            correlation_heatmap=title == "Correlation",
+        ))
         has_data = not dataframe.empty and len(dataframe.columns) > 0
         table.setVisible(has_data)
         self.analysis_empty_states[title].setVisible(not has_data)
@@ -718,14 +1115,14 @@ class DatasetPreviewPage(QWidget):
         numeric = dataframe.select_dtypes(include="number")
 
         quality_rows = [
-            ("Rows", f"{row_count:,}"),
-            ("Columns", f"{column_count:,}"),
-            ("Missing cells", f"{int(missing_by_column.sum()):,}"),
-            ("Complete rows", f"{int((~dataframe.isna().any(axis=1)).sum()):,}"),
-            ("Duplicate rows", f"{duplicate_count:,}"),
-            ("Columns with missing values", f"{int((missing_by_column > 0).sum()):,}"),
+            ("Baris", f"{row_count:,}"),
+            ("Kolom", f"{column_count:,}"),
+            ("Sel kosong", f"{int(missing_by_column.sum()):,}"),
+            ("Baris lengkap", f"{int((~dataframe.isna().any(axis=1)).sum()):,}"),
+            ("Baris duplikat", f"{duplicate_count:,}"),
+            ("Kolom dengan Missing Values", f"{int((missing_by_column > 0).sum()):,}"),
         ]
-        quality_table = pd.DataFrame(quality_rows, columns=["Measure", "Value"])
+        quality_table = pd.DataFrame(quality_rows, columns=["Ukuran", "Nilai"])
         self.quality_summary.setText(
             f"{row_count:,} baris · {column_count:,} kolom · "
             f"{int(missing_by_column.sum()):,} sel kosong · "
@@ -755,7 +1152,13 @@ class DatasetPreviewPage(QWidget):
             q1, q3 = values.quantile([0.25, 0.75]).tolist()
             spread = q3 - q1
             count = int(((values < q1 - 1.5 * spread) | (values > q3 + 1.5 * spread)).sum())
-            outlier_rows.append((str(column), count, f"{count / max(len(values), 1) * 100:.1f}%"))
+            percentage = count / max(len(values), 1) * 100
+            outlier_rows.append((
+                str(column),
+                count,
+                f"{percentage:.1f}%",
+                "Perlu ditinjau" if count else "Aman",
+            ))
 
         # Bound correlation work for wide/large datasets while preserving a useful preview.
         correlation_columns = list(numeric.columns[:20])
@@ -764,38 +1167,54 @@ class DatasetPreviewPage(QWidget):
             correlation_data = correlation_data.sample(n=5000, random_state=0)
         correlation = correlation_data.corr().round(3) if len(correlation_columns) >= 2 else pd.DataFrame()
         if not correlation.empty:
-            correlation.insert(0, "Column", correlation.index.astype(str))
+            correlation.insert(0, "Kolom", correlation.index.astype(str))
             correlation = correlation.reset_index(drop=True)
 
         self._set_analysis_table("Data Quality", quality_table)
         self._set_analysis_table(
             "Columns",
-            pd.DataFrame(column_rows, columns=["Column", "Type", "Non-empty", "Unique", "Example values"]),
+            pd.DataFrame(column_rows, columns=["Kolom", "Tipe", "Terisi", "Unik", "Contoh nilai"]),
         )
         self._set_analysis_table(
             "Missing Values",
-            pd.DataFrame(missing_rows, columns=["Column", "Missing", "Percent"]),
+            pd.DataFrame(missing_rows, columns=["Kolom", "Missing Values", "Persentase"]),
         )
         self._set_analysis_table(
             "Outliers",
-            pd.DataFrame(outlier_rows, columns=["Numeric column", "Outlier rows", "Percent"]),
+            pd.DataFrame(outlier_rows, columns=["Kolom numerik", "Baris Outliers", "Persentase", "Status"]),
         )
         self._set_analysis_table("Correlation", correlation)
 
     def update_dataset(self, dataframe: pd.DataFrame | None, filename: str = ""):
         self._dataframe = dataframe
         self._dataset_name = filename or "Dataset"
-        self.model.set_dataframe(dataframe)
+        self._filtered_dataframe = dataframe if dataframe is not None else pd.DataFrame()
+        self._current_page = 0
+        if hasattr(self, "table_search"):
+            self.table_search.blockSignals(True)
+            self.table_search.clear()
+            self.table_search.blockSignals(False)
+        if hasattr(self, "page_size_combo"):
+            self.page_size_combo.blockSignals(True)
+            self.page_size_combo.setCurrentText(str(self._page_size))
+            self.page_size_combo.blockSignals(False)
+        if hasattr(self, "model"):
+            self._apply_table_page()
+        if hasattr(self, "clean_button"):
+            self.clean_button.setEnabled(dataframe is not None)
         if dataframe is None:
-            self.summary.setText("Upload, preview and clean your CSV before analysis.")
-            self.file_name.setText("No dataset loaded")
-            self.file_details.setText("Select a CSV file to preview your dataset.")
+            self.summary.setText(
+                "Lihat dan jelajahi data Anda sebelum melakukan analisis lebih lanjut."
+            )
+            self.file_name.setText("Belum ada dataset yang dimuat")
+            self.file_details.setText("Pilih file CSV untuk melihat pratinjau dataset.")
             self.rows_value.setText("—")
             self.columns_value.setText("—")
             self.missing_value.setText("—")
             self.duplicates_value.setText("—")
-            self.row_count_label.setText("0 rows")
-            self.column_count_label.setText("0 columns")
+            self.file_size_value.setText("—")
+            self.row_count_label.setText("0 baris")
+            self.column_count_label.setText("0 kolom")
             self.loaded_badge.hide()
             self.table.hide()
             self.empty_state.show()
@@ -809,26 +1228,31 @@ class DatasetPreviewPage(QWidget):
         missing_cells = int(dataframe.isna().sum().sum())
         duplicates = int(dataframe.duplicated().sum())
         self.file_name.setText(self._dataset_name)
+        self.breadcrumb.setText(f"Dataset  ›  {self._dataset_name}  ›  Pratinjau")
+        file_size = None
         if self._main_window is not None and self._main_window.current_file_path:
             try:
                 file_size = Path(self._main_window.current_file_path).stat().st_size
-                file_details = f"{file_size / 1024:.1f} KB · Uploaded just now"
             except OSError:
-                file_details = f"{rows:,} rows · {columns:,} columns"
-        else:
-            file_details = f"{rows:,} rows · {columns:,} columns"
+                file_size = None
+        file_size_text = (
+            f"{file_size / 1024:.1f} KB" if file_size is not None else "Ukuran file tidak tersedia"
+        )
+        file_details = f"{file_size_text}  ·  {rows:,} baris  ·  {columns:,} kolom"
         self.file_details.setText(file_details)
         self.rows_value.setText(f"{rows:,}")
         self.columns_value.setText(f"{columns:,}")
         self.missing_value.setText(f"{missing_cells:,}")
         self.duplicates_value.setText(f"{duplicates:,}")
+        self.file_size_value.setText(
+            f"{file_size / 1024:.1f} KB" if file_size is not None else "—"
+        )
         missing_percent = missing_cells / max(rows * columns, 1) * 100
-        self.metric_descriptions["ROWS"].setText("Records")
-        self.metric_descriptions["COLUMNS"].setText("Features")
-        self.metric_descriptions["MISSING CELLS"].setText(f"{missing_percent:.1f}% of all data")
-        self.metric_descriptions["DUPLICATES"].setText("Identical rows")
-        self.row_count_label.setText(f"{rows:,} rows")
-        self.column_count_label.setText("Missing")
+        self.metric_descriptions["ROWS"].setText("Baris Data")
+        self.metric_descriptions["COLUMNS"].setText("Kolom")
+        self.metric_descriptions["MISSING CELLS"].setText(f"({missing_percent:.1f}%)")
+        self.metric_descriptions["DUPLICATES"].setText("Duplikat Baris")
+        self.metric_descriptions["FILE SIZE"].setText("Ukuran File")
         self.loaded_badge.show()
         self._populate_column_rows(dataframe)
         self._update_analysis_views(dataframe, duplicates)

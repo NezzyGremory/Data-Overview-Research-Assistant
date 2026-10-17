@@ -5,7 +5,7 @@ import sys
 
 import pandas as pd
 from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QIcon, QPixmap
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -15,11 +15,13 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from app.ui.style_utils import apply_card_shadow
+from app.ui.style_utils import apply_card_shadow, render_icon_pixmap
+from app.ui.overview_empty_page import Page4OverviewEmptyPage
 
 
 def _asset_path(relative_path: str) -> Path:
@@ -36,12 +38,18 @@ class DashboardPage(QWidget):
         super().__init__()
         self.main_window = main_window
         self._dataframe = getattr(main_window, "current_dataset", None)
-        self._filename = "Dataset"
+        filename_getter = getattr(main_window, "_current_filename", None)
+        self._filename = (
+            str(filename_getter()) if callable(filename_getter) else "Dataset"
+        )
         self._workflow = {
             "has_dataset": self._dataframe is not None,
             "analysis_done": False,
             "ml_done": False,
         }
+        self._summary_signature = None
+        self._duplicate_count_source = None
+        self._duplicate_count_value = None
         self._build_ui()
         self.refresh_summary()
 
@@ -50,6 +58,7 @@ class DashboardPage(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
         scroll = QScrollArea()
+        self.scroll = scroll
         scroll.setObjectName("overviewScroll")
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
@@ -74,12 +83,12 @@ class DashboardPage(QWidget):
         title_block.setSpacing(0)
         title = QLabel("Overview")
         title.setObjectName("overviewTitle")
-        subtitle = QLabel("Everything about your current research in one")
+        subtitle = QLabel("Semua informasi riset Anda dalam satu ruang kerja.")
         subtitle.setObjectName("overviewSubtitle")
         title_block.addWidget(title)
         title_block.addWidget(subtitle)
         header_layout.addLayout(title_block, 1)
-        self.report_button = QPushButton("Generated Research Report")
+        self.report_button = QPushButton("Laporan Riset")
         self.report_button.setObjectName("overviewReportButton")
         self.report_button.setIcon(QIcon(str(_asset_path("assets/icons/overview-report.svg"))))
         self.report_button.setIconSize(QSize(30, 30))
@@ -101,7 +110,9 @@ class DashboardPage(QWidget):
         info_icon.setObjectName("overviewInfoIcon")
         info_path = _asset_path("assets/icons/about.svg")
         if info_path.exists():
-            info_icon.setPixmap(QPixmap(str(info_path)).scaled(38, 38, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            info_icon.setPixmap(
+                render_icon_pixmap(info_path, 38, info_icon.devicePixelRatioF())
+            )
         else:
             info_icon.setText("ⓘ")
         info_icon.setFixedSize(40, 40)
@@ -125,7 +136,7 @@ class DashboardPage(QWidget):
         pipeline_header = QHBoxLayout()
         pipeline_header.setContentsMargins(0, 0, 0, 0)
         pipeline_header.setSpacing(12)
-        pipeline_title = QLabel("Dataset workflow")
+        pipeline_title = QLabel("Alur kerja Dataset")
         pipeline_title.setObjectName("overviewPipelineTitle")
         pipeline_title.setFixedWidth(207)
         pipeline_header.addWidget(pipeline_title)
@@ -137,7 +148,7 @@ class DashboardPage(QWidget):
         self.pipeline_progress.setFixedHeight(10)
         self.pipeline_progress.setFixedWidth(402)
         pipeline_header.addWidget(self.pipeline_progress)
-        self.pipeline_count = QLabel("0 of 7 step completed")
+        self.pipeline_count = QLabel("0 dari 7 langkah selesai")
         self.pipeline_count.setObjectName("overviewPipelineCount")
         pipeline_header.addWidget(self.pipeline_count)
         pipeline_layout.addLayout(pipeline_header)
@@ -171,7 +182,18 @@ class DashboardPage(QWidget):
         layout.addLayout(self.summary_cards_layout)
         layout.addStretch(1)
         scroll.setWidget(canvas)
-        outer.addWidget(scroll)
+        self.page4_empty_page = Page4OverviewEmptyPage(self.main_window)
+        self.state_stack = QStackedWidget()
+        self.state_stack.setObjectName("overviewStateStack")
+        self.state_stack.addWidget(scroll)
+        self.state_stack.addWidget(self.page4_empty_page)
+        outer.addWidget(self.state_stack)
+        self.page4_empty_page.set_dataset(
+            self._dataframe,
+            self._filename,
+            getattr(self.main_window, "analysis_result", None),
+        )
+        self.state_stack.setCurrentWidget(self.page4_empty_page)
         self._summary_columns = None
         self._pipeline_columns = None
         self._apply_responsive_layout(self.width())
@@ -226,7 +248,9 @@ class DashboardPage(QWidget):
         icon.setFixedSize(32, 32)
         path = _asset_path(icon_path)
         if path.exists():
-            icon.setPixmap(QPixmap(str(path)).scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            icon.setPixmap(
+                render_icon_pixmap(path, 24, icon.devicePixelRatioF())
+            )
         layout.addWidget(icon, 0, Qt.AlignVCenter)
         label = QLabel(title)
         label.setObjectName("overviewCardTitle")
@@ -234,7 +258,7 @@ class DashboardPage(QWidget):
         return row, layout
 
     def _make_details_button(self, callback):
-        button = QPushButton("View details")
+        button = QPushButton("Lihat detail")
         button.setObjectName("overviewDetailsButton")
         button.setIcon(QIcon(str(_asset_path("assets/icons/overview-arrow-right.svg"))))
         button.setIconSize(QSize(10, 10))
@@ -248,18 +272,18 @@ class DashboardPage(QWidget):
         heading, heading_layout = self._heading_row(
             "Dataset", "assets/icons/dataset.svg"
         )
-        self.dataset_loaded_badge = QLabel("Loaded")
+        self.dataset_loaded_badge = QLabel("Dimuat")
         self.dataset_loaded_badge.setObjectName("overviewLoadedBadge")
         heading_layout.addWidget(self.dataset_loaded_badge, 0, Qt.AlignVCenter)
         layout.addWidget(heading)
-        self.dataset_name_label = QLabel("No dataset loaded")
+        self.dataset_name_label = QLabel("Belum ada dataset yang dimuat")
         self.dataset_name_label.setObjectName("overviewDatasetName")
         self.dataset_name_label.setWordWrap(True)
         layout.addWidget(self.dataset_name_label)
         self.dataset_metric_values = {}
         metrics = QHBoxLayout()
         metrics.setSpacing(7)
-        for key, title in (("rows", "ROWS"), ("columns", "COLUMNS"), ("size", "SIZE"), ("duplicates", "DUPLICATES")):
+        for key, title in (("rows", "BARIS"), ("columns", "KOLOM"), ("size", "UKURAN"), ("duplicates", "DUPLIKAT")):
             tile = QFrame()
             tile.setObjectName("overviewDatasetMetric")
             tile_layout = QVBoxLayout(tile)
@@ -274,7 +298,7 @@ class DashboardPage(QWidget):
             metrics.addWidget(tile, 1)
             self.dataset_metric_values[key] = value
         layout.addLayout(metrics)
-        column_title = QLabel("COLUMNS TYPE")
+        column_title = QLabel("TIPE KOLOM")
         column_title.setObjectName("overviewSmallHeading")
         layout.addWidget(column_title)
         self.column_type_bar = QWidget()
@@ -315,18 +339,18 @@ class DashboardPage(QWidget):
         heading, heading_layout = self._heading_row(
             "Data Quality", "assets/icons/overview-quality-folder.svg"
         )
-        self.quality_readiness_badge = QLabel("Readiness")
+        self.quality_readiness_badge = QLabel("Kesiapan")
         self.quality_readiness_badge.setObjectName("overviewReadinessBadge")
         heading_layout.addWidget(self.quality_readiness_badge, 0, Qt.AlignVCenter)
         layout.addWidget(heading)
-        self.quality_missing = QLabel("Missing values: —")
-        self.quality_outliers = QLabel("Outliers detected in —")
-        self.quality_duplicates = QLabel("Duplicate rows: —")
+        self.quality_missing = QLabel("Missing Values: —")
+        self.quality_outliers = QLabel("Outliers pada —")
+        self.quality_duplicates = QLabel("Baris duplikat: —")
         for label in (self.quality_missing, self.quality_outliers, self.quality_duplicates):
             label.setObjectName("overviewQualityLine")
             label.setWordWrap(True)
             layout.addWidget(label)
-        most_title = QLabel("MOST MISSING")
+        most_title = QLabel("MISSING VALUES TERBANYAK")
         most_title.setObjectName("overviewSmallHeading")
         layout.addWidget(most_title)
         self.quality_most_missing = QLabel("—")
@@ -460,10 +484,25 @@ class DashboardPage(QWidget):
             return "0,0"
 
     def update_dataset(self, dataframe, filename):
+        self._summary_signature = None
+        self._duplicate_count_source = None
+        self._duplicate_count_value = None
         if dataframe is None:
+            self._dataframe = None
+            self._filename = "Dataset"
+            self._workflow["has_dataset"] = False
+            self.page4_empty_page.set_dataset(None, "", None)
+            if hasattr(self, "state_stack"):
+                self.state_stack.setCurrentWidget(self.page4_empty_page)
             return
         self._dataframe = dataframe
         self._filename = str(filename or "Dataset")
+        self.page4_empty_page.set_dataset(
+            dataframe,
+            self._filename,
+            getattr(self.main_window, "analysis_result", None),
+        )
+        self.state_stack.setCurrentWidget(self.page4_empty_page)
         self._workflow["has_dataset"] = True
         self._workflow["analysis_done"] = bool(getattr(self.main_window, "analysis_result", {}))
         self.refresh_summary()
@@ -474,7 +513,40 @@ class DashboardPage(QWidget):
             "analysis_done": bool(analysis_done),
             "ml_done": bool(ml_done),
         })
+        dataframe = getattr(self.main_window, "current_dataset", self._dataframe)
+        filename = self._filename
+        self.page4_empty_page.set_dataset(
+            dataframe if has_dataset else None,
+            filename,
+            getattr(self.main_window, "analysis_result", None),
+        )
+        self.state_stack.setCurrentWidget(self.page4_empty_page)
         self.refresh_summary()
+
+    def _current_summary_signature(self):
+        dataframe = getattr(self.main_window, "current_dataset", self._dataframe)
+        analysis = getattr(self.main_window, "analysis_result", {}) or {}
+        ml_page = getattr(self.main_window, "ml_page", None)
+        task_result = getattr(ml_page, "last_task_result", {}) if ml_page is not None else {}
+        method_result = getattr(ml_page, "last_method_result", {}) if ml_page is not None else {}
+        shape = getattr(dataframe, "shape", None)
+        return (
+            id(dataframe),
+            shape,
+            self._filename,
+            id(analysis),
+            id(task_result),
+            id(method_result),
+            tuple(sorted(self._workflow.items())),
+        )
+
+    def _duplicate_count(self, dataframe):
+        if dataframe is self._duplicate_count_source and self._duplicate_count_value is not None:
+            return self._duplicate_count_value
+        count = int(dataframe.duplicated().sum())
+        self._duplicate_count_source = dataframe
+        self._duplicate_count_value = count
+        return count
 
     def _column_types(self, dataframe):
         counts = {"id": 0, "target": 0, "numeric": 0, "categorical": 0, "text": 0}
@@ -518,8 +590,8 @@ class DashboardPage(QWidget):
         dataframe = getattr(self.main_window, "current_dataset", None)
         if dataframe is None:
             dataframe = self._dataframe
-        self.dataset_name_label.setText(self._filename if dataframe is not None else "No dataset loaded")
-        self.dataset_loaded_badge.setText("Loaded" if dataframe is not None else "Not loaded")
+        self.dataset_name_label.setText(self._filename if dataframe is not None else "Belum ada dataset yang dimuat")
+        self.dataset_loaded_badge.setText("Dimuat" if dataframe is not None else "Belum dimuat")
         if dataframe is None:
             values = {"rows": "—", "columns": "—", "size": "—", "duplicates": "—"}
             counts = {"id": 0, "target": 0, "numeric": 0, "categorical": 0, "text": 0}
@@ -529,7 +601,7 @@ class DashboardPage(QWidget):
             duplicate_info = analysis.get("duplicates", {}) if isinstance(analysis, dict) else {}
             duplicate_count = duplicate_info.get("duplicate_count") if isinstance(duplicate_info, dict) else None
             if duplicate_count is None:
-                duplicate_count = int(dataframe.duplicated().sum())
+                duplicate_count = self._duplicate_count(dataframe)
             values["duplicates"] = f"{int(duplicate_count):,}"
             file_path = getattr(self.main_window, "current_file_path", None)
             try:
@@ -554,32 +626,37 @@ class DashboardPage(QWidget):
             dataframe = self._dataframe
         result = getattr(self.main_window, "analysis_result", {}) or {}
         if dataframe is None:
-            self.quality_missing.setText("Missing values: —")
-            self.quality_outliers.setText("Outliers detected in —")
-            self.quality_duplicates.setText("Duplicate rows: —")
+            self.quality_missing.setText("Missing Values: —")
+            self.quality_outliers.setText("Outliers pada —")
+            self.quality_duplicates.setText("Baris duplikat: —")
             self.quality_most_missing.setText("—")
-            self.quality_readiness_badge.setText("Not analyzed")
+            self.quality_readiness_badge.setText("Belum dianalisis")
             return
         missing = result.get("missing_values", []) if isinstance(result, dict) else []
         missing = [item for item in missing if isinstance(item, dict)] if isinstance(missing, list) else []
         if not result:
-            self.quality_missing.setText("Run analysis to inspect missing values")
+            self.quality_missing.setText("Jalankan Analysis untuk memeriksa Missing Values")
         else:
             missing.sort(key=lambda item: float(item.get("missing_percentage", 0) or 0), reverse=True)
             missing_count = sum(int(item.get("missing_count", 0) or 0) for item in missing)
             total_cells = max(1, len(dataframe) * len(dataframe.columns))
             missing_percent = self._format_percent((missing_count / total_cells) * 100)
-            self.quality_missing.setText(f"Missing values: {missing_count:,} ({missing_percent}%)")
+            self.quality_missing.setText(f"Missing Values: {missing_count:,} ({missing_percent}%)")
         outliers = result.get("outliers", []) if isinstance(result, dict) else []
         active_outliers = [item for item in outliers if isinstance(item, dict) and int(item.get("outlier_count", 0) or 0) > 0] if isinstance(outliers, list) else []
         outlier_names = ", ".join(str(item.get("column", "")) for item in active_outliers[:3])
         if outlier_names:
-            self.quality_outliers.setText(f"Outliers detected in {outlier_names}")
+            self.quality_outliers.setText(f"Outliers ditemukan pada {outlier_names}")
         else:
-            self.quality_outliers.setText("No outliers detected" if result else "Run analysis to inspect outliers")
+            self.quality_outliers.setText("Tidak ada Outliers yang terdeteksi" if result else "Jalankan Analysis untuk memeriksa Outliers")
         duplicate_info = result.get("duplicates", {}) if isinstance(result, dict) else {}
-        duplicate_count = duplicate_info.get("duplicate_count", int(dataframe.duplicated().sum())) if isinstance(duplicate_info, dict) else int(dataframe.duplicated().sum())
-        self.quality_duplicates.setText(f"Duplicate rows: {int(duplicate_count):,}")
+        duplicate_count = (
+            duplicate_info.get("duplicate_count")
+            if isinstance(duplicate_info, dict) else None
+        )
+        if duplicate_count is None:
+            duplicate_count = self._duplicate_count(dataframe)
+        self.quality_duplicates.setText(f"Baris duplikat: {int(duplicate_count):,}")
         if result:
             most_missing = []
             for item in missing[:3]:
@@ -590,11 +667,11 @@ class DashboardPage(QWidget):
                 except (TypeError, ValueError):
                     percentage = "0.0"
                 most_missing.append(f"{item.get('column', '—')} {percentage}%")
-            self.quality_most_missing.setText(" | ".join(most_missing) if most_missing else "No missing values")
+            self.quality_most_missing.setText(" | ".join(most_missing) if most_missing else "Tidak ada Missing Values")
             self.quality_readiness_badge.setText(getattr(self, "_preview_readiness_label", "Readiness"))
         else:
-            self.quality_most_missing.setText("Run analysis to see columns")
-            self.quality_readiness_badge.setText("Not analyzed")
+            self.quality_most_missing.setText("Jalankan Analysis untuk melihat kolom")
+            self.quality_readiness_badge.setText("Belum dianalisis")
 
     def _update_ml_card(self):
         ml_page = getattr(self.main_window, "ml_page", None)
@@ -636,7 +713,7 @@ class DashboardPage(QWidget):
         if dataframe is None:
             dataframe = self._dataframe
         if dataframe is None:
-            self.key_findings_text.setText("<b>Key findings:</b> upload and analyze a dataset to see findings here.")
+            self.key_findings_text.setText("<b>Temuan utama:</b> unggah dan analisis dataset untuk melihat hasilnya di sini.")
             return
         missing = analysis.get("missing_values", []) if isinstance(analysis, dict) else []
         missing_count = sum(
@@ -651,18 +728,18 @@ class DashboardPage(QWidget):
         if isinstance(primary, dict) and primary:
             task = str(primary.get("task") or primary.get("label") or "machine learning").replace("_", " ").lower()
             model = recommendations[0] if isinstance(recommendations, list) and recommendations else {}
-            model_name = model.get("method") or model.get("name") or "a recommended model"
+            model_name = model.get("method") or model.get("name") or "model yang disarankan"
             score = model.get("score", model.get("accuracy"))
             try:
                 score_value = float(score)
                 score_text = f"{score_value * (100 if score_value <= 1 else 1):.2f}%"
             except (TypeError, ValueError):
                 score_text = "N/A"
-            finding = f"your dataset suits <b>{task}</b> ({model_name} performs best, {score_text})."
+            finding = f"dataset Anda sesuai untuk <b>{task}</b> (hasil {model_name} paling baik: {score_text})."
         else:
-            finding = "ML Intelligence has not been run yet."
+            finding = "ML Intelligence belum dijalankan."
         self.key_findings_text.setText(
-            f"<b>Key findings:</b> {finding} Fix {missing_count:,} missing values before modeling."
+            f"<b>Temuan utama:</b> {finding} Tangani {missing_count:,} Missing Values sebelum melatih model."
         )
 
     def _update_pipeline(self):
@@ -673,12 +750,12 @@ class DashboardPage(QWidget):
         )
         count = sum(bool(value) for value in completed)
         total = len(completed)
-        self.pipeline_count.setText(f"{count} of {total} steps completed")
+        self.pipeline_count.setText(f"{count} dari {total} langkah selesai")
         self.pipeline_progress.setValue(count)
         for stage, is_complete in zip(self.pipeline_stages, completed):
             stage.setProperty("state", "complete" if is_complete else "waiting")
             stage._status_label.setProperty("complete", bool(is_complete))
-            stage._status_label.setText("Done" if is_complete else "Waiting")
+            stage._status_label.setText("Selesai" if is_complete else "Menunggu")
             stage.style().unpolish(stage)
             stage.style().polish(stage)
             stage._status_label.style().unpolish(stage._status_label)
@@ -687,12 +764,19 @@ class DashboardPage(QWidget):
     def refresh_summary(self):
         if not hasattr(self, "dataset_name_label"):
             return
+        signature = self._current_summary_signature()
+        if signature == self._summary_signature:
+            return
         self._update_dataset_card()
         self._update_quality_card()
         self._update_ml_card()
         analysis = getattr(self.main_window, "analysis_result", {}) or {}
         self._set_key_findings(analysis)
         self._update_pipeline()
+        dataframe = getattr(self.main_window, "current_dataset", self._dataframe)
+        filename = self._filename
+        self.page4_empty_page.set_dataset(dataframe, filename, analysis)
+        self._summary_signature = signature
 
     def reset_dataset(self):
         self._dataframe = None
@@ -702,4 +786,6 @@ class DashboardPage(QWidget):
             "analysis_done": False,
             "ml_done": False,
         }
+        self.page4_empty_page.set_dataset(None, "", None)
+        self.state_stack.setCurrentWidget(self.page4_empty_page)
         self.refresh_summary()

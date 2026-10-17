@@ -1,5 +1,5 @@
-#define AppName "DORA"
-#define AppVersion "5.0.0"
+#define AppName "Dataset Overview Research & Assistant"
+#define AppVersion "6.0.0"
 #define AppPublisher "Metriks Studio"
 #define AppExeName "DORA.exe"
 
@@ -13,7 +13,7 @@ DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir=..\hasil_compile
-OutputBaseFilename=DORA-v{#AppVersion}-Setup
+OutputBaseFilename=Dataset-Overview-Research-Assistant-v{#AppVersion}-Setup
 SetupIconFile=..\app\ui\assets\dataset_research.ico
 UninstallDisplayIcon={app}\{#AppExeName}
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -26,7 +26,7 @@ Uninstallable=yes
 CreateAppDir=yes
 
 [Files]
-Source: "..\hasil_compile\DORA\payload\DORA\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\hasil_compile\Dataset Overview Research & Assistant v{#AppVersion}\payload\DORA\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"

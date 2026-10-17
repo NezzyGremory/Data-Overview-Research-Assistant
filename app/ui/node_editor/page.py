@@ -3034,7 +3034,7 @@ class NodeEditorPage(QWidget):
             self.validation_status.setText(f"Valid · {warning_count} peringatan")
         else:
             self.validation_status.setText("Graf valid")
-        self.validation_status.setToolTip("Double-click masalah untuk memusatkan kanvas pada node terkait.")
+        self.validation_status.setToolTip("Klik dua kali masalah untuk memusatkan kanvas pada node terkait.")
         self.result_tabs.setTabVisible(5, bool(issues))
         if show_tab and issues:
             self.result_tabs.setCurrentIndex(5)

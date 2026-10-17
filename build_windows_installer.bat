@@ -3,12 +3,13 @@ setlocal
 cd /d "%~dp0"
 
 set "PYTHON=.venv\Scripts\python.exe"
-set "APP_NAME=DORA"
-set "APP_VERSION=5.0.0"
-set "BUILD_DIR=build\installer-dora-v5"
-set "PAYLOAD_ROOT=hasil_compile\DORA\payload"
+set "APP_NAME=Dataset Overview Research & Assistant"
+set "APP_EXE_NAME=DORA.exe"
+set "APP_VERSION=6.0.0"
+set "BUILD_DIR=build\installer-dora-v6-named"
+set "PAYLOAD_ROOT=hasil_compile\Dataset Overview Research & Assistant v%APP_VERSION%\payload"
 set "PAYLOAD_DIR=%PAYLOAD_ROOT%\DORA"
-set "INSTALLER=hasil_compile\DORA-v%APP_VERSION%-Setup.exe"
+set "INSTALLER=hasil_compile\Dataset-Overview-Research-Assistant-v%APP_VERSION%-Setup.exe"
 set "ISCC="
 
 if not exist "%PYTHON%" (
@@ -22,19 +23,14 @@ if not exist "installer\DatasetResearch.iss" (
     exit /b 1
 )
 
-echo [0/4] Cleaning only the DORA v5 build output...
-if exist "%BUILD_DIR%" rmdir /s /q "%BUILD_DIR%"
+echo [0/3] Preparing an incremental build for v%APP_VERSION%...
 if exist "%PAYLOAD_DIR%" rmdir /s /q "%PAYLOAD_DIR%"
 if exist "%INSTALLER%" del /q "%INSTALLER%"
 if not exist "%BUILD_DIR%" mkdir "%BUILD_DIR%"
 if not exist "%PAYLOAD_ROOT%" mkdir "%PAYLOAD_ROOT%"
 
-echo [1/4] Creating the Windows application icon...
-"%PYTHON%" scripts\create_app_icon.py
-if errorlevel 1 exit /b 1
-
-echo [2/4] Building the optimized one-directory application...
-"%PYTHON%" -m PyInstaller --noconfirm --clean --distpath "%CD%\%PAYLOAD_ROOT%" --workpath "%CD%\%BUILD_DIR%" "Dataset Research.spec"
+echo [1/3] Building the optimized one-directory application...
+"%PYTHON%" -m PyInstaller --noconfirm --distpath "%CD%\%PAYLOAD_ROOT%" --workpath "%CD%\%BUILD_DIR%" "Dataset Research.spec"
 if errorlevel 1 (
     echo [ERROR] PyInstaller build failed.
     exit /b 1
@@ -46,13 +42,13 @@ if defined SIGN_CERT_SHA1 (
         echo [ERROR] signtool.exe is not available. The application remains unsigned.
         exit /b 1
     )
-    signtool.exe sign /sha1 "%SIGN_CERT_SHA1%" /fd SHA256 /tr "http://timestamp.digicert.com" /td SHA256 "%PAYLOAD_DIR%\%APP_NAME%.exe"
+    signtool.exe sign /sha1 "%SIGN_CERT_SHA1%" /fd SHA256 /tr "http://timestamp.digicert.com" /td SHA256 "%PAYLOAD_DIR%\%APP_EXE_NAME%"
     if errorlevel 1 exit /b 1
-    signtool.exe verify /pa /v "%PAYLOAD_DIR%\%APP_NAME%.exe"
+    signtool.exe verify /pa /v "%PAYLOAD_DIR%\%APP_EXE_NAME%"
     if errorlevel 1 exit /b 1
 )
 
-echo [3/4] Locating Inno Setup compiler...
+echo [2/3] Locating Inno Setup compiler...
 where ISCC.exe >nul 2>nul
 if not errorlevel 1 set "ISCC=ISCC.exe"
 if not defined ISCC if exist "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" set "ISCC=%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe"
@@ -65,7 +61,7 @@ if not defined ISCC (
     exit /b 1
 )
 
-echo [4/4] Compiling the v%APP_VERSION% installer...
+echo [3/3] Compiling the installer with Inno Setup...
 "%ISCC%" "installer\DatasetResearch.iss"
 if errorlevel 1 (
     echo [ERROR] Inno Setup compilation failed.
