@@ -69,14 +69,14 @@ class DashboardPage(QWidget):
         canvas.setObjectName("overviewCanvas")
         layout = QVBoxLayout(canvas)
         self._canvas_layout = layout
-        layout.setContentsMargins(36, 4, 42, 24)
+        layout.setContentsMargins(36, 4, 40, 24)
         layout.setSpacing(0)
 
         header = QWidget()
         header.setObjectName("overviewHeader")
         header.setFixedHeight(66)
         header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(0, 0, 3, 0)
+        header_layout.setContentsMargins(0, 0, 4, 0)
         header_layout.setSpacing(12)
         title_block = QVBoxLayout()
         title_block.setContentsMargins(0, 0, 0, 0)
@@ -104,8 +104,8 @@ class DashboardPage(QWidget):
         self.key_findings.setFixedHeight(88)
         apply_card_shadow(self.key_findings)
         findings_layout = QHBoxLayout(self.key_findings)
-        findings_layout.setContentsMargins(31, 12, 20, 12)
-        findings_layout.setSpacing(14)
+        findings_layout.setContentsMargins(32, 12, 20, 12)
+        findings_layout.setSpacing(16)
         info_icon = QLabel()
         info_icon.setObjectName("overviewInfoIcon")
         info_path = _asset_path("assets/icons/about.svg")
@@ -123,15 +123,15 @@ class DashboardPage(QWidget):
         self.key_findings_text.setTextFormat(Qt.RichText)
         findings_layout.addWidget(self.key_findings_text, 1, Qt.AlignVCenter)
         layout.addWidget(self.key_findings)
-        layout.addSpacing(7)
+        layout.addSpacing(8)
 
         self.pipeline_card = QFrame()
         self.pipeline_card.setObjectName("overviewPipelineCard")
         self.pipeline_card.setMinimumHeight(185)
         apply_card_shadow(self.pipeline_card)
         pipeline_layout = QVBoxLayout(self.pipeline_card)
-        pipeline_layout.setContentsMargins(18, 14, 18, 12)
-        pipeline_layout.setSpacing(21)
+        pipeline_layout.setContentsMargins(16, 16, 16, 12)
+        pipeline_layout.setSpacing(20)
         pipeline_layout.setAlignment(Qt.AlignTop)
         pipeline_header = QHBoxLayout()
         pipeline_header.setContentsMargins(0, 0, 0, 0)
@@ -164,8 +164,8 @@ class DashboardPage(QWidget):
         self.pipeline_stages[-1].setProperty("kind", "report")
         self.pipeline_stage_layout = QGridLayout()
         self.pipeline_stage_layout.setContentsMargins(0, 0, 0, 0)
-        self.pipeline_stage_layout.setHorizontalSpacing(9)
-        self.pipeline_stage_layout.setVerticalSpacing(9)
+        self.pipeline_stage_layout.setHorizontalSpacing(8)
+        self.pipeline_stage_layout.setVerticalSpacing(8)
         pipeline_layout.addLayout(self.pipeline_stage_layout)
         layout.addWidget(self.pipeline_card)
         layout.addSpacing(24)
@@ -177,7 +177,7 @@ class DashboardPage(QWidget):
         ]
         self.summary_cards_layout = QGridLayout()
         self.summary_cards_layout.setContentsMargins(0, 0, 0, 0)
-        self.summary_cards_layout.setHorizontalSpacing(22)
+        self.summary_cards_layout.setHorizontalSpacing(24)
         self.summary_cards_layout.setVerticalSpacing(16)
         layout.addLayout(self.summary_cards_layout)
         layout.addStretch(1)
@@ -205,7 +205,7 @@ class DashboardPage(QWidget):
         stage.setProperty("state", "waiting")
         stage.setMinimumHeight(81)
         row = QHBoxLayout(stage)
-        row.setContentsMargins(8, 9, 6, 8)
+        row.setContentsMargins(8, 8, 8, 8)
         row.setSpacing(8)
         number_label = QLabel(f"{number:02d}")
         number_label.setObjectName("overviewStageNumber")
@@ -232,7 +232,7 @@ class DashboardPage(QWidget):
         card.setObjectName(object_name)
         card.setMinimumHeight(258)
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(18, 14, 18, 14)
+        layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(8)
         apply_card_shadow(card)
         return card, layout
@@ -282,12 +282,12 @@ class DashboardPage(QWidget):
         layout.addWidget(self.dataset_name_label)
         self.dataset_metric_values = {}
         metrics = QHBoxLayout()
-        metrics.setSpacing(7)
+        metrics.setSpacing(8)
         for key, title in (("rows", "BARIS"), ("columns", "KOLOM"), ("size", "UKURAN"), ("duplicates", "DUPLIKAT")):
             tile = QFrame()
             tile.setObjectName("overviewDatasetMetric")
             tile_layout = QVBoxLayout(tile)
-            tile_layout.setContentsMargins(7, 4, 4, 3)
+            tile_layout.setContentsMargins(8, 4, 4, 4)
             tile_layout.setSpacing(0)
             caption = QLabel(title)
             caption.setObjectName("overviewMetricTitle")
@@ -322,7 +322,7 @@ class DashboardPage(QWidget):
         layout.addWidget(self.column_type_bar)
         self.column_type_legend = QHBoxLayout()
         self.column_type_legend.setContentsMargins(0, 0, 0, 0)
-        self.column_type_legend.setSpacing(5)
+        self.column_type_legend.setSpacing(4)
         for label in self.column_type_legend_labels:
             self.column_type_legend.addWidget(label)
         self.column_type_legend.addStretch(1)
@@ -372,7 +372,7 @@ class DashboardPage(QWidget):
         layout.addWidget(heading)
         self.ml_tags = QHBoxLayout()
         self.ml_tags.setContentsMargins(0, 0, 0, 0)
-        self.ml_tags.setSpacing(7)
+        self.ml_tags.setSpacing(8)
         self.ml_task_badge = QLabel("—")
         self.ml_task_badge.setObjectName("overviewMLTaskBadge")
         self.ml_confidence_badge = QLabel("—")
@@ -448,7 +448,7 @@ class DashboardPage(QWidget):
             self._reflow_pipeline(pipeline_columns)
         compact = logical_width < 1000
         self._canvas_layout.setContentsMargins(
-            px(18 if compact else 36), px(4), px(18 if compact else 42),
+            px(16 if compact else 36), px(4), px(16 if compact else 40),
             px(20 if compact else 24),
         )
         if logical_width < 1100:

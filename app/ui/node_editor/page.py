@@ -18,7 +18,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from PySide6.QtCore import QMimeData, QObject, QPointF, QRectF, QStandardPaths, Qt, QThread, QTimer, Signal, Slot
+from PySide6.QtCore import (
+    QMimeData, QObject, QPointF, QRectF, QRunnable, QStandardPaths, QThread,
+    QThreadPool, QTimer, Qt, Signal, Slot,
+)
 from PySide6.QtGui import QBrush, QColor, QDrag, QPainter, QPainterPath, QPen, QPolygonF, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout, QFrame, QGraphicsEllipseItem,
@@ -396,6 +399,7 @@ class GraphView(QGraphicsView):
         self._connecting = False
         self._positions_before_drag = None
         self.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
+        self.setCacheMode(QGraphicsView.CacheBackground)
         self.setDragMode(QGraphicsView.RubberBandDrag)
         self.setBackgroundBrush(QColor("#F1F7FF"))
         self.setMinimumWidth(0)
@@ -849,6 +853,60 @@ class _RunWorker(QObject):
                 raise
 
 
+class _DatasetAnalysisSignals(QObject):
+    ready = Signal(int, object, object, object, object, object, object)
+    failed = Signal(int, str)
+    finished = Signal(int)
+
+
+class _DatasetAnalysisWorker(QRunnable):
+    def __init__(self, generation, dataframe, target_column, dataset_path=None, loader=None):
+        super().__init__()
+        self.generation = generation
+        self.dataframe = dataframe
+        self.target_column = target_column
+        self.dataset_path = dataset_path
+        self.loader = loader
+        self.signals = _DatasetAnalysisSignals()
+
+    @Slot()
+    def run(self):
+        try:
+            from app.ml.graph.task_detector import detect_task, generate_template_graphs
+
+            dataframe = self.dataframe
+            if dataframe is None:
+                if self.loader is None or not self.dataset_path:
+                    raise RuntimeError("Loader dataset aplikasi tidak tersedia.")
+                dataframe = self.loader.load(self.dataset_path)
+            detection = detect_task(
+                dataframe,
+                target_column=self.target_column,
+                auto_guess_target=True,
+            )
+            generated_templates = generate_template_graphs(
+                dataframe,
+                detection.get("target_column"),
+            )
+            unique_counts = {
+                column: int(dataframe[column].nunique(dropna=True))
+                for column in dataframe.columns
+            }
+            self.signals.ready.emit(
+                self.generation,
+                dataframe,
+                self.target_column,
+                self.dataset_path,
+                detection,
+                generated_templates,
+                unique_counts,
+            )
+        except Exception as error:
+            self.signals.failed.emit(self.generation, str(error))
+        finally:
+            self.signals.finished.emit(self.generation)
+
+
 def _restore_graph(graph_data):
     graph = GraphEngine()
     for raw in graph_data.get("nodes", []):
@@ -884,6 +942,13 @@ class NodeEditorPage(QWidget):
         self._graph_dataset = None
         self._graph_dataset_path = ""
         self._graph_dataset_error = ""
+        self._dataset_sync_generation = 0
+        self._dataset_sync_key = None
+        self._dataset_analysis_worker = None
+        self._dataset_analysis_active_key = None
+        self._dataset_analysis_active_generation = None
+        self._dataset_analysis_pending = None
+        self._dataset_analysis_cache = None
         self.thread = None
         self.worker = None
         self._is_running = False
@@ -1500,19 +1565,6 @@ class NodeEditorPage(QWidget):
     def _current_dataset(self):
         if self._dataset_scope != "graph":
             return getattr(self.main_window, "current_dataset", None)
-        if self._graph_dataset is None and self._graph_dataset_path and not self._graph_dataset_error:
-            path = Path(self._graph_dataset_path)
-            loader = getattr(self.main_window, "loader", None)
-            if not path.is_file():
-                self._graph_dataset_error = f"File dataset tidak ditemukan: {path}"
-            elif loader is None:
-                self._graph_dataset_error = "Loader dataset aplikasi tidak tersedia."
-            else:
-                try:
-                    self._graph_dataset = loader.load(str(path))
-                    self._graph_dataset_error = ""
-                except Exception as exc:
-                    self._graph_dataset_error = str(exc)
         return self._graph_dataset
 
     def _current_dataset_name(self):
@@ -1542,8 +1594,6 @@ class NodeEditorPage(QWidget):
         index = self.dataset_scope_combo.findData(self._dataset_scope)
         self.dataset_scope_combo.setCurrentIndex(max(0, index))
         self.dataset_scope_combo.blockSignals(False)
-        if self._dataset_scope == "graph":
-            self._current_dataset()
 
     def _schedule_history_snapshot(self):
         if self._history_suspended:
@@ -1841,8 +1891,6 @@ class NodeEditorPage(QWidget):
         self._dataset_scope = scope
         self._dataset_scope_explicit = True
         self._active_dataset_token = None
-        if scope == "graph":
-            self._current_dataset()
         self.sync_dataset()
         self._mark_graph_dirty()
 
@@ -1855,17 +1903,8 @@ class NodeEditorPage(QWidget):
         )
         if not path:
             return
-        loader = getattr(self.main_window, "loader", None)
-        if loader is None:
-            QMessageBox.critical(self, "Dataset tidak dapat dimuat", "Loader dataset aplikasi tidak tersedia.")
-            return
-        try:
-            dataframe = loader.load(path)
-        except Exception as exc:
-            QMessageBox.critical(self, "Dataset tidak dapat dimuat", str(exc))
-            return
-        self._graph_dataset = dataframe
         self._graph_dataset_path = str(Path(path).resolve())
+        self._graph_dataset = None
         self._graph_dataset_error = ""
         if self._dataset_scope != "graph":
             self._dataset_scope = "graph"
@@ -1897,7 +1936,28 @@ class NodeEditorPage(QWidget):
 
     def sync_dataset(self):
         dataframe = self._current_dataset()
-        if dataframe is None:
+        dataset_path = None
+        loader = None
+        if (
+            self._dataset_scope == "graph"
+            and dataframe is None
+            and self._graph_dataset_path
+            and not self._graph_dataset_error
+        ):
+            candidate = Path(self._graph_dataset_path)
+            loader = getattr(self.main_window, "loader", None)
+            if not candidate.is_file():
+                self._graph_dataset_error = f"File dataset tidak ditemukan: {candidate}"
+            elif loader is None:
+                self._graph_dataset_error = "Loader dataset aplikasi tidak tersedia."
+            else:
+                dataset_path = str(candidate.resolve())
+
+        if dataframe is None and dataset_path is None:
+            self._dataset_sync_generation += 1
+            self._dataset_sync_key = None
+            self._dataset_analysis_pending = None
+            self._dataset_analysis_cache = None
             self._active_dataset_token = None
             self._template_key = None
             if self._dataset_scope == "graph":
@@ -1934,9 +1994,9 @@ class NodeEditorPage(QWidget):
             self._refresh_profile_view(None)
             return
 
-        rows, columns = dataframe.shape
+        rows, columns = dataframe.shape if dataframe is not None else (0, 0)
         previous_token = self._active_dataset_token
-        self._active_dataset_token = id(dataframe)
+        self._active_dataset_token = id(dataframe) if dataframe is not None else None
         if previous_token is not None and previous_token != self._active_dataset_token:
             self.engine._cache.clear()
             for node_id, node in self.engine.nodes.items():
@@ -1950,11 +2010,137 @@ class NodeEditorPage(QWidget):
                 target_col = node.parameters["target"]
                 break
 
-        # 2. Automated Task Detection
-        from app.ml.graph.task_detector import detect_task, generate_template_graphs
-        detection = detect_task(dataframe, target_column=target_col, auto_guess_target=True)
+        sync_key = (
+            ("path", dataset_path, target_col)
+            if dataset_path is not None
+            else (id(dataframe), target_col)
+        )
+        if sync_key != self._dataset_sync_key:
+            self._dataset_sync_generation += 1
+            self._dataset_sync_key = sync_key
+        generation = self._dataset_sync_generation
+
+        cached = self._dataset_analysis_cache
+        if cached is not None and cached["key"] == sync_key:
+            self._apply_dataset_analysis(
+                generation,
+                dataframe,
+                target_col,
+                cached["detection"],
+                cached["templates"],
+                cached["unique_counts"],
+            )
+            return
+
+        request = (generation, dataframe, target_col, sync_key, dataset_path, loader)
+        active_key = self._dataset_analysis_active_key
+        if self._dataset_analysis_worker is not None:
+            if (
+                active_key != sync_key
+                or self._dataset_analysis_active_generation != generation
+            ):
+                self._dataset_analysis_pending = request
+            if dataset_path is not None:
+                self.dataset_status.setText("Membaca dataset graf...")
+            else:
+                self.dataset_status.setText(
+                    f"Dataset sedang dianalisis | {rows:,} baris x {columns:,} kolom"
+                )
+            self.dataset_task_status.setText("Mendeteksi task...")
+            return
+
+        self._start_dataset_analysis(request)
+
+    def _start_dataset_analysis(self, request):
+        generation, dataframe, target_column, sync_key, dataset_path, loader = request
+        worker = _DatasetAnalysisWorker(
+            generation, dataframe, target_column, dataset_path, loader
+        )
+        self._dataset_analysis_worker = worker
+        self._dataset_analysis_active_key = sync_key
+        self._dataset_analysis_active_generation = generation
+        if dataframe is None:
+            self.dataset_status.setText("Membaca dataset graf...")
+        else:
+            rows, columns = dataframe.shape
+            source_name = "Dataset graf" if self._dataset_scope == "graph" else "Workspace"
+            self.dataset_status.setText(
+                f"{source_name} sedang dianalisis | {rows:,} baris x {columns:,} kolom"
+            )
+        self.dataset_task_status.setText("Mendeteksi task...")
+        worker.signals.ready.connect(self._on_dataset_analysis_ready)
+        worker.signals.failed.connect(self._on_dataset_analysis_failed)
+        worker.signals.finished.connect(self._on_dataset_analysis_finished)
+        QThreadPool.globalInstance().start(worker)
+
+    @Slot(int, object, object, object, object, object, object)
+    def _on_dataset_analysis_ready(
+        self, generation, dataframe, target_column, dataset_path,
+        detection, templates, unique_counts,
+    ):
+        request_key = (
+            ("path", dataset_path, target_column)
+            if dataset_path is not None
+            else (id(dataframe), target_column)
+        )
+        if generation != self._dataset_sync_generation or request_key != self._dataset_sync_key:
+            return
+        if dataset_path is not None:
+            if self._dataset_scope != "graph":
+                return
+            if str(Path(self._graph_dataset_path).resolve()) != dataset_path:
+                return
+            previous_token = self._active_dataset_token
+            self._graph_dataset = dataframe
+            self._graph_dataset_error = ""
+            self._active_dataset_token = id(dataframe)
+            if previous_token is not None and previous_token != self._active_dataset_token:
+                self.engine._cache.clear()
+                for node_id, node in self.engine.nodes.items():
+                    node.status = "menunggu"
+                    if node_id in self.items:
+                        self.items[node_id].set_status(node.status)
+        sync_key = (id(dataframe), target_column)
+        self._dataset_sync_key = sync_key
+        self._dataset_analysis_cache = {
+            "key": sync_key,
+            "detection": detection,
+            "templates": templates,
+            "unique_counts": unique_counts,
+        }
+        self._apply_dataset_analysis(
+            generation, dataframe, target_column, detection, templates, unique_counts
+        )
+
+    @Slot(int, str)
+    def _on_dataset_analysis_failed(self, generation, message):
+        if generation != self._dataset_sync_generation:
+            return
+        if self._dataset_scope == "graph" and self._graph_dataset is None:
+            self._graph_dataset_error = message
+        self.dataset_status.setText("Analisis dataset gagal")
+        self.dataset_status.setToolTip(message)
+        self.dataset_task_status.setText("Task gagal dideteksi")
+        self.dataset_task_status.setToolTip(message)
+
+    @Slot(int)
+    def _on_dataset_analysis_finished(self, generation):
+        self._dataset_analysis_worker = None
+        self._dataset_analysis_active_key = None
+        self._dataset_analysis_active_generation = None
+        pending = self._dataset_analysis_pending
+        self._dataset_analysis_pending = None
+        if pending is not None and pending[0] == self._dataset_sync_generation:
+            self._start_dataset_analysis(pending)
+
+    def _apply_dataset_analysis(
+        self, generation, dataframe, target_column, detection, generated_templates, unique_counts
+    ):
+        if generation != self._dataset_sync_generation:
+            return
+        rows, columns = dataframe.shape
         self.detected_task = detection
-        self._refresh_profile_view(dataframe)
+        self._refresh_profile_view(dataframe, unique_counts)
         self.result_tabs.setTabVisible(self.profile_tab_index, True)
         task_type = detection["task_type"]
         detected_target = detection.get("target_column")
@@ -1966,7 +2152,6 @@ class NodeEditorPage(QWidget):
             "clustering": "Pengelompokan (Clustering)",
             "time_series": "Rangkaian Waktu",
         }.get(task_type, task_type.capitalize())
-        target_desc = f" ({detected_target})" if detected_target else ""
         source_name = "Dataset graf" if self._dataset_scope == "graph" else "Workspace"
         self.dataset_status.setText(f"{source_name} | {rows:,} baris x {columns:,} kolom")
         self.dataset_task_status.setText(f"Task: {task_label}")
@@ -2001,7 +2186,7 @@ class NodeEditorPage(QWidget):
         if hasattr(self, "template_combo") and template_key != getattr(self, "_template_key", None):
             self._template_key = template_key
             self.current_templates = self._build_dataset_templates(
-                dataframe, detection, generate_template_graphs(dataframe, detected_target)
+                dataframe, detection, generated_templates
             )
             self.template_combo.blockSignals(True)
             self.template_combo.clear()
@@ -2385,7 +2570,7 @@ class NodeEditorPage(QWidget):
             ))
         return templates
 
-    def _refresh_profile_view(self, dataframe):
+    def _refresh_profile_view(self, dataframe, unique_counts=None):
         while self.profile_summary_layout.count():
             item = self.profile_summary_layout.takeAt(0)
             if item.widget() is not None:
@@ -2413,6 +2598,7 @@ class NodeEditorPage(QWidget):
 
         column_types = profile.get("column_types", {})
         missing_by_column = profile.get("missing_percent", {})
+        unique_counts = unique_counts or {}
         type_labels = {
             "numeric": "Numerik",
             "categorical": "Kategori",
@@ -2423,7 +2609,7 @@ class NodeEditorPage(QWidget):
         self.profile_table.setHorizontalHeaderLabels(["Kolom", "Jenis data", "Nilai unik", "Kosong"])
         self.profile_table.setRowCount(column_count)
         for row, column in enumerate(dataframe.columns):
-            unique_count = int(dataframe[column].nunique(dropna=True))
+            unique_count = int(unique_counts.get(column, 0))
             missing = float(missing_by_column.get(column, 0.0))
             values = (
                 str(column),

@@ -22,8 +22,10 @@ from PySide6.QtCore import (
     QProcess,
     QProcessEnvironment,
     QPropertyAnimation,
+    QRect,
     QRegularExpression,
     Signal,
+    Slot,
     QStandardPaths,
     QTimer,
     Qt,
@@ -130,9 +132,11 @@ class PythonCodeEditor(QPlainTextEdit):
         digits = max(2, len(str(max(1, self.blockCount()))))
         return 12 + self.fontMetrics().horizontalAdvance("9") * digits
 
+    @Slot(int)
     def _update_line_number_width(self, *_args):
         self.setViewportMargins(self.line_number_area_width(), 0, 0, 0)
 
+    @Slot(QRect, int)
     def _update_line_number_area(self, rect, dy: int):
         if dy:
             self.line_number_area.scroll(0, dy)
@@ -166,6 +170,7 @@ class PythonCodeEditor(QPlainTextEdit):
             bottom = top + self.blockBoundingRect(block).height()
             block_number += 1
 
+    @Slot()
     def _highlight_current_line(self):
         selections = []
         if not self.isReadOnly():
@@ -1504,6 +1509,7 @@ plt.tight_layout()
             )
         self._update_cell_controls()
 
+    @Slot()
     def _update_cursor_status(self):
         cursor = self.code_editor.textCursor()
         self.cursor_position_label.setText(
@@ -1544,6 +1550,7 @@ plt.tight_layout()
         self.template_combo.blockSignals(False)
         return target
 
+    @Slot()
     def _save_current_code(self):
         if 0 <= self._selected_step < len(self._steps):
             step = self._steps[self._selected_step]
@@ -1569,6 +1576,7 @@ plt.tight_layout()
         if not self._initializing and hasattr(self, "_autosave_timer"):
             self._autosave_timer.start()
 
+    @Slot()
     def _save_autosave_state(self):
         if not hasattr(self, "code_editor"):
             return True
@@ -1598,6 +1606,7 @@ plt.tight_layout()
             return False
         return True
 
+    @Slot()
     def _save_autosave_on_exit(self):
         self._autosave_timer.stop()
         return self._save_autosave_state()
@@ -1715,9 +1724,11 @@ plt.tight_layout()
         self.step_list.setCurrentRow(index)
         self._mark_notebook_dirty()
 
+    @Slot()
     def _add_markdown_cell(self):
         self._insert_cell("markdown")
 
+    @Slot(int)
     def _cell_type_changed(self, index: int):
         if not 0 <= self._selected_step < len(self._steps):
             return
@@ -1744,6 +1755,7 @@ plt.tight_layout()
         self.step_list.setCurrentRow(self._selected_step)
         self._mark_notebook_dirty()
 
+    @Slot()
     def _duplicate_step(self):
         if not 0 <= self._selected_step < len(self._steps):
             return
@@ -1763,6 +1775,7 @@ plt.tight_layout()
         self.step_list.setCurrentRow(index)
         self._mark_notebook_dirty()
 
+    @Slot()
     def _delete_step(self):
         if len(self._steps) <= 1 or not 0 <= self._selected_step < len(self._steps):
             return
@@ -1783,6 +1796,7 @@ plt.tight_layout()
         self.step_list.setCurrentRow(destination)
         self._mark_notebook_dirty()
 
+    @Slot(int)
     def _select_step(self, index: int):
         self._save_current_code()
         if not 0 <= index < len(self._steps):
@@ -1870,6 +1884,7 @@ plt.tight_layout()
             step.get("cell_type", "code") == "code" for step in self._steps
         ) and not self._kernel_busy)
 
+    @Slot(str)
     def _category_changed(self, category: str):
         if not 0 <= self._selected_step < len(self._steps) or self._steps[self._selected_step].get("cell_type", "code") != "code":
             return
@@ -1888,6 +1903,7 @@ plt.tight_layout()
         step["notebook_outputs"] = None
         self._mark_notebook_dirty()
 
+    @Slot(str)
     def _apply_template(self, template_name: str):
         if not 0 <= self._selected_step < len(self._steps) or self._steps[self._selected_step].get("cell_type", "code") != "code":
             return
@@ -1905,6 +1921,7 @@ plt.tight_layout()
         step["notebook_outputs"] = None
         self._mark_notebook_dirty()
 
+    @Slot()
     def _reset_code(self):
         if not 0 <= self._selected_step < len(self._steps) or self._steps[self._selected_step].get("cell_type", "code") != "code":
             return
@@ -1929,6 +1946,7 @@ plt.tight_layout()
         self.target_combo.setVisible(visible)
         self.target_combo.setEnabled(self._dataframe is not None and self.target_combo.count() > 0)
 
+    @Slot(str)
     def _target_changed(self, target: str):
         if not target or not 0 <= self._selected_step < len(self._steps) or self._steps[self._selected_step].get("cell_type", "code") != "code":
             return
@@ -1953,6 +1971,7 @@ plt.tight_layout()
                 return by_normalized[candidate]
         return columns[-1] if columns else ""
 
+    @Slot()
     def _copy_code(self):
         QApplication.clipboard().setText(self.code_editor.toPlainText())
         self.execution_note.setText("Kode berhasil disalin ke clipboard.")
@@ -2039,12 +2058,14 @@ plt.tight_layout()
         self._run_animation.start()
         self._ensure_environment(self._start_kernel)
 
+    @Slot()
     def _execute_code(self):
         if self._selected_step < 0 or self._steps[self._selected_step].get("cell_type", "code") != "code":
             self.execution_note.setText("Pilih bagian analisis yang akan dijalankan.")
             return
         self._queue_execution([self._selected_step])
 
+    @Slot()
     def _execute_code_and_advance(self):
         self._advance_after_run = True
         self._execute_code()
@@ -2057,6 +2078,7 @@ plt.tight_layout()
         else:
             self._insert_cell("code", len(self._steps))
 
+    @Slot()
     def _run_all(self):
         self._save_current_code()
         self._queue_execution(list(range(len(self._steps))))
@@ -2166,6 +2188,7 @@ plt.tight_layout()
         }
         process.write((json.dumps(request, ensure_ascii=False) + "\n").encode("utf-8"))
 
+    @Slot()
     def _read_kernel_output(self):
         process = self._kernel_process
         if process is None:
@@ -2270,6 +2293,7 @@ plt.tight_layout()
         else:
             self._finish_execution(exit_code == 0 and not self._queue_had_error)
 
+    @Slot()
     def _on_run_timeout(self):
         index = self._running_step_index
         if 0 <= index < len(self._steps):
@@ -2284,6 +2308,7 @@ plt.tight_layout()
         self._stop_kernel()
         self._finish_execution(False)
 
+    @Slot()
     def _terminate_run(self):
         if not self._kernel_busy and not self._execution_queue:
             return
@@ -2315,6 +2340,7 @@ plt.tight_layout()
             process.deleteLater()
         self._remove_dataset_snapshot()
 
+    @Slot()
     def _restart_kernel(self):
         if self._kernel_busy or self._execution_queue:
             self.execution_note.setText("Hentikan proses yang berjalan sebelum mereset sesi Python.")
@@ -2385,6 +2411,7 @@ plt.tight_layout()
             return []
         return list(dict.fromkeys(parts))
 
+    @Slot()
     def _install_library(self):
         packages = self._parse_package_specs(self.library_input.text())
         if not packages:
@@ -2441,6 +2468,7 @@ plt.tight_layout()
         process.errorOccurred.connect(self._package_error)
         process.start()
 
+    @Slot()
     def _read_package_output(self):
         process = self._package_process
         if process is None:
@@ -2448,12 +2476,14 @@ plt.tight_layout()
         output = bytes(process.readAllStandardOutput()).decode("utf-8", errors="replace")
         self._append_library_log(output)
 
+    @Slot(QProcess.ProcessError)
     def _package_error(self, error):
         if self._package_process is None or error != QProcess.FailedToStart:
             return
         self._append_library_log("pip gagal dijalankan di lingkungan proyek.\n")
         self._package_finished(-1, QProcess.CrashExit)
 
+    @Slot(int, QProcess.ExitStatus)
     def _package_finished(self, exit_code: int, _exit_status):
         process = self._package_process
         if process is None:
@@ -2616,6 +2646,7 @@ plt.tight_layout()
             "nbformat_minor": 5,
         }
 
+    @Slot()
     def _save_notebook(self):
         default_notebook = (
             self._project_workspace / "analisis.ipynb"
@@ -2646,6 +2677,7 @@ plt.tight_layout()
         self._save_autosave_state()
         self.notebook_status_label.setText(f"Tersimpan: {path.name}")
 
+    @Slot()
     def _open_notebook(self):
         if self._kernel_busy or self._execution_queue:
             self.execution_note.setText("Hentikan proses sebelum membuka notebook lain.")
@@ -2782,6 +2814,7 @@ plt.tight_layout()
         self.library_status.setText(f"{len(steps)} bagian dimuat dari {Path(filename).name}.")
         self._schedule_autosave()
 
+    @Slot()
     def _terminate_process_on_exit(self):
         self._run_timeout.stop()
         self._stop_kernel()
@@ -2790,6 +2823,7 @@ plt.tight_layout()
                 process.kill()
                 process.waitForFinished(1500)
 
+    @Slot()
     def _add_step(self):
         self._insert_cell("code")
 
@@ -2839,6 +2873,7 @@ plt.tight_layout()
                 "Pilih dataset Workspace atau file notebook melalui menu."
             )
 
+    @Slot(int)
     def _dataset_scope_changed(self, index: int):
         scope = self.dataset_scope_combo.itemData(index)
         if scope == self._dataset_scope:
@@ -2859,6 +2894,7 @@ plt.tight_layout()
             self._apply_dataset(self._workspace_dataframe, self._workspace_dataset_name)
             self._schedule_autosave()
 
+    @Slot()
     def _choose_notebook_dataset(self):
         loader = getattr(self._main_window, "loader", None)
         if loader is None:

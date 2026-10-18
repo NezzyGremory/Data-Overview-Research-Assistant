@@ -8735,7 +8735,9 @@ class ResearchPage(QWidget):
             + ("  |  ".join(provider_parts) if provider_parts else "Status provider belum tersedia.")
         )
         self._populate_papers(papers)
-        self.main_window.papers_tool_page.update_from_result(result)
+        papers_tool_page = getattr(self.main_window, "papers_tool_page", None)
+        if papers_tool_page is not None:
+            papers_tool_page.update_from_result(result)
     def _open_ucl_discovery_search(self):
         base_url = "https://discovery.ucl.ac.uk/cgi/search/simple"
         if self.ucl_search_query:
@@ -13433,7 +13435,7 @@ class MainWindow(QMainWindow):
         # widget is styled as soon as it is created.
         self._load_stylesheet()
 
-        self.setWindowTitle("DORA")
+        self.setWindowTitle("Data Overview Research & Assistant v6")
         app_icon = _resource_path("assets/dataset_research.ico")
         if app_icon.exists():
             self.setWindowIcon(QIcon(str(app_icon)))
@@ -13565,7 +13567,7 @@ class MainWindow(QMainWindow):
         except Exception as error:
             self._shutdown_pending = False
             self._shutdown_idle_checks = 0
-            self.setWindowTitle("DORA")
+            self.setWindowTitle("Data Overview Research & Assistant v6")
             if self.centralWidget() is not None:
                 self.centralWidget().setEnabled(True)
             self.statusBar().clearMessage()
@@ -13627,7 +13629,7 @@ class MainWindow(QMainWindow):
 
         self._shutdown_pending = True
         self._shutdown_idle_checks = 0
-        self.setWindowTitle("Dataset Research — Menutup sesi")
+        self.setWindowTitle("Data Overview Research & Assistant v6 — Menutup sesi")
         if self.centralWidget() is not None:
             self.centralWidget().setEnabled(False)
         self.statusBar().showMessage(
@@ -14978,6 +14980,7 @@ class MainWindow(QMainWindow):
                 row.setSpacing(self.scale_manager.px(8) if page4_shell_mode else analysis_px(8 if analysis_mode else 25))
                 icon = button.findChild(QLabel, "navIcon")
                 if icon is not None:
+                    icon.setAttribute(Qt.WA_TransparentForMouseEvents, page4_shell_mode)
                     icon_size = self.scale_manager.px(20) if page4_shell_mode else analysis_px(30)
                     icon.setFixedSize(icon_size, icon_size)
                     icon_path = button.property("iconPath")
@@ -14997,6 +15000,9 @@ class MainWindow(QMainWindow):
                             )
                             icon.setProperty("renderedTint", active_tint)
                             icon.setProperty("renderedIconSize", icon_size)
+                text_label = button.findChild(QLabel, "navText")
+                if text_label is not None:
+                    text_label.setAttribute(Qt.WA_TransparentForMouseEvents, page4_shell_mode)
         if page4_shell_mode:
             for section_label in self.sidebar_section_labels:
                 section_label.setFixedHeight(self.scale_manager.px(24))
@@ -15134,9 +15140,9 @@ class MainWindow(QMainWindow):
                 max(0, self.topbar.width() - self.scale_manager.px(25)),
                 self.scale_manager.px(130),
             )
-        if analysis_mode and hasattr(self, "analysis_page"):
-            page = self.analysis_page
-            page._refresh_analysis_layout(page.width())
+        analysis_page = getattr(self, "analysis_page", None)
+        if analysis_mode and analysis_page is not None:
+            analysis_page._refresh_analysis_layout(analysis_page.width())
             QTimer.singleShot(0, self._apply_analysis_frame_geometry)
 
     def _reorder_page4_workspace_navigation(self, page4_mode: bool):
@@ -15286,7 +15292,11 @@ class MainWindow(QMainWindow):
 
         from app.ui.editor_analysis_page import EditorAnalysisPage
 
-        page = EditorAnalysisPage(self)
+        # Build the Python QWidget wrapper before assigning its parent. Passing
+        # MainWindow into QWidget.__init__ can make PySide resolve this Python
+        # subclass as plain QWidget, dropping its Python slot metaobject.
+        page = EditorAnalysisPage()
+        page._main_window = self
         page.set_dataset(
             self.current_dataset,
             self._current_filename() if self.current_dataset is not None else "",

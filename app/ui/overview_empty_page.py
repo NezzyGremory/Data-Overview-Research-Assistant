@@ -120,7 +120,7 @@ class Page4OverviewEmptyPage(QWidget):
         self.container.setObjectName("overviewEmptyContainer")
         layout = QVBoxLayout(self.container)
         self.content_layout = layout
-        layout.setContentsMargins(17, 10, 18, 14)
+        layout.setContentsMargins(16, 8, 16, 16)
         layout.setSpacing(12)
         layout.addWidget(self._build_hero())
         layout.addWidget(self._build_dataset_welcome())
@@ -192,7 +192,7 @@ class Page4OverviewEmptyPage(QWidget):
         hero.setMinimumHeight(220)
         layout = QVBoxLayout(hero)
         self.hero_layout = layout
-        layout.setContentsMargins(28, 21, 28, 24)
+        layout.setContentsMargins(28, 20, 28, 24)
         layout.setSpacing(12)
         badge = QLabel("Selamat Datang di DORA")
         badge.setObjectName("overviewEmptyWelcomeBadge")
@@ -216,7 +216,7 @@ class Page4OverviewEmptyPage(QWidget):
         layout.addSpacing(8)
         actions = QHBoxLayout()
         self.hero_actions = actions
-        actions.setSpacing(14)
+        actions.setSpacing(16)
         self.hero_search_button = self._button(
             "Cari Dataset Sekarang", "figma-overview-search.svg", primary=True,
             callback=self.main_window.open_dataset_search_page,
@@ -244,8 +244,8 @@ class Page4OverviewEmptyPage(QWidget):
         panel.setMinimumHeight(204)
         layout = QHBoxLayout(panel)
         self.empty_dataset_layout = layout
-        layout.setContentsMargins(30, 18, 16, 18)
-        layout.setSpacing(22)
+        layout.setContentsMargins(32, 16, 16, 16)
+        layout.setSpacing(24)
         self.dataset_illustration = DatasetIllustrationCrop()
         layout.addWidget(self.dataset_illustration, 0, Qt.AlignVCenter)
 
@@ -288,10 +288,10 @@ class Page4OverviewEmptyPage(QWidget):
         benefits.setMinimumHeight(168)
         benefits.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         benefits_layout = QVBoxLayout(benefits)
-        benefits_layout.setContentsMargins(22, 18, 12, 17)
-        benefits_layout.setSpacing(15)
+        benefits_layout.setContentsMargins(24, 16, 12, 16)
+        benefits_layout.setSpacing(16)
         heading = QHBoxLayout()
-        heading.setSpacing(10)
+        heading.setSpacing(8)
         lightbulb = QLabel()
         lightbulb.setObjectName("overviewEmptyBenefitsIcon")
         lightbulb.setFixedSize(22, 22)
@@ -309,7 +309,7 @@ class Page4OverviewEmptyPage(QWidget):
             "Bisa menggunakan dataset publik atau dataset Anda sendiri",
         ):
             row = QHBoxLayout()
-            row.setSpacing(10)
+            row.setSpacing(8)
             check = QLabel()
             check.setObjectName("overviewEmptyBenefitCheck")
             check.setFixedSize(16, 16)
@@ -335,8 +335,8 @@ class Page4OverviewEmptyPage(QWidget):
         panel.setMinimumHeight(204)
         layout = QHBoxLayout(panel)
         self.loaded_dataset_layout = layout
-        layout.setContentsMargins(30, 18, 16, 18)
-        layout.setSpacing(28)
+        layout.setContentsMargins(32, 16, 16, 16)
+        layout.setSpacing(24)
 
         details = QWidget()
         details.setObjectName("overviewEmptyLoadedDetails")
@@ -361,7 +361,7 @@ class Page4OverviewEmptyPage(QWidget):
 
         metrics = QHBoxLayout()
         self.loaded_metrics_layout = metrics
-        metrics.setSpacing(10)
+        metrics.setSpacing(8)
         self.loaded_metrics = {}
         for key, caption_text in (
             ("rows", "BARIS"),
@@ -371,8 +371,8 @@ class Page4OverviewEmptyPage(QWidget):
             tile = QFrame()
             tile.setObjectName("overviewLoadedMetric")
             tile_layout = QVBoxLayout(tile)
-            tile_layout.setContentsMargins(10, 6, 10, 6)
-            tile_layout.setSpacing(2)
+            tile_layout.setContentsMargins(8, 8, 8, 8)
+            tile_layout.setSpacing(4)
             caption = QLabel(caption_text)
             caption.setObjectName("overviewLoadedMetricCaption")
             value = QLabel("—")
@@ -385,7 +385,7 @@ class Page4OverviewEmptyPage(QWidget):
 
         actions = QHBoxLayout()
         self.loaded_actions_layout = actions
-        actions.setSpacing(10)
+        actions.setSpacing(8)
         preview_button = self._button(
             "Buka Dataset",
             "figma-overview-upload.svg",
@@ -417,8 +417,8 @@ class Page4OverviewEmptyPage(QWidget):
         status.setMinimumHeight(168)
         status.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         status_layout = QVBoxLayout(status)
-        status_layout.setContentsMargins(22, 18, 12, 17)
-        status_layout.setSpacing(14)
+        status_layout.setContentsMargins(24, 16, 12, 16)
+        status_layout.setSpacing(16)
         status_title = QLabel("Langkah berikutnya")
         status_title.setObjectName("overviewEmptyBenefitsTitle")
         status_layout.addWidget(status_title)
@@ -475,9 +475,9 @@ class Page4OverviewEmptyPage(QWidget):
         panel.setObjectName("overviewEmptySection")
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(11)
+        layout.setSpacing(12)
         heading = QVBoxLayout()
-        heading.setSpacing(3)
+        heading.setSpacing(4)
         title = QLabel("Mulai dengan 5 Langkah Mudah")
         title.setObjectName("overviewEmptySectionTitle")
         subtitle = QLabel("Ikuti alur berikut untuk melakukan analisis penelitian menggunakan DORA.")
@@ -488,7 +488,7 @@ class Page4OverviewEmptyPage(QWidget):
         self.steps_layout = QGridLayout()
         self.steps_layout.setContentsMargins(0, 0, 0, 0)
         self.steps_layout.setHorizontalSpacing(12)
-        self.steps_layout.setVerticalSpacing(10)
+        self.steps_layout.setVerticalSpacing(8)
         self.step_cards = []
         self.step_arrows = []
         steps = (
@@ -529,7 +529,7 @@ class Page4OverviewEmptyPage(QWidget):
             card.setMinimumHeight(158)
             card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
             card_layout = QVBoxLayout(card)
-            card_layout.setContentsMargins(10, 14, 10, 12)
+            card_layout.setContentsMargins(8, 16, 8, 12)
             card_layout.setSpacing(8)
             number = QLabel(str(index + 1), card)
             number.setObjectName("overviewEmptyStepNumber")
@@ -583,7 +583,7 @@ class Page4OverviewEmptyPage(QWidget):
         features.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         feature_layout = QVBoxLayout(features)
         feature_layout.setContentsMargins(12, 12, 12, 12)
-        feature_layout.setSpacing(7)
+        feature_layout.setSpacing(8)
         heading = QLabel("Fitur Utama DORA")
         heading.setObjectName("overviewEmptySectionTitle")
         description = QLabel("Semua yang Anda butuhkan untuk penelitian berbasis data, dalam satu platform.")
@@ -592,8 +592,8 @@ class Page4OverviewEmptyPage(QWidget):
         feature_layout.addWidget(description)
         self.feature_cards_layout = QGridLayout()
         self.feature_cards_layout.setContentsMargins(0, 0, 0, 0)
-        self.feature_cards_layout.setHorizontalSpacing(10)
-        self.feature_cards_layout.setVerticalSpacing(9)
+        self.feature_cards_layout.setHorizontalSpacing(8)
+        self.feature_cards_layout.setVerticalSpacing(8)
         self.feature_cards = []
         for title, detail, icon_name, action in (
             ("Manajemen Dataset", "Upload, kelola, dan jelajahi dataset dengan mudah.", "figma-overview-dataset.svg", self.main_window.open_datasets_page),
@@ -613,8 +613,8 @@ class Page4OverviewEmptyPage(QWidget):
         card = QFrame()
         card.setObjectName("overviewEmptyFeatureCard")
         content = QVBoxLayout(card)
-        content.setContentsMargins(16, 12, 12, 10)
-        content.setSpacing(6)
+        content.setContentsMargins(16, 12, 12, 8)
+        content.setSpacing(8)
         tile = QFrame()
         tile.setObjectName("overviewEmptyFeatureIconTile")
         tile.setProperty("kind", icon_name)
@@ -652,8 +652,8 @@ class Page4OverviewEmptyPage(QWidget):
         card.setMinimumHeight(220)
         card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(14, 14, 14, 12)
-        layout.setSpacing(5)
+        layout.setContentsMargins(16, 16, 16, 12)
+        layout.setSpacing(4)
         heading = QHBoxLayout()
         title = QLabel("Tentang DORA")
         title.setObjectName("overviewEmptyAboutTitle")
@@ -680,7 +680,7 @@ class Page4OverviewEmptyPage(QWidget):
         layout.addWidget(description)
         benefits = QHBoxLayout()
         self.about_benefits_layout = benefits
-        benefits.setSpacing(7)
+        benefits.setSpacing(8)
         for title, icon_name, description, kind in (
             ("users", "figma-overview-users.svg", "Ramah untuk\npeneliti non-teknis", "green"),
             ("shield", "figma-overview-shield.svg", "Aman dan\nterjamin privasi", "orange"),
@@ -690,8 +690,8 @@ class Page4OverviewEmptyPage(QWidget):
             benefit.setObjectName("overviewEmptyAboutBenefit")
             benefit.setProperty("kind", kind)
             benefit_layout = QVBoxLayout(benefit)
-            benefit_layout.setContentsMargins(8, 8, 5, 7)
-            benefit_layout.setSpacing(6)
+            benefit_layout.setContentsMargins(8, 8, 4, 8)
+            benefit_layout.setSpacing(8)
             tile = QFrame()
             tile.setObjectName("overviewEmptyAboutBenefitIconTile")
             tile.setProperty("kind", kind)
@@ -753,15 +753,15 @@ class Page4OverviewEmptyPage(QWidget):
             return
         self._responsive_mode = mode
         self.content_layout.setContentsMargins(
-            17 if logical_width >= 1100 else 12, 10,
-            18 if logical_width >= 1100 else 12, 14,
+            16 if logical_width >= 1100 else 12, 8,
+            16 if logical_width >= 1100 else 12, 16,
         )
-        self.content_layout.setSpacing(12 if logical_width >= 1100 else 9)
+        self.content_layout.setSpacing(12 if logical_width >= 1100 else 8)
         self.hero_layout.setContentsMargins(
-            28 if logical_width >= 760 else 18,
-            21 if logical_width >= 760 else 16,
-            28 if logical_width >= 760 else 18,
-            24 if logical_width >= 760 else 18,
+            28 if logical_width >= 760 else 16,
+            20 if logical_width >= 760 else 16,
+            28 if logical_width >= 760 else 16,
+            24 if logical_width >= 760 else 16,
         )
         self.hero_actions.setDirection(
             QBoxLayout.LeftToRight if not compact else QBoxLayout.TopToBottom
@@ -774,8 +774,8 @@ class Page4OverviewEmptyPage(QWidget):
         self.loaded_dataset_layout.setDirection(
             QBoxLayout.LeftToRight if not stacked_dataset else QBoxLayout.TopToBottom
         )
-        self.empty_dataset_layout.setSpacing(22 if not stacked_dataset else 14)
-        self.loaded_dataset_layout.setSpacing(22 if not stacked_dataset else 14)
+        self.empty_dataset_layout.setSpacing(24 if not stacked_dataset else 16)
+        self.loaded_dataset_layout.setSpacing(24 if not stacked_dataset else 16)
         self.dataset_illustration.setVisible(logical_width >= 760)
         self.dataset_illustration.setMaximumWidth(257 if not stacked_dataset else 220)
         self.empty_dataset_actions.setDirection(

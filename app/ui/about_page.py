@@ -7,6 +7,7 @@ from PySide6.QtCore import Qt, QSize, QRect
 from PySide6.QtWidgets import (
     QBoxLayout,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QScrollArea,
@@ -197,6 +198,87 @@ class AboutPage(QWidget):
         self.content.addSpacing(18)
         self.content.addWidget(self.details_section, 0, Qt.AlignLeft)
 
+        self.content.addSpacing(24)
+        self.privacy_section = QWidget()
+        self.privacy_section.setObjectName("aboutPrivacySection")
+        self.privacy_layout = QVBoxLayout(self.privacy_section)
+        self.privacy_layout.setContentsMargins(0, 0, 0, 0)
+        self.privacy_layout.setSpacing(10)
+
+        self.privacy_heading = QLabel("Privasi & keamanan")
+        self.privacy_heading.setObjectName("aboutPrivacyHeading")
+        self.privacy_layout.addWidget(self.privacy_heading)
+        self.privacy_intro = QLabel(
+            "Ringkasan ini menjelaskan apa yang diproses di perangkat dan apa yang dibagikan "
+            "saat Anda memakai layanan online."
+        )
+        self.privacy_intro.setObjectName("aboutPrivacyIntro")
+        self.privacy_intro.setWordWrap(True)
+        self.privacy_layout.addWidget(self.privacy_intro)
+
+        self.privacy_grid = QGridLayout()
+        self.privacy_grid.setContentsMargins(0, 2, 0, 0)
+        self.privacy_grid.setHorizontalSpacing(12)
+        self.privacy_grid.setVerticalSpacing(12)
+        self.privacy_layout.addLayout(self.privacy_grid)
+        self.privacy_cards = []
+        for title, tag, text, kind in (
+            (
+                "Analisis dataset",
+                "LOKAL",
+                "File dan proyek tersimpan di perangkat. Analisis dataset utama berjalan secara lokal.",
+                "local",
+            ),
+            (
+                "Pencarian dataset & riset",
+                "KONEKSI ONLINE",
+                "Saat Anda mencari, kata kunci dikirim ke penyedia terkait, seperti Hugging Face, "
+                "Kaggle, atau layanan pencarian literatur. Dataset yang dipilih diunduh dari penyedia tersebut.",
+                "search",
+            ),
+            (
+                "Penjelasan Gemini",
+                "JIKA DIATUR",
+                "Jika Gemini dikonfigurasi dan digunakan, aplikasi mengirim ringkasan profil, statistik, "
+                "nilai kosong, duplikasi, outlier, korelasi, dan fingerprint analisis ke Google. File CSV "
+                "utuh tidak dikirim, tetapi ringkasan dapat memuat nama kolom atau informasi sensitif. "
+                "Tanpa API key, penjelasan menggunakan engine lokal.",
+                "ai",
+            ),
+            (
+                "Telemetry penggunaan",
+                "OPSIONAL",
+                "Telemetry tidak dikirim jika endpoint-nya kosong. Jika diaktifkan, aplikasi mengirim ID "
+                "instalasi acak dan event penggunaan, versi aplikasi, durasi, serta waktu. IP tidak ada di "
+                "payload telemetry; server tetap dapat melihat IP koneksi.",
+                "telemetry",
+            ),
+        ):
+            self.privacy_cards.append(self._make_privacy_card(title, tag, text, kind))
+        self.privacy_layout.addSpacing(2)
+
+        self.privacy_notes_grid = QGridLayout()
+        self.privacy_notes_grid.setContentsMargins(0, 0, 0, 0)
+        self.privacy_notes_grid.setHorizontalSpacing(12)
+        self.privacy_notes_grid.setVerticalSpacing(12)
+        self.privacy_layout.addLayout(self.privacy_notes_grid)
+        self.privacy_notes = [
+            self._make_privacy_note(
+                "Alamat IP",
+                "Layanan internet yang dihubungi dapat melihat IP publik koneksi Anda. HTTPS "
+                "melindungi isi permintaan selama transit, tetapi tidak menyembunyikan IP dari layanan tujuan.",
+                "network",
+            ),
+            self._make_privacy_note(
+                "Kunci API Gemini",
+                "Kunci yang disimpan melalui aplikasi berada di file konfigurasi lokal dan tidak "
+                "dienkripsi oleh aplikasi. Kunci tidak masuk telemetry; kunci dikirim ke Google "
+                "sebagai kredensial saat fitur Gemini digunakan.",
+                "key",
+            ),
+        ]
+        self.content.addWidget(self.privacy_section, 0, Qt.AlignLeft)
+
         self.copyright = QLabel("\u00a9 2026 Metriks Studio. All rights reserved.")
         self.copyright.setObjectName("aboutCopyright")
         self.copyright.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -228,6 +310,53 @@ class AboutPage(QWidget):
         layout.addWidget(text)
         return badge
 
+    @staticmethod
+    def _make_privacy_card(title: str, tag: str, text: str, kind: str) -> QFrame:
+        card = QFrame()
+        card.setObjectName("aboutPrivacyCard")
+        card.setProperty("kind", kind)
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(8)
+
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(10)
+        heading = QLabel(title)
+        heading.setObjectName("aboutPrivacyCardTitle")
+        heading.setWordWrap(True)
+        header.addWidget(heading, 1)
+        tag_label = QLabel(tag)
+        tag_label.setObjectName("aboutPrivacyTag")
+        tag_label.setAlignment(Qt.AlignCenter)
+        tag_label.setContentsMargins(7, 3, 7, 3)
+        header.addWidget(tag_label, 0, Qt.AlignTop)
+        layout.addLayout(header)
+
+        description = QLabel(text)
+        description.setObjectName("aboutPrivacyText")
+        description.setWordWrap(True)
+        description.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+        layout.addWidget(description)
+        return card, description
+
+    @staticmethod
+    def _make_privacy_note(title: str, text: str, kind: str) -> QFrame:
+        note = QFrame()
+        note.setObjectName("aboutPrivacyNote")
+        note.setProperty("kind", kind)
+        layout = QVBoxLayout(note)
+        layout.setContentsMargins(16, 13, 16, 13)
+        layout.setSpacing(5)
+        heading = QLabel(title)
+        heading.setObjectName("aboutPrivacyNoteTitle")
+        layout.addWidget(heading)
+        description = QLabel(text)
+        description.setObjectName("aboutPrivacyNoteText")
+        description.setWordWrap(True)
+        layout.addWidget(description)
+        return note, description
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._apply_responsive_width(event.size().width())
@@ -244,6 +373,7 @@ class AboutPage(QWidget):
         self.subtitle.setFixedHeight(max(ui_px(31), subtitle_height + ui_px(4)))
         self.application_card.setFixedWidth(card_width)
         self.details_section.setFixedWidth(card_width)
+        self.privacy_section.setFixedWidth(card_width)
         self.capability_row.layout().setDirection(
             QBoxLayout.LeftToRight if logical_width(card_width) >= 720 else QBoxLayout.TopToBottom
         )
@@ -262,6 +392,53 @@ class AboutPage(QWidget):
             ).height()
             text_label.setMinimumHeight(text_height + ui_px(5))
             capability.setFixedHeight(max(ui_px(90), text_height + ui_px(62)))
+        privacy_columns = 2 if logical_width(card_width) >= 720 else 1
+        for card, _description in self.privacy_cards:
+            self.privacy_grid.removeWidget(card)
+        privacy_card_width = (
+            max(1, (card_width - ui_px(12)) // 2)
+            if privacy_columns == 2
+            else card_width
+        )
+        for index, (card, description) in enumerate(self.privacy_cards):
+            self.privacy_grid.addWidget(card, index // privacy_columns, index % privacy_columns)
+            body_width = max(1, privacy_card_width - ui_px(38))
+            body_height = description.fontMetrics().boundingRect(
+                QRect(0, 0, body_width, 1000),
+                Qt.TextWordWrap,
+                description.text(),
+            ).height()
+            description.setFixedHeight(body_height + ui_px(2))
+            title = card.findChild(QLabel, "aboutPrivacyCardTitle")
+            tag = card.findChild(QLabel, "aboutPrivacyTag")
+            header_width = privacy_card_width - ui_px(43) - (tag.sizeHint().width() if tag else 0)
+            title_height = title.fontMetrics().boundingRect(
+                QRect(0, 0, max(1, header_width), 1000),
+                Qt.TextWordWrap,
+                title.text(),
+            ).height()
+            header_height = max(title_height, tag.sizeHint().height() if tag else 0)
+            card.setFixedHeight(header_height + body_height + ui_px(54))
+        for column in range(2):
+            self.privacy_grid.setColumnStretch(column, 1 if column < privacy_columns else 0)
+        note_columns = 2 if logical_width(card_width) >= 820 else 1
+        for note, _description in self.privacy_notes:
+            self.privacy_notes_grid.removeWidget(note)
+        note_width = max(1, (card_width - ui_px(12)) // 2) if note_columns == 2 else card_width
+        for index, (note, description) in enumerate(self.privacy_notes):
+            self.privacy_notes_grid.addWidget(note, index // note_columns, index % note_columns)
+            note_body_width = max(1, note_width - ui_px(34))
+            note_body_height = description.fontMetrics().boundingRect(
+                QRect(0, 0, note_body_width, 1000),
+                Qt.TextWordWrap,
+                description.text(),
+            ).height()
+            description.setFixedHeight(note_body_height + ui_px(2))
+            title = note.findChild(QLabel, "aboutPrivacyNoteTitle")
+            title_height = title.fontMetrics().height() if title else 0
+            note.setFixedHeight(title_height + note_body_height + ui_px(46))
+        for column in range(2):
+            self.privacy_notes_grid.setColumnStretch(column, 1 if column < note_columns else 0)
         self.application_layout.setDirection(
             QBoxLayout.LeftToRight if logical_width(card_width) >= 820 else QBoxLayout.TopToBottom
         )

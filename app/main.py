@@ -1,6 +1,31 @@
+import os
 import sys
 import threading
 import traceback
+from pathlib import Path
+
+
+def _ensure_project_interpreter() -> None:
+    """Use the repository venv even when this module is launched directly."""
+    if getattr(sys, "frozen", False):
+        return
+
+    project_root = Path(__file__).resolve().parents[1]
+    project_python = project_root / ".venv" / "Scripts" / "python.exe"
+    if not project_python.is_file():
+        return
+    if Path(sys.executable).resolve() == project_python.resolve():
+        return
+
+    launcher = project_root / "run.py"
+    os.execv(
+        str(project_python),
+        [str(project_python), str(launcher), *sys.argv[1:]],
+    )
+
+
+if __name__ == "__main__":
+    _ensure_project_interpreter()
 
 from PySide6.QtCore import QCoreApplication, QObject, Qt, Signal, Slot
 from PySide6.QtGui import QGuiApplication
