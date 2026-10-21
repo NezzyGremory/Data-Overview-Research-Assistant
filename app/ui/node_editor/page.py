@@ -513,10 +513,22 @@ class GraphView(QGraphicsView):
                 event.accept()
                 return
             if not self._space_held:
-                self._positions_before_drag = {
-                    node_id: tuple(node.position)
-                    for node_id, node in self.page.engine.nodes.items()
+                clicked_item = self._node_item_at(event.position().toPoint())
+                snapshots = {
+                    item.node_id: tuple(self.page.engine.nodes[item.node_id].position)
+                    for item in self.scene().selectedItems()
+                    if isinstance(item, GraphNodeItem)
+                    and item.node_id in self.page.engine.nodes
                 }
+                if (
+                    clicked_item is not None
+                    and clicked_item.node_id in self.page.engine.nodes
+                ):
+                    snapshots.setdefault(
+                        clicked_item.node_id,
+                        tuple(self.page.engine.nodes[clicked_item.node_id].position),
+                    )
+                self._positions_before_drag = snapshots or None
             if (
                 self._space_held
                 and self.page.connection_start is None
@@ -1042,6 +1054,9 @@ class NodeEditorPage(QWidget):
         self._dataset_analysis_active_generation = None
         self._dataset_analysis_pending = None
         self._dataset_analysis_cache = None
+        self._dataset_analysis_applied_key = None
+        self._package_presence_cache = {}
+        self._palette_items = {}
         self.thread = None
         self.worker = None
         self._is_running = False
@@ -1453,9 +1468,74 @@ class NodeEditorPage(QWidget):
         button.clicked.connect(self.add_palette_node)
         self.add_node_button = button
         layout.addWidget(button)
+        for spec_id, spec in self.engine.specs.items():
+            item = QListWidgetItem()
+            item.setData(Qt.UserRole, spec_id)
+            self.node_palette.addItem(item)
+            self._palette_items[spec_id] = item
+            self._set_palette_item_metadata(spec_id, spec)
         self.refresh_palette()
         layout.addStretch(1)
         return panel
+
+    def _missing_package_for_spec(self, spec):
+        module_name = spec.check_package
+        if not module_name:
+            return None
+        installed = self._package_presence_cache.get(module_name)
+        if installed is None:
+            try:
+                installed = importlib.util.find_spec(module_name) is not None
+            except (ImportError, ModuleNotFoundError, ValueError):
+                installed = False
+            self._package_presence_cache[module_name] = installed
+        if installed:
+            return None
+        return PACKAGE_DISTRIBUTIONS.get(module_name, module_name)
+
+    def _set_palette_item_metadata(self, spec_id, spec):
+        item = self._palette_items.get(spec_id)
+        if item is None:
+            return
+        category = CATEGORY_TRANSLATIONS.get(spec.category, spec.category)
+        label = f"{category} · {spec.name}"
+        missing_package = self._missing_package_for_spec(spec)
+        if missing_package:
+            label += "  (belum terpasang; install otomatis saat Run)"
+        if spec.max_recommended_rows < 100_000:
+            label += f"  (batas saran {spec.max_recommended_rows:,} baris)"
+        item.setText(label)
+        input_names = ", ".join(port.name for port in spec.inputs) or "tidak ada"
+        output_names = ", ".join(port.name for port in spec.outputs) or "tidak ada"
+        tooltip = (
+            f"Tahap: {category}\nInput: {input_names}\nOutput: {output_names}"
+        )
+        if missing_package:
+            item.setForeground(QBrush(QColor("#8A94A3")))
+            tooltip = (
+                f"Library '{missing_package}' belum terpasang. "
+                "Library akan dicoba dipasang otomatis saat graf dijalankan."
+            )
+        else:
+            item.setForeground(QBrush())
+        item.setToolTip(tooltip)
+
+    def _refresh_missing_package_status(self):
+        installed_modules = set()
+        for module_name, installed in tuple(self._package_presence_cache.items()):
+            if installed:
+                continue
+            try:
+                now_installed = importlib.util.find_spec(module_name) is not None
+            except (ImportError, ModuleNotFoundError, ValueError):
+                now_installed = False
+            if now_installed:
+                self._package_presence_cache[module_name] = True
+                installed_modules.add(module_name)
+        if installed_modules:
+            for spec_id, spec in self.engine.specs.items():
+                if spec.check_package in installed_modules:
+                    self._set_palette_item_metadata(spec_id, spec)
 
     def _build_parameters(self):
         panel = QFrame()
@@ -1493,84 +1573,61 @@ class NodeEditorPage(QWidget):
         return panel
 
     def refresh_palette(self, *_):
-        self.node_palette.clear()
         task = self.task_filter.currentData() if hasattr(self, "task_filter") else "all"
         workflow = self.workflow_filter.currentData() if hasattr(self, "workflow_filter") else "all"
         query = self.search.text().casefold() if hasattr(self, "search") else ""
-        for spec_id, spec in self.engine.specs.items():
-            if workflow != "all" and spec.category not in WORKFLOW_CATEGORIES.get(workflow, set()):
-                continue
-            if task != "all":
-                if task == "classification":
-                    is_match = (
-                        spec.category in ("Classification", "Data Tidak Seimbang", "Ensemble")
-                        or any(t.endswith("classification") for t in spec.task_types)
-                        or spec_id in ("load_dataset", "select_target", "split", "preprocess", "train", "evaluate", "compare", "cross_validate")
-                    )
-                elif task == "regression":
-                    is_match = (
-                        spec.category in ("Regression", "Ensemble")
-                        or "regression" in spec.task_types
-                        or spec_id in ("load_dataset", "select_target", "split", "preprocess", "train", "evaluate", "compare", "cross_validate")
-                    )
-                elif task == "clustering":
-                    is_match = (
-                        spec.category == "Clustering"
-                        or "clustering" in spec.task_types
-                        or spec_id in ("load_dataset", "preprocess", "train", "evaluate", "compare")
-                    )
-                elif task == "time_series":
-                    is_match = (
-                        spec.category in ("Forecasting", "Regression")
-                        or any(t in ("time_series", "forecasting") for t in spec.task_types)
-                        or spec_id in ("load_dataset", "time_split", "forecast", "train", "evaluate", "compare")
-                    )
-                elif task == "anomaly":
-                    is_match = (
-                        spec.category == "Anomaly Detection"
-                        or any("anomaly" in t for t in spec.task_types)
-                        or spec_id in ("load_dataset", "preprocess", "train", "evaluate", "compare")
-                    )
-                else:
-                    is_match = task in spec.task_types or "all" in spec.task_types
-                if not is_match:
-                    continue
-
-            if query and query not in spec.name.casefold() and query not in spec.category.casefold():
-                continue
-            category = CATEGORY_TRANSLATIONS.get(spec.category, spec.category)
-            label = f"{category} · {spec.name}"
-            missing_package = None
-            if spec.check_package:
-                try:
-                    missing_package = (
-                        None
-                        if importlib.util.find_spec(spec.check_package) is not None
-                        else PACKAGE_DISTRIBUTIONS.get(spec.check_package, spec.check_package)
-                    )
-                except (ImportError, ModuleNotFoundError, ValueError):
-                    missing_package = PACKAGE_DISTRIBUTIONS.get(
-                        spec.check_package, spec.check_package
-                    )
-                if missing_package:
-                    label += "  (belum terpasang; install otomatis saat Run)"
-            if spec.max_recommended_rows < 100_000:
-                label += f"  (batas saran {spec.max_recommended_rows:,} baris)"
-            item = QListWidgetItem(label)
-            item.setData(Qt.UserRole, spec_id)
-            input_names = ", ".join(port.name for port in spec.inputs) or "tidak ada"
-            output_names = ", ".join(port.name for port in spec.outputs) or "tidak ada"
-            item.setToolTip(
-                f"Tahap: {CATEGORY_TRANSLATIONS.get(spec.category, spec.category)}\n"
-                f"Input: {input_names}\nOutput: {output_names}"
-            )
-            if missing_package:
-                item.setForeground(QBrush(QColor("#8A94A3")))
-                item.setToolTip(
-                    f"Library '{missing_package}' belum terpasang. "
-                    "Library akan dicoba dipasang otomatis saat graf dijalankan."
+        self.node_palette.setUpdatesEnabled(False)
+        self.node_palette.setCurrentRow(-1)
+        try:
+            for spec_id, spec in self.engine.specs.items():
+                matches = (
+                    workflow == "all"
+                    or spec.category in WORKFLOW_CATEGORIES.get(workflow, set())
                 )
-            self.node_palette.addItem(item)
+                if matches and task != "all":
+                    if task == "classification":
+                        matches = (
+                            spec.category in ("Classification", "Data Tidak Seimbang", "Ensemble")
+                            or any(t.endswith("classification") for t in spec.task_types)
+                            or spec_id in ("load_dataset", "select_target", "split", "preprocess", "train", "evaluate", "compare", "cross_validate")
+                        )
+                    elif task == "regression":
+                        matches = (
+                            spec.category in ("Regression", "Ensemble")
+                            or "regression" in spec.task_types
+                            or spec_id in ("load_dataset", "select_target", "split", "preprocess", "train", "evaluate", "compare", "cross_validate")
+                        )
+                    elif task == "clustering":
+                        matches = (
+                            spec.category == "Clustering"
+                            or "clustering" in spec.task_types
+                            or spec_id in ("load_dataset", "preprocess", "train", "evaluate", "compare")
+                        )
+                    elif task == "time_series":
+                        matches = (
+                            spec.category in ("Forecasting", "Regression")
+                            or any(t in ("time_series", "forecasting") for t in spec.task_types)
+                            or spec_id in ("load_dataset", "time_split", "forecast", "train", "evaluate", "compare")
+                        )
+                    elif task == "anomaly":
+                        matches = (
+                            spec.category == "Anomaly Detection"
+                            or any("anomaly" in t for t in spec.task_types)
+                            or spec_id in ("load_dataset", "preprocess", "train", "evaluate", "compare")
+                        )
+                    else:
+                        matches = task in spec.task_types or "all" in spec.task_types
+                if matches and query:
+                    matches = (
+                        query in spec.name.casefold()
+                        or query in spec.category.casefold()
+                    )
+                item = self._palette_items.get(spec_id)
+                if item is not None:
+                    item.setHidden(not matches)
+        finally:
+            self.node_palette.setUpdatesEnabled(True)
+            self.node_palette.viewport().update()
 
     def add_palette_node(self, *_):
         item = self.node_palette.currentItem()
@@ -1744,7 +1801,7 @@ class NodeEditorPage(QWidget):
             self.undo_button.setEnabled(self._history.can_undo() and not getattr(self, "_is_running", False))
             self.redo_button.setEnabled(self._history.can_redo() and not getattr(self, "_is_running", False))
 
-    def _restore_graph_state(self, state):
+    def _restore_graph_state(self, state, on_complete=None):
         self._history_suspended = True
         try:
             self.cancel_connection()
@@ -1752,20 +1809,48 @@ class NodeEditorPage(QWidget):
             self.scene.clear()
             self.items.clear()
             self.cables.clear()
-            for node in self.engine.nodes.values():
-                item = GraphNodeItem(self, node, *node.position)
-                self.items[node.id] = item
-                self.scene.addItem(item)
+        except Exception:
+            self._history_suspended = False
+            raise
+
+        nodes = list(self.engine.nodes.values())
+
+        def finish_restore():
             self.redraw_cables()
             self._clear_results()
             self._history_state = self._graph_state_key()
             self.refresh_palette()
             self.show_parameters()
             self._update_delete_button()
-        finally:
             self._history_suspended = False
-        self.validate_graph(show_tab=False)
-        self._mark_graph_dirty()
+            self.validate_graph(show_tab=False)
+            self._mark_graph_dirty()
+            if on_complete is not None:
+                on_complete()
+
+        def add_node_batch(start, batch_size):
+            end = min(start + batch_size, len(nodes))
+            try:
+                for node in nodes[start:end]:
+                    item = GraphNodeItem(self, node, *node.position)
+                    self.items[node.id] = item
+                    self.scene.addItem(item)
+            except Exception as error:
+                self._history_suspended = False
+                self.graph_state_label.setText(
+                    f"Autosave graf tidak dapat dipulihkan: {error}"
+                )
+                if on_complete is not None:
+                    on_complete()
+                return
+            if end < len(nodes):
+                QTimer.singleShot(
+                    5, lambda: add_node_batch(end, batch_size)
+                )
+            else:
+                finish_restore()
+
+        add_node_batch(0, 8 if on_complete is not None else max(1, len(nodes)))
 
     def undo_graph(self):
         state = self._history.undo()
@@ -1779,13 +1864,21 @@ class NodeEditorPage(QWidget):
             self._restore_graph_state(state)
             self._update_history_buttons()
 
-    def prepare_for_open(self):
+    def prepare_for_open(self, on_ready=None):
         if self.thread is not None and self.thread.isRunning():
             self.dataset_status.setText("Graf sedang berjalan")
+            if on_ready is not None:
+                on_ready()
             return
-        self._restore_session_graph()
+        self._refresh_missing_package_status()
         self.refresh_palette()
-        self.sync_dataset()
+
+        def finish_preparation():
+            self.sync_dataset()
+            if on_ready is not None:
+                on_ready()
+
+        self._restore_session_graph(on_complete=finish_preparation)
 
     def _session_graph_path(self) -> Path:
         app_data = QStandardPaths.writableLocation(QStandardPaths.AppLocalDataLocation)
@@ -1887,106 +1980,141 @@ class NodeEditorPage(QWidget):
             return False
         return True
 
-    def _restore_session_graph(self):
+    def _restore_session_graph(self, on_complete=None):
         if self._session_graph_restored:
+            if on_complete is not None:
+                on_complete()
             return
         self._session_graph_restored = True
         path = self._session_graph_path()
         try:
             state = json.loads(path.read_text(encoding="utf-8"))
             if not isinstance(state, dict) or state.get("version") != 1:
+                if on_complete is not None:
+                    on_complete()
                 return
             graph = state.get("graph")
             if not isinstance(graph, dict):
+                if on_complete is not None:
+                    on_complete()
                 return
-            self._restore_graph_state(graph)
-            self._restore_dataset_source(state.get("dataset_source"))
-            self._reset_graph_history(saved=True)
-            run_history = state.get("run_history")
-            self._run_history = []
-            if isinstance(run_history, list):
-                for index, run in enumerate(run_history[:100]):
-                    if not isinstance(run, dict):
-                        continue
-                    self._run_history.append({
-                        "id": str(run.get("id") or f"restored-{index + 1}"),
-                        "created_at": str(run.get("created_at") or ""),
-                        "task": str(run.get("task") or ""),
-                        "target": str(run.get("target") or ""),
-                        "dataset": str(run.get("dataset") or ""),
-                        "duration_ms": run.get("duration_ms", 0),
-                        "status": str(run.get("status") or "unknown"),
-                        "metrics": run.get("metrics") if isinstance(run.get("metrics"), dict) else {},
-                        "graph_version_id": str(run.get("graph_version_id") or ""),
-                        "random_state": run.get("random_state", 42),
-                        "notes": str(run.get("notes") or ""),
-                    })
-            self._refresh_run_history()
-            self.output_log.setPlainText(str(state.get("output_log") or ""))
-
-            same_workspace = (
-                state.get("workspace_project_id")
-                == getattr(self.main_window, "current_project_id", None)
-            )
-            keep_results = self._dataset_scope == "graph" or same_workspace
-            if keep_results:
-                metric_rows = state.get("metric_rows")
-                if isinstance(metric_rows, list):
-                    self._metric_rows = metric_rows
-                    self._display_table(self.metrics_results, pd.DataFrame(metric_rows))
-                    self.metric_summary_model.blockSignals(True)
-                    self.metric_summary_model.clear()
-                    for row in metric_rows:
-                        if isinstance(row, dict):
-                            self.metric_summary_model.addItem(str(row.get("Model", "Model")))
-                    self.metric_summary_model.blockSignals(False)
-                    self.metric_summary_model.setVisible(len(metric_rows) > 1)
-                    self.metric_summary_model_label.setVisible(len(metric_rows) > 1)
-                    if metric_rows:
-                        self.metric_summary_model.setCurrentIndex(0)
-                    self._render_metric_summary()
-                    self.result_tabs.setTabVisible(1, bool(metric_rows))
-                if self._restore_table_snapshot(
-                    self.confusion_matrix_table, state.get("confusion_matrix")
-                ):
-                    self.result_tabs.setTabVisible(2, True)
-                forecast_metrics = state.get("forecast_metrics")
-                if isinstance(forecast_metrics, dict) and forecast_metrics:
-                    self.forecast_chart.set_metrics(forecast_metrics)
-                    self.result_tabs.setTabVisible(3, True)
-                selected_result = state.get("selected_result")
-                if isinstance(selected_result, dict) and isinstance(selected_result.get("frame"), dict):
-                    frame_data = selected_result["frame"]
-                    columns = frame_data.get("columns")
-                    rows = frame_data.get("rows")
-                    if isinstance(columns, list) and isinstance(rows, list):
-                        key = str(selected_result.get("key") or "restored:table")
-                        frame = pd.DataFrame(rows, columns=columns)
-                        self._result_outputs = {key: frame}
-                        self.preview_node_combo.blockSignals(True)
-                        self.preview_node_combo.clear()
-                        self.preview_node_combo.addItem("Pilih output node…", None)
-                        self.preview_node_combo.addItem(
-                            str(selected_result.get("label") or "Output dipulihkan"), key
-                        )
-                        self.preview_node_combo.blockSignals(False)
-                        self.preview_node_combo.setCurrentIndex(1)
-                        self.result_tabs.setTabVisible(0, True)
-                saved_tab = state.get("result_tab_index", 0)
-                if (
-                    isinstance(saved_tab, int)
-                    and 0 <= saved_tab < self.result_tabs.count()
-                    and self.result_tabs.isTabVisible(saved_tab)
-                ):
-                    self.result_tabs.setCurrentIndex(saved_tab)
-            self._session_graph_touched = True
-            self._mark_graph_dirty()
-            self._reset_graph_history(saved=True)
-            self.graph_state_label.setText("Graf dan progres dipulihkan")
         except FileNotFoundError:
+            if on_complete is not None:
+                on_complete()
             return
-        except (OSError, json.JSONDecodeError, TypeError, ValueError, GraphError) as error:
-            self.graph_state_label.setText(f"Autosave graf tidak dapat dipulihkan: {error}")
+        except (OSError, json.JSONDecodeError, TypeError, ValueError) as error:
+            self.graph_state_label.setText(
+                f"Autosave graf tidak dapat dipulihkan: {error}"
+            )
+            if on_complete is not None:
+                on_complete()
+            return
+
+        def finish_restore():
+            try:
+                self._finish_session_graph_restore(state)
+            except (OSError, TypeError, ValueError, GraphError) as error:
+                self.graph_state_label.setText(
+                    f"Autosave graf tidak dapat dipulihkan: {error}"
+                )
+            finally:
+                if on_complete is not None:
+                    on_complete()
+
+        try:
+            self._restore_graph_state(graph, on_complete=finish_restore)
+        except (OSError, TypeError, ValueError, GraphError) as error:
+            self._history_suspended = False
+            self.graph_state_label.setText(
+                f"Autosave graf tidak dapat dipulihkan: {error}"
+            )
+            if on_complete is not None:
+                on_complete()
+
+    def _finish_session_graph_restore(self, state):
+        self._restore_dataset_source(state.get("dataset_source"))
+        self._reset_graph_history(saved=True)
+        run_history = state.get("run_history")
+        self._run_history = []
+        if isinstance(run_history, list):
+            for index, run in enumerate(run_history[:100]):
+                if not isinstance(run, dict):
+                    continue
+                self._run_history.append({
+                    "id": str(run.get("id") or f"restored-{index + 1}"),
+                    "created_at": str(run.get("created_at") or ""),
+                    "task": str(run.get("task") or ""),
+                    "target": str(run.get("target") or ""),
+                    "dataset": str(run.get("dataset") or ""),
+                    "duration_ms": run.get("duration_ms", 0),
+                    "status": str(run.get("status") or "unknown"),
+                    "metrics": run.get("metrics") if isinstance(run.get("metrics"), dict) else {},
+                    "graph_version_id": str(run.get("graph_version_id") or ""),
+                    "random_state": run.get("random_state", 42),
+                    "notes": str(run.get("notes") or ""),
+                })
+        self._refresh_run_history()
+        self.output_log.setPlainText(str(state.get("output_log") or ""))
+
+        same_workspace = (
+            state.get("workspace_project_id")
+            == getattr(self.main_window, "current_project_id", None)
+        )
+        keep_results = self._dataset_scope == "graph" or same_workspace
+        if keep_results:
+            metric_rows = state.get("metric_rows")
+            if isinstance(metric_rows, list):
+                self._metric_rows = metric_rows
+                self._display_table(self.metrics_results, pd.DataFrame(metric_rows))
+                self.metric_summary_model.blockSignals(True)
+                self.metric_summary_model.clear()
+                for row in metric_rows:
+                    if isinstance(row, dict):
+                        self.metric_summary_model.addItem(str(row.get("Model", "Model")))
+                self.metric_summary_model.blockSignals(False)
+                self.metric_summary_model.setVisible(len(metric_rows) > 1)
+                self.metric_summary_model_label.setVisible(len(metric_rows) > 1)
+                if metric_rows:
+                    self.metric_summary_model.setCurrentIndex(0)
+                self._render_metric_summary()
+                self.result_tabs.setTabVisible(1, bool(metric_rows))
+            if self._restore_table_snapshot(
+                self.confusion_matrix_table, state.get("confusion_matrix")
+            ):
+                self.result_tabs.setTabVisible(2, True)
+            forecast_metrics = state.get("forecast_metrics")
+            if isinstance(forecast_metrics, dict) and forecast_metrics:
+                self.forecast_chart.set_metrics(forecast_metrics)
+                self.result_tabs.setTabVisible(3, True)
+            selected_result = state.get("selected_result")
+            if isinstance(selected_result, dict) and isinstance(selected_result.get("frame"), dict):
+                frame_data = selected_result["frame"]
+                columns = frame_data.get("columns")
+                rows = frame_data.get("rows")
+                if isinstance(columns, list) and isinstance(rows, list):
+                    key = str(selected_result.get("key") or "restored:table")
+                    frame = pd.DataFrame(rows, columns=columns)
+                    self._result_outputs = {key: frame}
+                    self.preview_node_combo.blockSignals(True)
+                    self.preview_node_combo.clear()
+                    self.preview_node_combo.addItem("Pilih output node…", None)
+                    self.preview_node_combo.addItem(
+                        str(selected_result.get("label") or "Output dipulihkan"), key
+                    )
+                    self.preview_node_combo.blockSignals(False)
+                    self.preview_node_combo.setCurrentIndex(1)
+                    self.result_tabs.setTabVisible(0, True)
+            saved_tab = state.get("result_tab_index", 0)
+            if (
+                isinstance(saved_tab, int)
+                and 0 <= saved_tab < self.result_tabs.count()
+                and self.result_tabs.isTabVisible(saved_tab)
+            ):
+                self.result_tabs.setCurrentIndex(saved_tab)
+        self._session_graph_touched = True
+        self._mark_graph_dirty()
+        self._reset_graph_history(saved=True)
+        self.graph_state_label.setText("Graf dan progres dipulihkan")
 
     def _on_dataset_scope_changed(self, index):
         scope = self.dataset_scope_combo.itemData(index)
@@ -2062,6 +2190,7 @@ class NodeEditorPage(QWidget):
             self._dataset_sync_key = None
             self._dataset_analysis_pending = None
             self._dataset_analysis_cache = None
+            self._dataset_analysis_applied_key = None
             self._active_dataset_token = None
             self._workspace_target_column = None
             self._template_key = None
@@ -2161,14 +2290,21 @@ class NodeEditorPage(QWidget):
             and cached["key"] == sync_key
             and reference_matches_cache
         ):
-            self._apply_dataset_analysis(
-                generation,
-                dataframe,
-                target_col,
-                cached["detection"],
-                cached["templates"],
-                cached["unique_counts"],
+            applied_key = (
+                sync_key,
+                self._dataset_scope,
+                cached_detection.get("target_column"),
+                cached_detection.get("task_type"),
             )
+            if self._dataset_analysis_applied_key != applied_key:
+                self._apply_dataset_analysis(
+                    generation,
+                    dataframe,
+                    target_col,
+                    cached["detection"],
+                    cached["templates"],
+                    cached["unique_counts"],
+                )
             return
 
         request = (generation, dataframe, target_col, sync_key, dataset_path, loader)
@@ -2398,6 +2534,12 @@ class NodeEditorPage(QWidget):
             self.validate_graph(show_tab=False)
             if self.scene.selectedItems():
                 self.show_parameters()
+        self._dataset_analysis_applied_key = (
+            self._dataset_sync_key,
+            self._dataset_scope,
+            detected_target,
+            task_type,
+        )
 
     def _sync_invalid_workspace_targets(self, dataframe, target_column):
         if not target_column or target_column not in dataframe.columns:
@@ -3597,6 +3739,11 @@ class NodeEditorPage(QWidget):
     @Slot()
     def _thread_finished(self):
         thread = self.thread
+        worker = self.worker
+        if worker is not None and worker.packages:
+            self._package_presence_cache.clear()
+            for spec_id, spec in self.engine.specs.items():
+                self._set_palette_item_metadata(spec_id, spec)
         if self.thread is thread:
             self.thread = None
             self.worker = None

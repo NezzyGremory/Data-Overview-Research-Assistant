@@ -23,6 +23,7 @@ from matplotlib.figure import Figure
 from shiboken6 import isValid as is_qt_object_valid
 
 from PySide6.QtCore import Qt, QUrl, QObject, QThread, QTimer, Signal, Slot, QMarginsF, QSize, QPoint, QRect, QRectF, QEvent, QEventLoop
+from PySide6.QtCore import QEasingCurve, QPropertyAnimation
 from PySide6.QtGui import QAction, QActionGroup, QIcon, QPixmap, QDesktopServices, QTextDocument, QFont, QFontDatabase, QColor, QPalette, QPageSize, QPageLayout, QPainter, QPen, QRegion
 from PySide6.QtPrintSupport import QPrinter
 from PySide6.QtWidgets import (
@@ -14368,6 +14369,25 @@ class MainWindow(QMainWindow):
         self.page_stack.setMinimumSize(0, 0)
         self.page_stack.setAttribute(Qt.WA_StyledBackground, True)
         content_layout.addWidget(self.page_stack, 1)
+        self._navigation_loading_progress = QProgressBar(self.page_stack)
+        self._navigation_loading_progress.setObjectName(
+            "navigationLoadingProgress"
+        )
+        self._navigation_loading_progress.setAccessibleName(
+            "Memuat halaman"
+        )
+        self._navigation_loading_progress.setRange(0, 100)
+        self._navigation_loading_progress.setValue(0)
+        self._navigation_loading_progress.setTextVisible(False)
+        self._navigation_loading_progress.setFixedHeight(8)
+        self._navigation_loading_progress.setAttribute(
+            Qt.WA_TransparentForMouseEvents
+        )
+        self._navigation_loading_progress.setFocusPolicy(Qt.NoFocus)
+        self._navigation_loading_progress.hide()
+        self._navigation_loading_animation = None
+        self._navigation_loading_pending = False
+        self._navigation_loading_started_at = None
 
         root_layout.addWidget(content, 1)
 
@@ -14437,11 +14457,20 @@ class MainWindow(QMainWindow):
             node_placeholder_layout.setContentsMargins(32, 32, 32, 32)
             node_placeholder_layout.addStretch(1)
             node_placeholder_message = QLabel(
-                "Node Editor akan disiapkan saat dibuka."
+                "Memuat Node Editor..."
             )
             node_placeholder_message.setObjectName("emptyState")
             node_placeholder_message.setAlignment(Qt.AlignCenter)
             node_placeholder_layout.addWidget(node_placeholder_message)
+            node_loading_progress = QProgressBar()
+            node_loading_progress.setObjectName("nodeEditorLoadingProgress")
+            node_loading_progress.setRange(0, 0)
+            node_loading_progress.setTextVisible(False)
+            node_loading_progress.setFixedWidth(320)
+            node_loading_progress.setAccessibleName("Memuat Node Editor")
+            node_placeholder_layout.addWidget(
+                node_loading_progress, 0, Qt.AlignHCenter
+            )
             node_placeholder_layout.addStretch(1)
         self._startup_checkpoint("Menyiapkan tools riset…")
         # These tools contain large tables, charts, and report widgets. Keep
@@ -14811,6 +14840,8 @@ class MainWindow(QMainWindow):
         }
 
         if key in callbacks:
+            button.pressed.connect(self._prepare_navigation_feedback)
+            button.clicked.connect(self._prepare_navigation_feedback)
             button.clicked.connect(callbacks[key])
         return button
 
@@ -14868,6 +14899,10 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        progress = getattr(self, "_navigation_loading_progress", None)
+        page_stack = getattr(self, "page_stack", None)
+        if progress is not None and page_stack is not None:
+            progress.setGeometry(0, 0, page_stack.width(), 8)
         sidebar = getattr(self, "sidebar_container", None)
         if sidebar is None:
             return
@@ -15249,12 +15284,21 @@ class MainWindow(QMainWindow):
     def _show_page(self, key):
         page = self.pages[key]
         target = self.page_hosts.get(id(page), page)
-        if target is not self.page_stack.currentWidget():
+        previous_key = getattr(self, "_current_page_key", None)
+        target_changed = target is not self.page_stack.currentWidget()
+        route_changed = previous_key is not None and previous_key != key
+        navigation_started = self._navigation_loading_started_at
+        if navigation_started is None and previous_key is not None and (
+            target_changed or route_changed
+        ):
+            navigation_started = time.perf_counter()
+        if target_changed or route_changed:
             self._cancel_page_transition()
             # Keep native widget painting during navigation. Applying an
             # opacity effect to the stacked window forces Qt to rasterize the
             # complete page and causes stutters on chart- and table-heavy views.
-            self.page_stack.setCurrentWidget(target)
+            if target_changed:
+                self.page_stack.setCurrentWidget(target)
         self._current_page_key = key
         current_scale = self.scale_manager.get_scale()
         page_scales = getattr(self, "_page_scale_values", {})
@@ -15273,6 +15317,53 @@ class MainWindow(QMainWindow):
         self.page_title.setText(self._page_titles[key])
         self.set_active_button("dashboard" if key == "about" else key)
         self._sync_page_chrome(self.width(), self.height())
+        if navigation_started is not None:
+            elapsed_ms = (time.perf_counter() - navigation_started) * 1000
+            self._navigation_loading_pending = False
+            self._navigation_loading_started_at = None
+            self._start_navigation_feedback(elapsed_ms)
+
+    def _prepare_navigation_feedback(self, checked=False):
+        already_pending = self._navigation_loading_pending
+        self._navigation_loading_pending = True
+        self._navigation_loading_started_at = time.perf_counter()
+        if not already_pending:
+            self._start_navigation_feedback()
+
+    def _start_navigation_feedback(self, load_time_ms=0):
+        progress = self._navigation_loading_progress
+        old_animation = self._navigation_loading_animation
+        if old_animation is not None:
+            old_animation.stop()
+            old_animation.deleteLater()
+
+        progress.setGeometry(0, 0, self.page_stack.width(), 8)
+        progress.setValue(8)
+        progress.show()
+        progress.raise_()
+
+        animation = QPropertyAnimation(progress, b"value", self)
+        duration_ms = max(180, min(650, 180 + round(load_time_ms * 0.5)))
+        animation.setDuration(duration_ms)
+        animation.setStartValue(8)
+        animation.setEndValue(100)
+        animation.setEasingCurve(QEasingCurve.OutCubic)
+        animation.finished.connect(
+            lambda animation=animation: self._finish_navigation_feedback(
+                animation
+            )
+        )
+        self._navigation_loading_animation = animation
+        animation.start()
+
+    def _finish_navigation_feedback(self, animation):
+        if self._navigation_loading_animation is not animation:
+            return
+        self._navigation_loading_progress.hide()
+        self._navigation_loading_animation = None
+        self._navigation_loading_pending = False
+        self._navigation_loading_started_at = None
+        animation.deleteLater()
 
     def _cancel_page_transition(self):
         animation = getattr(self, "_page_transition_animation", None)
@@ -15408,21 +15499,29 @@ class MainWindow(QMainWindow):
             self._show_page("node_editor")
             if not self._node_editor_build_scheduled:
                 self._node_editor_build_scheduled = True
-                QTimer.singleShot(0, self._create_node_editor_page)
+                # Let Qt paint the loading state before building the page.
+                QTimer.singleShot(40, self._create_node_editor_page)
             return
         self.node_editor_page.prepare_for_open()
         self._show_page("node_editor")
 
     def _create_node_editor_page(self):
-        self._node_editor_build_scheduled = False
         if self.node_editor_page is not None:
+            self._node_editor_build_scheduled = False
             return
         from app.ui.node_editor import NodeEditorPage
 
         page = NodeEditorPage(self)
-        page.prepare_for_open()
-        self.node_editor_page = page
-        self._replace_lazy_page("node_editor", page)
+
+        def show_ready_page():
+            if self.node_editor_page is not None:
+                self._node_editor_build_scheduled = False
+                return
+            self.node_editor_page = page
+            self._node_editor_build_scheduled = False
+            self._replace_lazy_page("node_editor", page)
+
+        page.prepare_for_open(on_ready=show_ready_page)
 
     def _schedule_page_build(self, key, flag_name, builder_name):
         self._show_page(key)

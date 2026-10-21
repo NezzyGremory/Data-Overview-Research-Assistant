@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-labelledby="title desc">
+  <title id="title">DORA: Data Overview Research &amp; Assistant</title>
+  <desc id="desc">A dramatic, layered three-dimensional DORA wordmark on a deep blue and violet research-themed banner.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#071426" />
+      <stop offset="50%" stop-color="#101b43" />
+      <stop offset="100%" stop-color="#211344" />
+    </linearGradient>
+    <linearGradient id="front" x1="0" y1="0" x2="0.9" y2="1">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="34%" stop-color="#dbeafe" />
+      <stop offset="68%" stop-color="#7dd3fc" />
+      <stop offset="100%" stop-color="#a5b4fc" />
+    </linearGradient>
+    <linearGradient id="side" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#2563eb" />
+      <stop offset="55%" stop-color="#4f46e5" />
+      <stop offset="100%" stop-color="#7c3aed" />
+    </linearGradient>
+    <radialGradient id="halo" cx="50%" cy="45%" r="52%">
+      <stop offset="0%" stop-color="#3b82f6" stop-opacity=".42" />
+      <stop offset="55%" stop-color="#6366f1" stop-opacity=".15" />
+      <stop offset="100%" stop-color="#111827" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0" />
+      <stop offset="50%" stop-color="#93c5fd" stop-opacity=".9" />
+      <stop offset="100%" stop-color="#a78bfa" stop-opacity="0" />
+    </linearGradient>
+  </defs>
+
+  <rect x="1" y="1" width="1198" height="358" rx="30" fill="url(#background)" stroke="#334c83" stroke-width="2" />
+  <ellipse cx="600" cy="162" rx="435" ry="174" fill="url(#halo)" />
+  <path d="M78 291 H1122" stroke="url(#edge)" stroke-width="2" />
+  <path d="M120 84 H370 M830 84 H1080" stroke="#49659a" stroke-width="1.5" opacity=".55" />
+
+  <g fill="#bfdbfe" opacity=".72">
+    <circle cx="113" cy="133" r="2" /><circle cx="168" cy="205" r="3" />
+    <circle cx="1066" cy="125" r="2.5" /><circle cx="1019" cy="218" r="2" />
+    <circle cx="274" cy="92" r="2" /><circle cx="926" cy="90" r="2" />
+  </g>
+  <g stroke="#60a5fa" fill="none" opacity=".46">
+    <path d="M88 183 C178 75 270 75 355 111" stroke-width="2" />
+    <path d="M845 111 C930 75 1022 75 1112 183" stroke-width="2" />
+  </g>
+
+  <g transform="translate(138 160)" opacity=".82" stroke="#7dd3fc" stroke-width="3" fill="none" stroke-linejoin="round">
+    <ellipse cx="0" cy="-27" rx="29" ry="10" fill="#1d4ed8" fill-opacity=".48" />
+    <path d="M-29 -27 V20 C-29 34 29 34 29 20 V-27" fill="#1e40af" fill-opacity=".26" />
+    <path d="M-29 -5 C-29 9 29 9 29 -5 M-29 11 C-29 25 29 25 29 11" />
+  </g>
+  <g transform="translate(1060 161)" opacity=".82" stroke="#c4b5fd" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M-36 -22 C-17 -30 -4 -23 0 -15 C4 -23 17 -30 36 -22 V24 C17 17 4 22 0 30 C-4 22 -17 17 -36 24 Z" fill="#5b21b6" fill-opacity=".26" />
+    <path d="M0 -15 V30 M-27 -12 C-17 -15 -10 -13 -5 -9 M-27 0 C-17 -3 -10 -1 -5 3 M27 -12 C17 -15 10 -13 5 -9 M27 0 C17 -3 10 -1 5 3" />
+  </g>
+
+  <text x="600" y="34" text-anchor="middle" fill="#93c5fd" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="15" font-weight="700" letter-spacing="6">DATA · METHODS · DISCOVERY</text>
+
+  <g text-anchor="middle" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="154" font-weight="900" letter-spacing="8">
+    <text x="615" y="211" fill="#070b1d">DORA</text>
+    <text x="614" y="206" fill="#0b1230">DORA</text>
+    <text x="613" y="201" fill="#10183c">DORA</text>
+    <text x="612" y="196" fill="#14204b">DORA</text>
+    <text x="611" y="191" fill="#18285d">DORA</text>
+    <text x="610" y="186" fill="#1d3472">DORA</text>
+    <text x="609" y="181" fill="#21438d">DORA</text>
+    <text x="608" y="176" fill="#2452a8">DORA</text>
+    <text x="607" y="171" fill="#2865c8">DORA</text>
+    <text x="606" y="166" fill="url(#side)">DORA</text>
+    <text x="600" y="157" fill="url(#front)" stroke="#ffffff" stroke-opacity=".88" stroke-width="2" paint-order="stroke">DORA</text>
+  </g>
+  <path d="M444 164 C493 175 707 175 756 164" fill="none" stroke="#ffffff" stroke-opacity=".36" stroke-width="2" />
+
+  <text x="600" y="258" text-anchor="middle" fill="#e0e7ff" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="24" font-weight="700" letter-spacing="3">DATA OVERVIEW RESEARCH &amp; ASSISTANT</text>
+  <text x="600" y="324" text-anchor="middle" fill="#9fb3dc" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="14" font-weight="600" letter-spacing="2">LOCAL DATA ANALYSIS  ·  MACHINE LEARNING  ·  ACADEMIC RESEARCH</text>
+</svg>

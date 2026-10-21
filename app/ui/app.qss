@@ -945,6 +945,18 @@ QProgressBar::chunk {
     border-radius: @px(4);
 }
 
+#navigationLoadingProgress {
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    max-height: @px(8);
+}
+
+#navigationLoadingProgress::chunk {
+    background: #006bb8;
+    border-radius: 0;
+}
+
 /* ============================================================
    SCROLLBARS
    ============================================================ */

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="310" viewBox="0 0 900 310" role="img" aria-labelledby="title desc">
+  <title id="title">Evaluation chart placeholder</title>
+  <desc id="desc">A neutral empty chart illustration waiting for verified evaluation data.</desc>
+  <rect x="1" y="1" width="898" height="308" rx="20" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2" />
+  <path d="M100 225 H800 M100 170 H800 M100 115 H800" stroke="#e2e8f0" stroke-width="2" stroke-dasharray="7 8" />
+  <path d="M100 70 V225 H800" fill="none" stroke="#94a3b8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+  <rect x="276" y="117" width="348" height="70" rx="16" fill="#ffffff" stroke="#bfdbfe" stroke-width="2" stroke-dasharray="8 6" />
+  <text x="450" y="148" text-anchor="middle" fill="#1e3a8a" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="17" font-weight="700">ADD A VERIFIED BENCHMARK CHART</text>
+  <text x="450" y="172" text-anchor="middle" fill="#64748b" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="14">No benchmark values are shown in this placeholder</text>
+  <text x="450" y="270" text-anchor="middle" fill="#334155" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="16" font-weight="600">REPLACE AFTER A REPRODUCIBLE EVALUATION</text>
+</svg>

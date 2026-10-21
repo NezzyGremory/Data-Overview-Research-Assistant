@@ -1,274 +1,285 @@
-# DORA — Data Overview & Research Assistant
-
-DORA adalah aplikasi desktop untuk membantu peneliti memahami dataset, mencoba analisis machine learning, dan meninjau literatur yang berkaitan. Analisis dataset berjalan lokal di komputer. DORA membantu proses riset; hasil dan rekomendasinya tetap perlu ditinjau oleh peneliti.
-
-Versi project saat ini: **v5.0.0**.
-
-Nama tim pada tampilan aplikasi: **Metriks Studio**.
-
-## Galeri aplikasi
-
-Gambar di bawah menampilkan antarmuka DORA saat ini. Isi dataset dan hasil pencarian pada screenshot adalah **data demo lokal untuk dokumentasi**, bukan hasil pencarian internet atau data pengguna.
-
-### Memuat dan meninjau dataset
-
-Dataset dapat dipilih lewat tombol unggah atau dengan mengeklik/meletakkan file CSV pada area unggah. Setelah konfirmasi, halaman Dataset menyediakan pratinjau tabel dan tab kualitas data.
-
-![Halaman unggah dataset](screenshots/readme/dataset-upload.png)
-
-![Pratinjau dataset, ringkasan kualitas, dan kolom](screenshots/readme/dataset-preview.png)
-
-Tab analisis dataset lainnya:
-
-![Ringkasan Data Quality](screenshots/readme/dataset-data-quality.png)
-
-![Tipe dan peran kolom](screenshots/readme/dataset-columns.png)
-
-![Pemeriksaan Missing Values](screenshots/readme/dataset-missing-values.png)
-
-![Pemeriksaan Outliers](screenshots/readme/dataset-outliers.png)
-
-![Matriks Correlation](screenshots/readme/dataset-correlation.png)
-
-### Dataset Search
-
-Cari dataset publik berdasarkan kata kunci dari Kaggle, Hugging Face, atau keduanya lewat pilihan **All providers**. Screenshot hasil pencarian memakai rekaman demo.
-
-![Pencarian dataset](screenshots/readme/dataset-search.png)
-
-### Analisis dan eksperimen
-
-Analysis merangkum struktur, statistik, kualitas data, nilai kosong, duplikasi, outlier, korelasi, dan grafik. **Editor Analysis** menyediakan tahap analisis dengan template kode Python yang bisa diedit dan dijalankan, output teks/grafik, notebook `.ipynb`, serta pemasangan paket Python dari PyPI.
-
-![Analysis dataset](screenshots/readme/analysis.png)
-
-![Editor Analysis](screenshots/readme/editor-analysis.png)
-
-![Rekomendasi ML Intelligence](screenshots/readme/ml-intelligence.png)
-
-### Ringkasan alur kerja
-
-Overview mengumpulkan status dataset, kualitas, rekomendasi ML, kemajuan pipeline, dan pintasan ke laporan.
-
-![Overview](screenshots/readme/overview.png)
-
-### Literatur dan keluaran riset
-
-Academic Research mencari serta memberi peringkat paper dari provider akademik yang tersedia. Papers menyediakan penyaringan artikel dan pemeriksaan status jurnal. SINTA adalah akreditasi nasional; indeks lain seperti DOAJ dan Scopus ditampilkan terpisah karena status indeks bukan peringkat SINTA.
-
-![Academic Research](screenshots/readme/academic-research.png)
-
-![Daftar dan pemeriksaan paper](screenshots/readme/papers.png)
-
-![Research Landscape](screenshots/readme/research-landscape.png)
-
-![Kandidat Research Gap](screenshots/readme/research-gap.png)
-
-![Pratinjau Research Report](screenshots/readme/research-report.png)
-
-### Panduan dan informasi aplikasi
-
-![Halaman Help](screenshots/readme/help.png)
-
-![Halaman About](screenshots/readme/about.png)
-
-![Animasi credits Metriks Studio](screenshots/readme/copyright-credits.png)
-
-## Fitur
-
-### Dataset
-
-- Unggah CSV dengan pemilih file, klik area unggah, atau drag-and-drop.
-- Cari dataset publik melalui Kaggle dan Hugging Face; hasil bisa diunduh ke workspace DORA.
-- Lihat pratinjau baris dan identifikasi tipe kolom.
-- Tinjau Data Quality, Columns, Missing Values, Outliers, dan Correlation.
-- Gunakan tindakan pembersihan data dan lanjutkan dataset ke tahap analisis.
-- Review Data Types Overview, Distribution Analysis, Class Balance, Data Leakage Check, split/preprocessing recommendations, and feature selection hints before modeling.
-- Use the ML Pipeline Checklist to see which workflow stages are complete, recommended, or not yet available.
-- Pada Missing Values, tinjau jumlah nilai kosong dan nilai 0 secara terpisah; buat salinan **Cleaned Dataset** dengan pilihan kolom, aturan `any/all`, dan perlakuan nol.
-- Ekspor salinan bersih ke folder dan nama CSV pilihan sekarang atau nanti. Versi Original tetap tersedia untuk analisis.
-
-### Analysis
-
-- Profil ukuran dataset, tipe kolom, dan statistik deskriptif.
-- Pemeriksaan nilai kosong, baris duplikat, outlier, dan korelasi.
-- Ringkasan kualitas data, fingerprint dataset, serta visualisasi yang sesuai.
-- Hasil analisis menjadi konteks untuk ML Intelligence dan pencarian literatur.
-
-### Editor Analysis
-
-Editor bergaya notebook ini menyediakan tahapan seperti Data Profiling, Data Cleaning, Exploratory Data Analysis, Feature Engineering, pemodelan, dan evaluasi.
-
-- Pilih kelompok dan template, lalu edit kode Python sebelum dijalankan.
-- Jalankan satu langkah atau seluruh rangkaian; hasil dapat berupa teks maupun grafik.
-- Template mencakup beberapa metode klasifikasi, regresi, clustering, dan anomaly detection, termasuk metode ensemble.
-- Pasang paket PyPI untuk workspace editor menggunakan perintah seperti `pip install seaborn`.
-- Buka dan simpan notebook `.ipynb`.
-
-Kode editor dijalankan secara lokal dengan akses ke lingkungan komputer dan **tidak diisolasi dalam sandbox**. Jalankan hanya kode yang kamu pahami dan percaya. Template adalah titik awal eksperimen, bukan jaminan bahwa kode cocok untuk semua dataset.
-
-### ML Intelligence
-
-- Memperkirakan jenis tugas berdasarkan karakteristik dataset dan target yang dipilih.
-- Menampilkan metode kandidat beserta hasil evaluasi yang tersedia.
-- Rekomendasi merupakan bahan pertimbangan; validasi model tetap menjadi tanggung jawab peneliti.
-
-### Academic Research dan Papers
-
-- Membentuk query dari konteks dataset dan mengumpulkan metadata publikasi.
-- Menggabungkan dan menghapus duplikasi hasil, lalu menampilkan sinyal relevansi.
-- Meninjau judul, penulis, tahun, jurnal/venue, abstrak, DOI, ISSN, sumber, dan status pemeriksaan jurnal bila tersedia.
-- Memeriksa status SINTA secara terpisah dari indeks jurnal lain. Status dan masa berlaku akreditasi perlu cocok dengan tahun terbit artikel.
-- Pemeriksaan indeks lain mendukung DOAJ; pemeriksaan Scopus memerlukan API key dan entitlement Elsevier. Hasilnya dapat berubah dan merupakan snapshot saat diperiksa.
-- UCL Discovery dibuka sebagai pencarian eksternal dan hasilnya tidak otomatis dicampur ke daftar ranking.
-
-Provider pencarian akademik yang digunakan aplikasi mencakup OpenAlex, Crossref, Semantic Scholar, Europe PMC, dan OpenAIRE. Scopus opsional bergantung pada konfigurasi serta hak akses API Elsevier. Pencarian akademik memerlukan koneksi internet.
-
-### Landscape, Research Gap, dan Report
-
-- **Research Landscape** merangkum metode, venue, dan pola publikasi dari paper yang terkumpul.
-- **Research Gap** menampilkan kandidat celah dari literatur yang ditemukan. Kandidat bukan bukti kebaruan; periksa artikel asli dan publikasi terbaru.
-- **Research Report** menyusun pratinjau gabungan dataset, kualitas data, ML, literatur, tren, dan kandidat gap serta dapat diekspor ke PDF setelah tahapan yang diperlukan tersedia.
-
-### Overview, Help, dan Credits
-
-- Overview menunjukkan status pipeline dan ringkasan hasil yang sudah tersedia.
-- Help memuat panduan penggunaan dan pintasan ke halaman aplikasi.
-- Tombol Copyright menampilkan animasi end credits; informasinya dapat diedit di `app/ui/data/credits.json`.
-- Atur **UI Scale** dari menu **View** dengan pilihan Auto atau 70%–150%. Gunakan **Ctrl+=** untuk memperbesar, **Ctrl+-** untuk memperkecil, **Ctrl+0** untuk kembali ke Auto, atau **Ctrl+scroll** di area konten.
-- Tombol sidebar di topbar dan pilihan **Show Sidebar** pada menu View dapat membuka atau menciutkan navigasi. Pada jendela sempit, sidebar otomatis berubah menjadi ikon.
-
-## Alur penggunaan singkat
-
-1. Buka **Dataset** untuk memilih CSV, atau cari dataset publik di **Dataset Search**.
-2. Tinjau tabel dan kualitas data pada halaman Dataset.
-3. Run **Analysis** and review the data types, distributions, class balance, quality summary, leakage warnings, split/preprocessing guidance, and feature selection hints before modeling. These are analytical suggestions, not decisions.
-4. Pada **Missing Values**, tinjau jumlah kosong dan nilai 0, lalu gunakan **Drop Missing Values** jika diperlukan. Periksa pratinjau dan konfirmasi sebelum membuat versi bersih.
-5. Gunakan **ML Intelligence** untuk meninjau task, kandidat metode, dan evaluasi empiris.
-6. Gunakan **Editor Analysis** untuk mengubah dan menjalankan template kode secara manual.
-7. Jalankan **Academic Research**, lalu tinjau paper, landscape, serta kandidat research gap.
-8. Buka **Research Report** untuk melihat ringkasan dan mengekspor PDF jika semua tahap siap.
-9. Jika tampilan terlalu besar atau kecil, buka **View → UI Scale** atau gunakan shortcut zoom. Skala Auto menyesuaikan diri dengan layar aktif.
-
-## Catatan Penting
-
-- **Drop Missing Values** membuat versi dataset baru di workspace. DataFrame aktif dan file CSV sumber tidak ditulis ulang; pilih **Original** atau versi **Cleaned** pada halaman Analysis untuk berpindah.
-- Mode Auto menandai nilai 0 hanya pada kolom numerik yang secara statistik mencurigakan dan selalu menampilkan peringatan. Mode Selective membatasi kolom yang dipilih; mode Strict dapat menghapus kelas pada kolom biner atau target.
-- Mode `any` menghapus baris jika sedikitnya satu kolom terpilih missing. Mode `all` hanya menghapus baris jika semua kolom terpilih missing, sehingga baris yang tersisa masih dapat memiliki missing value.
-- Export CSV bersifat opsional. Tanpa export, versi bersih tetap tersimpan di workspace dan dapat diekspor kemudian melalui **Export Cleaned Dataset**.
-
-### Strategi missing value
-
-Dialog **Drop Missing Values** menyediakan empat strategi:
-
-- **Drop baris** menghapus baris berdasarkan kolom terpilih (`any` atau `all`).
-- **Drop kolom** menghapus kolom terpilih jika proporsi missing melebihi ambang.
-- **Imputasi** mendukung mean, median, mode, forward/back fill, interpolasi, konstanta, dan statistik per kelompok.
-- **Laporan saja** menghitung dampak tanpa mengubah dataset.
-
-Placeholder umum seperti `-`, `NA`, `null`, `tidak tersedia`, dan `#VALUE!` dinormalisasi. Kolom angka berbentuk teks diparse dengan heuristik format Indonesia maupun internasional; kolom ID/kode tetap berupa teks. Mode nilai 0 otomatis hanya menandai kolom numerik yang mencurigakan dan menampilkan peringatan di pratinjau. Nilai 0 yang valid dapat dipertahankan dengan memilih **Jangan anggap 0 missing**.
-
-Hasil yang dikonfirmasi disimpan sebagai versi baru di workspace. Saat diekspor ke CSV, baris yang dibuang juga disimpan dalam file saudara bernama `<nama>_dropped_rows.csv`. Loader menerima CSV, Excel (`.xlsx`/`.xls`), JSON, dan Parquet; CSV mendeteksi encoding serta delimiter umum secara otomatis.
-
-Contoh pemakaian analyzer:
-
-```python
-from app.analyzer.cleaner import drop_missing
-
-# Dataset produksi padi: nilai produksi nol yang mencurigakan terdeteksi otomatis.
-padi = drop_missing(dataframe_padi, strategy="drop_rows", how="any")
-print(padi.formatted_report)
-
-# Dataset sensor: laporkan dahulu, lalu isi temperatur dengan median per perangkat.
-preview = drop_missing(dataframe_sensor, strategy="report")
-sensor_bersih = drop_missing(
-    dataframe_sensor,
-    strategy="impute",
-    method="median",
-    group_by=["device_id"],
-    zero_as_missing=False,
-)
+<div align="center">
+  <img src="assets/title.svg" alt="DORA: Data Overview Research & Assistant" width="100%" />
+  <br />
+  <img src="https://readme-typing-svg.demolab.com?font=Inter&weight=600&size=18&pause=1200&color=2563EB&center=true&vCenter=true&width=760&lines=Explore+and+prepare+tabular+data;Build+and+evaluate+machine-learning+workflows;Connect+data+questions+to+academic+literature" alt="Explore data, build machine-learning workflows, and discover academic literature" />
+  <br /><br />
+
+  <a href="https://github.com/NezzyGremory/Dataset-Research"><img alt="Primary language: Python" src="https://img.shields.io/badge/primary%20language-Python-3776AB?logo=python&logoColor=white&style=flat-square" /></a>
+  <a href="https://github.com/NezzyGremory/Dataset-Research/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/github/license/NezzyGremory/Dataset-Research?color=0F766E&style=flat-square" /></a>
+  <a href="https://github.com/NezzyGremory/Dataset-Research/commits/main"><img alt="Latest commit" src="https://img.shields.io/github/last-commit/NezzyGremory/Dataset-Research?color=2563EB&style=flat-square" /></a>
+  <a href="https://github.com/NezzyGremory/Dataset-Research/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/NezzyGremory/Dataset-Research?color=7C3AED&style=flat-square" /></a>
+  <img alt="Project status: not declared" src="https://img.shields.io/badge/status-not%20declared-64748B?style=flat-square" />
+  <!-- ISI: set an official project status (for example, active, maintenance, or archived) when confirmed. -->
+</div>
+
+**Data Overview Research & Assistant (DORA)** is the Python desktop application in this repository. It brings local tabular-data exploration, machine-learning workflow tools, and academic-literature discovery into one workspace. The GitHub repository is named `Dataset-Research`.
+
+## Table of Contents
+
+- [About the Project](#about-the-project)
+- [Features](#features)
+- [Dataset](#dataset)
+- [Project Structure](#project-structure)
+- [Tech Stack](#tech-stack)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Workflow](#workflow)
+- [Results and Analysis](#results-and-analysis)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
+- [License](#license)
+- [Contact](#contact)
+- [Support](#support)
+
+## About the Project
+
+DORA helps researchers inspect and prepare tabular datasets, explore machine-learning approaches, and connect a research topic to relevant academic publications. Dataset loading, profiling, cleaning, and model evaluation are implemented in the desktop application; online dataset and paper providers require an internet connection.
+
+The project is a research-support tool rather than a source of authoritative scientific conclusions. Review the original dataset, paper, provider metadata, and model evaluation before relying on an output.
+
+## Features
+
+### Dataset exploration
+
+- Load local CSV, TSV, Excel (`.xlsx` / `.xls`), JSON, or Parquet files.
+- Search and download tabular datasets from Kaggle and Hugging Face through the Dataset Search page.
+- Review dataset shape, column types, descriptive statistics, missing values, duplicates, outliers, correlations, and data-quality signals.
+- Create cleaned dataset versions and keep dataset revisions in the local workspace.
+- Review ML-readiness information such as target candidates, class balance, data leakage signals, and preprocessing guidance.
+
+### Machine-learning workflows
+
+- Detect candidate task types and target columns from dataset information.
+- Review method recommendations and available model-evaluation metrics.
+- Build, validate, save, and run visual workflows in the Node Editor; export workflow code and notebook artifacts from its available actions.
+- Edit and execute Python analysis cells in the notebook-style Editor Analysis page, and open or save `.ipynb` notebooks.
+
+### Academic research
+
+- Search paper metadata through provider adapters for OpenAlex, Crossref, Semantic Scholar, Europe PMC, and OpenAIRE.
+- Review ranked and de-duplicated papers, publication metadata, research trends, landscape summaries, and candidate research gaps.
+- Use separate journal-index and accreditation checks where the configured provider supports them.
+- Generate a report from available dataset, ML, and research information.
+- Use local explainers and optional Gemini-backed explanations where configured.
+
+<details>
+  <summary>More about the evaluation tools</summary>
+
+  The separate `evaluation/` package contains runners for task/domain detection, method recommendations, quality, robustness, performance, ranking and gap labels, and deduplication checks. It can save machine-readable evaluation reports under the local `data/evaluation/results/` directory. Some research-ranking evaluations require human-labeled inputs; the evaluation protocol describes the requirements and interpretation limits.
+</details>
+
+## Dataset
+
+This repository is an application, not a dataset release. There is no fixed research dataset, notebook, row count, or feature schema committed with the source. Row and column counts depend on the file selected by the user or the provider result downloaded at runtime.
+
+| Dataset source | Formats | Rows and columns | How to obtain it |
+| --- | --- | --- | --- |
+| User-provided tabular data | CSV, TSV, XLSX, XLS, JSON, Parquet | Varies by file; the application displays the loaded shape and column names. | Select a local file in the Dataset page. |
+| Public community datasets | Kaggle and Hugging Face results; available file types depend on the provider entry. | Varies by dataset and selected file. | Search by keyword in **Dataset Search**, review the source page and license, then download. |
+| Evaluation datasets | OpenML IDs and provenance are described by the local evaluation manifest when available; downloaded copies are stored as CSV under `data/evaluation/`. | Varies by dataset ID and split. No single row or feature count applies to the suite. | Provide `evaluation/manifests/dataset_ground_truth.csv`, then run the evaluation download command below. |
+
+The dataset loader accepts files up to **100 MB**. Dataset Search can directly download JSONL files from supported provider entries, but `.jsonl` is not one of the dataset loader's accepted input suffixes; convert it to a supported format before importing it into analysis.
+
+Evaluation manifests, downloaded datasets, application databases, and evaluation results are local runtime data and are not included in the versioned source. Do not commit user data, provider credentials, or `.env` files.
+
+<!-- ISI: if this repository is intended to ship a fixed research dataset, document its canonical source, license, version, row count, target, and important feature columns here. -->
+
+## Project Structure
+
+```text
+.
+├── app/
+│   ├── ai/                 Local and optional remote explainers
+│   ├── analyzer/           Dataset loading, profiling, cleaning, and quality analysis
+│   ├── core/               App configuration, constants, exceptions, and logging
+│   ├── dataset_search/     Kaggle and Hugging Face search/download clients
+│   ├── ml/                 Task detection, recommendations, evaluation, and graph engine
+│   ├── nlp/                Keyword, domain, and text-similarity helpers
+│   ├── reports/            Report generation and HTML template
+│   ├── research/           Paper providers, ranking, trends, landscape, and gap analysis
+│   ├── storage/            SQLite repositories and dataset-version management
+│   └── ui/                 PySide6 pages, notebook editor, Node Editor, QSS, and assets
+├── assets/                 README title and results-placeholder illustrations
+├── docs/                   Evaluation, installer, release, and implementation notes
+├── evaluation/             Evaluation runners, metrics, and protocol (data manifest supplied separately)
+├── installer/              Inno Setup installer definition
+├── scripts/                Project utility scripts
+├── tests/                  Automated tests
+├── tools/                  Screenshot and documentation helpers
+├── .env.example            Example environment configuration
+├── Dataset Research.spec  PyInstaller build specification
+├── LICENSE                 MIT license
+├── pytest.ini              Test discovery configuration
+├── requirements.txt        Desktop application dependencies
+├── requirements-build.txt  Windows packaging dependencies
+├── run.py                  Application launcher
+└── build_windows_installer.bat  Windows packaging entry point
 ```
 
-Tambahkan marker khusus dengan `extra_placeholders=["belum diukur"]`. Untuk menganggap 0 sebagai missing pada kolom terpilih saja, gunakan `zero_as_missing=False, zero_cols=["measurement"]`.
+The application creates a local `data/` workspace for databases, downloads, dataset versions, and evaluation artifacts. That runtime data is intentionally excluded from the repository.
 
-## Persyaratan dan teknologi
+## Tech Stack
 
-Snapshot lingkungan pengembangan yang digunakan saat ini:
+<div>
+  <img alt="Python" src="https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=white" />
+  <img alt="PySide6" src="https://img.shields.io/badge/PySide6-41CD52?logo=qt&logoColor=white" />
+  <img alt="pandas" src="https://img.shields.io/badge/pandas-150458?logo=pandas&logoColor=white" />
+  <img alt="NumPy" src="https://img.shields.io/badge/NumPy-013243?logo=numpy&logoColor=white" />
+  <img alt="scikit-learn" src="https://img.shields.io/badge/scikit--learn-F7931E?logo=scikitlearn&logoColor=white" />
+  <img alt="SciPy" src="https://img.shields.io/badge/SciPy-8CAAE6?logo=scipy&logoColor=white" />
+  <img alt="PyArrow" src="https://img.shields.io/badge/PyArrow-4A90D9?logo=apache&logoColor=white" />
+  <img alt="Matplotlib" src="https://img.shields.io/badge/Matplotlib-11557C?logo=plotly&logoColor=white" />
+  <img alt="httpx" src="https://img.shields.io/badge/httpx-2563EB?logo=python&logoColor=white" />
+  <img alt="SQLite" src="https://img.shields.io/badge/SQLite-003B57?logo=sqlite&logoColor=white" />
+</div>
 
-- Python 3.13.12
-- PySide6 6.11.2
-- pandas, NumPy, SciPy, scikit-learn, PyArrow, dan matplotlib
-- httpx untuk koneksi layanan pencarian
-- SQLite lokal untuk penyimpanan aplikasi
+The dependency list also includes `python-dotenv`, `Jinja2`, `openpyxl`, and `xlrd`. `pytest`, Pillow, and PyInstaller are included in the project requirement files for development or packaging workflows. Dependency versions in `requirements.txt` are not pinned.
 
-Versi di `requirements.txt` tidak dikunci; snapshot di atas bukan pernyataan rentang versi resmi.
+## Installation
 
-## Menjalankan dari source
-
-Di PowerShell pada folder project:
+The steps below use Windows PowerShell, matching the repository's documented Windows installer workflow.
 
 ```powershell
+git clone https://github.com/NezzyGremory/Dataset-Research.git
+Set-Location Dataset-Research
+
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
+
+python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 python run.py
 ```
 
-Jika PowerShell memblokir aktivasi environment, jalankan Python di environment tersebut langsung:
+<!-- ISI: confirm and state the officially supported Python version range. The requirements file does not pin a Python version. -->
+
+If PowerShell blocks virtual-environment activation, call its interpreter directly:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe run.py
 ```
 
-## Konfigurasi opsional
+<details>
+  <summary>Build the Windows installer</summary>
 
-Salin `.env.example` menjadi `.env` hanya jika perlu mengatur layanan tambahan. Jangan commit `.env` atau menaruh kredensial di kode.
+  The installer documentation lists Windows 10 or 11 (64-bit), Python, a project virtual environment, and Inno Setup 6 as prerequisites.
 
-- `GEMINI_API_KEY`: penjelasan opsional berbasis Gemini pada fitur yang mendukungnya.
-- `SEMANTIC_SCHOLAR_API_KEY`: opsional untuk batas pemakaian layanan yang lebih tinggi.
-- `ELSEVIER_API_KEY`: diperlukan untuk pemeriksaan Scopus dan tetap bergantung pada entitlement akun Elsevier.
+  ```powershell
+  .\.venv\Scripts\python.exe -m pip install -r requirements-build.txt
+  .\build_windows_installer.bat
+  ```
 
-## Struktur project
+  Build output is written under `hasil_compile/`. See [`docs/WINDOWS_INSTALLER.md`](docs/WINDOWS_INSTALLER.md) for packaging and data-location details.
+</details>
 
-```text
-app/
-  ai/             Penjelasan research gap lokal dan layanan opsional
-  analyzer/       Profiling, statistik, kualitas, dan diagnostik dataset
-  core/           Konfigurasi, konstanta, exception, dan logger
-  dataset_search/ Pencarian dan unduhan Kaggle/Hugging Face
-  ml/             Deteksi task dan rekomendasi/evaluasi ML
-  nlp/            Ekstraksi kata kunci, kemiripan teks, dan domain
-  research/       Pencarian paper, ranking, indeks, landscape, dan gap
-  reports/        Pratinjau dan ekspor laporan
-  storage/        Penyimpanan lokal SQLite dan versi dataset
-  ui/             Halaman PySide6, kernel editor, QSS, dan aset
-  utils/          Utilitas bersama
-data/             Data runtime lokal; diabaikan oleh Git
-docs/             Panduan project
-screenshots/      Gambar dokumentasi UI
-tests/            Tes otomatis
-tools/             Utilitas pengembangan dan dokumentasi
-run.py             Entry point aplikasi
-```
+## Usage
 
-## Pemeriksaan project
+### Open the desktop application
 
 ```powershell
-python -m pytest tests/ -v
-python -m evaluation.run --only all --offline --dev --quick
+python run.py
 ```
 
-Runner evaluasi cepat bekerja offline. Evaluasi benchmark final memerlukan dataset dan label yang disiapkan sesuai [protokol evaluasi](docs/EVALUATION_PROTOCOL.md).
+The command starts the DORA desktop workspace. From there, choose a dataset, inspect its profile, and continue into analysis, ML workflows, or academic research.
 
-## Dokumentasi lain
+### Run the optional evaluation workflow
 
-- [Panduan GitHub Release DORA](docs/GITHUB_RELEASE_DORA.md) — langkah rilis v5.0.0, pemeriksaan versi/tag, dan deskripsi siap-tempel.
-- [Panduan Windows Installer](docs/WINDOWS_INSTALLER.md)
-- [Protokol Evaluasi](docs/EVALUATION_PROTOCOL.md)
-- [Catatan UI](docs/UI_PROGRESS.md)
+The evaluation runner requires its manifest and relevant local datasets/labels. These inputs are not bundled in the Git repository. With the manifest available, download the DEV split and run a quick offline pass against the local cache:
 
-## Tim dan lisensi
+```powershell
+python -m evaluation.download_datasets --dev
+python -m evaluation.run --only all --dev --quick --offline
+```
 
-DORA dikembangkan oleh **Metriks Studio** untuk kebutuhan pembelajaran, riset, dan portofolio. Lihat [LICENSE](LICENSE) serta lisensi masing-masing dependency dan layanan data sebelum mendistribusikan aplikasi.
+Example downloader output (the dataset count depends on the supplied manifest):
+
+```text
+Split DEV: <N> dataset; SHA-256 dicatat.
+```
+
+The evaluation runner writes a JSON report under `data/evaluation/results/`. Modules can report `SELESAI`, `TIDAK DIJALANKAN`, or `GAGAL` depending on available inputs; skipped or failed components must not be interpreted as a zero score. See [`docs/EVALUATION_PROTOCOL.md`](docs/EVALUATION_PROTOCOL.md) before citing benchmark results.
+
+## Workflow
+
+```mermaid
+flowchart LR
+    A[Upload a dataset or search a provider] --> B[Load and normalize the table]
+    B --> C[Profile data and review quality]
+    C --> D[Clean data or create a dataset version]
+    D --> E[Detect task and review ML methods]
+    E --> F[Evaluate a model or run a node workflow]
+    D --> G[Build a research query]
+    G --> H[Search academic providers]
+    H --> I[Deduplicate and rank papers]
+    I --> J[Review trends, landscape, and gap candidates]
+    F --> K[Generate a report]
+    J --> K
+```
+
+The diagram describes available application paths. Provider coverage, dataset suitability, model quality, and research-gap candidates depend on the selected inputs and should be reviewed by the researcher.
+
+## Results and Analysis
+
+The repository contains analysis and evaluation code, but no published aggregate benchmark report or fixed dataset. No accuracy, ranking, performance, or research-gap score is asserted here.
+
+| Area | What the project computes or presents | Quantitative result in the repository |
+| --- | --- | --- |
+| Dataset analysis | Profiles, quality indicators, missing-value and duplicate checks, outlier/correlation views | No fixed dataset-level result; input-dependent |
+| ML workflows | Task/target candidates, method suggestions, and available model metrics | No benchmark score published in this README |
+| Academic research | Provider results, paper ranking, landscape/trend summaries, and gap candidates | Live/provider-dependent; no human-labeled aggregate result published here |
+| Evaluation package | Reproducibility-oriented evaluation reports for configured datasets and labels | Local reports are generated at runtime and are not versioned |
+
+<p align="center">
+  <img src="assets/results-placeholder.svg" alt="Placeholder for a future chart based on verified, reproducible evaluation results" width="760" />
+</p>
+
+<!-- ISI: replace the placeholder chart only after committing or linking a reproducible evaluation report with dataset provenance, split, sample size, and uncertainty. -->
+
+## Roadmap
+
+### Available in the source
+
+- [x] Local tabular-data loading, profiling, cleaning, and quality review
+- [x] Dataset discovery through Kaggle and Hugging Face
+- [x] ML task detection, recommendations, evaluation, and visual node workflows
+- [x] Academic paper discovery, ranking, trend/landscape analysis, and gap candidates
+- [x] Report generation and a separate evaluation runner
+
+### Follow-up documentation and evaluation
+
+- [ ] Publish reproducible quantitative results after the required benchmark inputs and human labels are prepared
+- [ ] Confirm the project's official maintenance status and Python support range
+- [ ] Add a fixed dataset card only if the repository begins distributing a canonical dataset
+
+<!-- ISI: replace or extend these follow-up items with the maintainers' confirmed priorities. -->
+
+## Contributing
+
+Contributions are welcome. For a change:
+
+1. Open an issue or discussion describing the problem or proposed improvement.
+2. Create a focused branch and keep changes scoped to the relevant application area.
+3. Add or update tests for behavior changes, and run the checks relevant to the change.
+4. Open a pull request with a short summary and verification notes.
+
+Do not include private datasets, generated evaluation results, credentials, or `.env` files in a contribution.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE). Third-party packages, dataset providers, and academic-data services may have their own terms and licenses.
+
+## Contact
+
+- **Author:** Abdul muhis
+- **Project repository:** [NezzyGremory/Dataset-Research](https://github.com/NezzyGremory/Dataset-Research)
+- **Author profile:** Not listed in the repository. <!-- ISI: add the author's confirmed GitHub profile URL. -->
+- **Other contact:** Not listed. <!-- ISI: add an email, website, or ORCID if desired. -->
+
+## Support
+
+<div align="center">
+  <p>If DORA is useful to your work, consider giving the repository a star.</p>
+  <a href="https://github.com/NezzyGremory/Dataset-Research/stargazers"><img alt="Star Dataset-Research on GitHub" src="https://img.shields.io/github/stars/NezzyGremory/Dataset-Research?style=for-the-badge&logo=github&color=2563EB" /></a>
+  <p><sub>Use results responsibly, cite original data and papers, and share reproducible improvements.</sub></p>
+</div>
