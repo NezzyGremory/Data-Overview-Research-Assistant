@@ -46,9 +46,21 @@ GEMINI.md
 COPILOT_INSTRUCTIONS.md
 .agents/
 .codex/
+.opencode/
 .claude/
 .cursor/
 .github/copilot-instructions.md
+
+# Local JavaScript tooling caches; application source remains Python
+node_modules/
+bower_components/
+.npm/
+.yarn/cache/
+.pnp.*
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+*.tsbuildinfo
 
 # Runtime databases, logs, and local datasets
 data/*
@@ -81,6 +93,11 @@ logs/
 *.npz
 *.pkl
 *.joblib
+
+# Local scratch outputs not used by the application
+/install.ps1
+/potongan-node.json
+*.backup.md
 
 # Generated builds, installers, and binary archives
 build/
