@@ -1042,6 +1042,11 @@ class ResearchIntelligenceEngine:
                         external_id=item.get("external_id"),
                         keywords=keywords,
                         issn=issn,
+                        source_urls=(
+                            item.get("source_urls", [])
+                            if isinstance(item.get("source_urls"), list)
+                            else []
+                        ),
                     )
                 )
             except Exception:

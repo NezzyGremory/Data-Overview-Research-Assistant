@@ -714,6 +714,7 @@ class DatasetPreviewPage(QWidget):
             item = self.pagination_pages_layout.takeAt(0)
             widget = item.widget()
             if widget is not None:
+                widget.setParent(None)
                 widget.deleteLater()
         current = self._current_page
         if total_pages <= 7:
@@ -988,6 +989,7 @@ class DatasetPreviewPage(QWidget):
             item = self.columns_content_layout.takeAt(0)
             widget = item.widget()
             if widget is not None:
+                widget.setParent(None)
                 widget.deleteLater()
 
     def _populate_column_rows(self, dataframe: pd.DataFrame):

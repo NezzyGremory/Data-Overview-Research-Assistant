@@ -10,10 +10,6 @@ openpyxl
 xlrd
 jinja2
 matplotlib
-fastapi
-uvicorn[standard]
-mysql-connector-python
-pydantic
 pytest
 Pillow
 PyInstaller

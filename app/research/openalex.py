@@ -112,6 +112,11 @@ class OpenAlexClient:
             external_id=item.get("id"),
             keywords=keywords,
             issn=(source.get("issn") or ([source.get("issn_l")] if source.get("issn_l") else [])),
+            source_urls=(
+                [{"source": "OpenAlex", "url": str(item.get("id"))}]
+                if item.get("id")
+                else []
+            ),
         )
 
     @staticmethod

@@ -305,6 +305,7 @@ class ReportGenerator:
 
         candidate_models = []
         winner_model = None
+        best_model_status_label = None
 
         if ml_evaluated:
             # Winner model
@@ -345,6 +346,9 @@ class ReportGenerator:
                 "folds": best_info.get("folds", 5),
                 "rationale": "Model dengan performa rata-rata tertinggi dan variansi terkecil pada validasi k-fold cross validation.",
             }
+            # The benchmark winner is the best performer supported by the
+            # measured results, so the report labels it as such.
+            best_model_status_label = "Best Empirical Performer"
 
             # Map recommendations knowledge base for strengths and limitations
             knowledge_map = {}
@@ -384,7 +388,15 @@ class ReportGenerator:
                 })
 
         # Research Context
-        research_executed = bool(research_data and research_data.get("status") in {"SUCCESS", "PARTIAL"})
+        # A search that returned papers counts as executed even when the
+        # caller does not report an explicit success status.
+        research_executed = bool(
+            research_data
+            and (
+                research_data.get("papers")
+                or research_data.get("status") in {"SUCCESS", "PARTIAL"}
+            )
+        )
         domain_info = research_data.get("domain") or {}
         domain_name = domain_info.get("domain") or domain_info.get("primary_domain") or "Multidisciplinary / General"
 
@@ -479,6 +491,7 @@ class ReportGenerator:
             "missing_cells_fmt": f"{missing_cells:,}",
             "best_model_name": best_model_name,
             "best_model_score": best_model_score,
+            "best_model_status_label": best_model_status_label,
             "papers_count": len(raw_papers),
             "memory_usage": memory_usage,
             "numeric_col_count": numeric_count,

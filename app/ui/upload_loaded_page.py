@@ -10,6 +10,7 @@ from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QHeaderView,
@@ -40,6 +41,8 @@ class LoadedUploadPage(QWidget):
         self.main_window = upload_page.main_window
         self._dataframe: pd.DataFrame | None = None
         self._filename = ""
+        self._current_page = 0
+        self._page_size = 10
         self._icons = Path(__file__).resolve().parent / "assets" / "icons"
         self._build_ui()
 
@@ -196,7 +199,7 @@ class LoadedUploadPage(QWidget):
         self.table = DatasetTableView()
         self.table.setObjectName("uploadLoadedTable")
         self.model = DataFrameTableModel(
-            pd.DataFrame(), include_index=False, detailed_headers=False, parent=self.table
+            pd.DataFrame(), include_index=True, detailed_headers=False, parent=self.table
         )
         self.table.setModel(self.model)
         self.table.setSelectionBehavior(QAbstractItemView.SelectItems)
@@ -229,6 +232,35 @@ class LoadedUploadPage(QWidget):
         grid_hint.setObjectName("uploadLoadedGridHint")
         footer.addWidget(grid_hint)
         footer.addStretch(1)
+
+        rows_hint = QLabel("Tampilkan")
+        rows_hint.setObjectName("uploadLoadedGridHint")
+        footer.addWidget(rows_hint)
+        self.page_size_combo = QComboBox()
+        self.page_size_combo.setObjectName("datasetPreviewPageSize")
+        self.page_size_combo.addItems(("10", "25", "50"))
+        self.page_size_combo.setFixedWidth(_px(64))
+        self.page_size_combo.currentTextChanged.connect(self._set_page_size)
+        footer.addWidget(self.page_size_combo)
+        unit_label = QLabel("baris")
+        unit_label.setObjectName("uploadLoadedGridHint")
+        footer.addWidget(unit_label)
+        footer.addSpacing(_px(12))
+
+        self.previous_page_button = QPushButton("‹")
+        self.previous_page_button.setObjectName("datasetPreviewPageButton")
+        self.previous_page_button.setProperty("arrow", True)
+        self.previous_page_button.setFixedSize(_px(30), _px(30))
+        self.previous_page_button.clicked.connect(lambda: self._change_page(-1))
+        footer.addWidget(self.previous_page_button)
+        self.next_page_button = QPushButton("›")
+        self.next_page_button.setObjectName("datasetPreviewPageButton")
+        self.next_page_button.setProperty("arrow", True)
+        self.next_page_button.setFixedSize(_px(30), _px(30))
+        self.next_page_button.clicked.connect(lambda: self._change_page(1))
+        footer.addWidget(self.next_page_button)
+        footer.addSpacing(_px(8))
+
         self.continue_button = QPushButton("Lanjut ke Informasi Dataset")
         self.continue_button.setObjectName("uploadLoadedContinueButton")
         self._set_button_icon(self.continue_button, "figma-upload-continue.svg", 16)
@@ -266,12 +298,54 @@ class LoadedUploadPage(QWidget):
         )
 
     def _refresh_table(self):
+        self._current_page = 0
+        self._apply_table_page()
+
+    def _set_page_size(self, value: str):
+        try:
+            self._page_size = max(1, int(value))
+        except (TypeError, ValueError):
+            self._page_size = 10
+        self._current_page = 0
+        self._apply_table_page()
+
+    def _change_page(self, offset: int):
+        total_pages = self._total_pages()
+        self._current_page = min(max(self._current_page + offset, 0), total_pages - 1)
+        self._apply_table_page()
+
+    def _go_to_page(self, page: int):
+        total_pages = self._total_pages()
+        self._current_page = min(max(int(page), 0), total_pages - 1)
+        self._apply_table_page()
+
+    def _total_pages(self) -> int:
+        total_rows = len(self._dataframe) if self._dataframe is not None else 0
+        return max(1, (total_rows + self._page_size - 1) // self._page_size)
+
+    def _apply_table_page(self):
         dataframe = self._dataframe
-        visible = dataframe if dataframe is not None else pd.DataFrame()
-        self.model.set_dataframe(visible, row_offset=0)
-        self.rows_summary.setText(
-            f"{len(visible):,} baris  |  scroll untuk menjelajahi"
+        if dataframe is None:
+            dataframe = pd.DataFrame()
+        row_start = self._current_page * self._page_size
+        row_end = min(row_start + self._page_size, len(dataframe))
+        self.model.set_dataframe(
+            dataframe.iloc[row_start:row_end],
+            row_offset=row_start,
         )
+        if len(dataframe):
+            self.rows_summary.setText(
+                f"Menampilkan {row_start + 1}–{row_end} dari {len(dataframe):,} baris"
+            )
+        else:
+            self.rows_summary.setText("0 baris")
+        total_pages = self._total_pages()
+        previous_button = getattr(self, "previous_page_button", None)
+        if previous_button is not None:
+            previous_button.setEnabled(self._current_page > 0)
+        next_button = getattr(self, "next_page_button", None)
+        if next_button is not None:
+            next_button.setEnabled(self._current_page + 1 < total_pages)
         self._resize_columns()
 
     def _resize_columns(self):
@@ -283,12 +357,17 @@ class LoadedUploadPage(QWidget):
             "SibSp": 84, "Parch": 84, "Ticket": 156, "Fare": 104,
             "Cabin": 110, "Embarked": 110,
         }
-        for column in range(self.model.columnCount()):
-            name = str(self._dataframe.columns[column])
-            series = self._dataframe.iloc[:, column]
+        # The model prepends a row-number column when it shows one, so the
+        # dataframe columns start at that offset in the view.
+        index_offset = max(self.model.columnCount() - len(self._dataframe.columns), 0)
+        if index_offset:
+            self.table.setColumnWidth(0, _px(54))
+        for position in range(len(self._dataframe.columns)):
+            name = str(self._dataframe.columns[position])
+            series = self._dataframe.iloc[:, position]
             fallback = 105 if pd.api.types.is_numeric_dtype(series.dtype) else 168
             width = preferred_widths.get(name, fallback)
-            self.table.setColumnWidth(column, _px(width))
+            self.table.setColumnWidth(position + index_offset, _px(width))
 
     def _open_tab(self, tab_index: int):
         for index, button in enumerate(self.tab_buttons):

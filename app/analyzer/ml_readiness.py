@@ -706,11 +706,15 @@ def analyze_ml_readiness(
     """Compute structured, read-only pre-modeling diagnostics for one dataset."""
     if dataframe is None:
         dataframe = pd.DataFrame()
-    original = dataframe.copy(deep=True)
+    # All helpers below treat their input as read-only. Keep the full dataset by
+    # reference for whole-dataset checks, and only allocate when sampling is
+    # needed. Copying here duplicated a potentially large frame before the
+    # analysis even began.
+    original = dataframe
     sampled = len(original) > SAMPLE_THRESHOLD
     analysis_df = (
         original.sample(ANALYSIS_SAMPLE_SIZE, random_state=42)
-        if sampled else original.copy(deep=True)
+        if sampled else original
     )
     target, task, candidates = _selected_target(analysis_df, target, task)
     column_types = detect_column_types(analysis_df)

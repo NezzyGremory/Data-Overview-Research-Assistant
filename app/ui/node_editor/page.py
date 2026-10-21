@@ -860,14 +860,43 @@ class _DatasetAnalysisSignals(QObject):
 
 
 class _DatasetAnalysisWorker(QRunnable):
-    def __init__(self, generation, dataframe, target_column, dataset_path=None, loader=None):
+    def __init__(
+        self, generation, dataframe, target_column, dataset_path=None, loader=None,
+        reference_detection=None,
+    ):
         super().__init__()
         self.generation = generation
         self.dataframe = dataframe
         self.target_column = target_column
         self.dataset_path = dataset_path
         self.loader = loader
+        self.reference_detection = reference_detection or {}
         self.signals = _DatasetAnalysisSignals()
+
+    @staticmethod
+    def _is_likely_numeric_class_target(dataframe, target_column):
+        if target_column not in dataframe.columns:
+            return False
+        series = dataframe[target_column].dropna()
+        if series.empty or not pd.api.types.is_numeric_dtype(series):
+            return False
+        tokens = set(
+            str(target_column).casefold().replace("-", "_").replace(" ", "_").split("_")
+        )
+        class_name_hints = {
+            "class", "label", "category", "categorical", "status", "type",
+            "grade", "species", "diagnosis", "outcome", "churn", "survived",
+            "approved", "default", "response",
+        }
+        if not tokens.intersection(class_name_hints):
+            return False
+        unique_count = int(series.nunique(dropna=True))
+        class_limit = min(100, max(30, int(math.sqrt(len(series)) * 3)))
+        integer_like = (
+            pd.api.types.is_integer_dtype(series.dtype)
+            or bool(series.mod(1).eq(0).all())
+        )
+        return integer_like and 2 <= unique_count <= class_limit
 
     @Slot()
     def run(self):
@@ -879,11 +908,74 @@ class _DatasetAnalysisWorker(QRunnable):
                 if self.loader is None or not self.dataset_path:
                     raise RuntimeError("Loader dataset aplikasi tidak tersedia.")
                 dataframe = self.loader.load(self.dataset_path)
+            reference_target = self.reference_detection.get("target_column")
+            reference_task = self.reference_detection.get("task_type")
+            reference_applies = bool(
+                reference_target
+                and reference_task
+                and self.target_column in (None, reference_target)
+            )
+            target_column = self.target_column or (
+                reference_target if reference_applies else None
+            )
             detection = detect_task(
                 dataframe,
-                target_column=self.target_column,
-                auto_guess_target=True,
+                target_column=target_column,
+                auto_guess_target=not bool(target_column),
             )
+            detected_task = str(detection.get("task_type") or "")
+            detected_target = detection.get("target_column")
+            target_to_use = (
+                reference_target if reference_applies
+                else self.target_column or detected_target
+            )
+            resolved_task = reference_task if reference_applies else detected_task
+            if reference_applies and reference_task == "regression":
+                if "classification" in detected_task:
+                    resolved_task = detected_task
+            if (
+                resolved_task == "regression"
+                and self._is_likely_numeric_class_target(dataframe, target_to_use)
+            ):
+                class_count = int(dataframe[target_to_use].nunique(dropna=True))
+                resolved_task = (
+                    "binary_classification" if class_count == 2
+                    else "multiclass_classification"
+                )
+
+            if target_to_use and resolved_task:
+                detection["target_column"] = target_to_use
+                detection["task_type"] = resolved_task
+                profile = detection.get("profile", {})
+                target_info = profile.get("target_info", {}) if isinstance(profile, dict) else {}
+                target_series = dataframe[target_to_use].dropna()
+                class_counts = target_series.value_counts()
+                if resolved_task != detected_task:
+                    detection["reason"] = (
+                        f"Target '{target_to_use}' memiliki {len(class_counts)} "
+                        "kelas diskrit; Node Editor mengarahkannya ke klasifikasi."
+                    )
+                elif reference_applies:
+                    detection["reason"] = (
+                        "Mengikuti target dan task dari Dataset Analysis: "
+                        f"{resolved_task.replace('_', ' ')} pada '{target_to_use}'."
+                    )
+                if "classification" in resolved_task and len(class_counts):
+                    target_info.update({
+                        "target_column": target_to_use,
+                        "unique_count": int(target_series.nunique()),
+                        "target_type": "binary" if len(class_counts) == 2 else "multiclass",
+                        "is_imbalanced": (
+                            float(class_counts.min() / class_counts.max()) < 0.35
+                            if class_counts.max() else False
+                        ),
+                        "imbalance_ratio": (
+                            round(float(class_counts.min() / class_counts.max()), 3)
+                            if class_counts.max() else 1.0
+                        ),
+                        "class_counts": class_counts.head(10).to_dict(),
+                    })
+                    profile["target_info"] = target_info
             generated_templates = generate_template_graphs(
                 dataframe,
                 detection.get("target_column"),
@@ -934,6 +1026,7 @@ class NodeEditorPage(QWidget):
         self.connection_start = None
         self.connection_preview = None
         self._active_dataset_token = None
+        self._workspace_target_column = None
         self._suppressed_source_dataset_id = -1
         self._task_label = "Belum terdeteksi"
         self._has_dataset = False
@@ -1516,7 +1609,9 @@ class NodeEditorPage(QWidget):
             "train", "evaluate", "cross_validate", "grid_search", "random_search",
             "halving_grid_search", "halving_random_search", "optuna",
         }:
-            detected_type = (getattr(self, "detected_task", {}) or {}).get("task_type", "")
+            detected_type = self._normalized_task_type(
+                (getattr(self, "detected_task", {}) or {}).get("task_type", "")
+            )
             if detected_type in {"classification", "regression"} and parameters.get("task", "auto") == "auto":
                 parameters["task"] = detected_type
             elif detected_type == "regression" and parameters.get("task") == "classification":
@@ -1534,6 +1629,15 @@ class NodeEditorPage(QWidget):
         self._schedule_history_snapshot()
         self.validate_graph(show_tab=False)
         return node
+
+    @staticmethod
+    def _normalized_task_type(task_type):
+        normalized = str(task_type or "").strip().casefold()
+        if "classification" in normalized:
+            return "classification"
+        if normalized == "regression":
+            return "regression"
+        return normalized
 
     def _next_node_id(self):
         index = 1
@@ -1959,6 +2063,7 @@ class NodeEditorPage(QWidget):
             self._dataset_analysis_pending = None
             self._dataset_analysis_cache = None
             self._active_dataset_token = None
+            self._workspace_target_column = None
             self._template_key = None
             if self._dataset_scope == "graph":
                 message = "Dataset khusus graf belum dipilih"
@@ -1997,18 +2102,38 @@ class NodeEditorPage(QWidget):
         rows, columns = dataframe.shape if dataframe is not None else (0, 0)
         previous_token = self._active_dataset_token
         self._active_dataset_token = id(dataframe) if dataframe is not None else None
+        dataset_changed = previous_token != self._active_dataset_token
+        if dataset_changed:
+            self._workspace_target_column = None
         if previous_token is not None and previous_token != self._active_dataset_token:
             self.engine._cache.clear()
             for node_id, node in self.engine.nodes.items():
                 node.status = "menunggu"
                 if node_id in self.items:
                     self.items[node_id].set_status(node.status)
-        # 1. Identify target from existing nodes if configured
-        target_col = None
-        for node in self.engine.nodes.values():
-            if node.parameters.get("target"):
-                target_col = node.parameters["target"]
-                break
+        # Follow Workspace's current target when it is available. Saved graph
+        # nodes can still hold a target guessed for a previous dataset.
+        reference_detection = self._workspace_analysis_detection(dataframe)
+        target_col = (
+            reference_detection.get("target_column")
+            if reference_detection is not None
+            else None
+        )
+        if (
+            target_col is None
+            and self._dataset_scope == "workspace"
+            and not dataset_changed
+            and self._workspace_target_column in dataframe.columns
+        ):
+            target_col = self._workspace_target_column
+        if target_col is None and self._dataset_scope != "workspace":
+            for node in self.engine.nodes.values():
+                candidate_target = node.parameters.get("target")
+                if candidate_target and (
+                    dataframe is None or candidate_target in dataframe.columns
+                ):
+                    target_col = candidate_target
+                    break
 
         sync_key = (
             ("path", dataset_path, target_col)
@@ -2021,7 +2146,21 @@ class NodeEditorPage(QWidget):
         generation = self._dataset_sync_generation
 
         cached = self._dataset_analysis_cache
-        if cached is not None and cached["key"] == sync_key:
+        cached_detection = cached.get("detection", {}) if cached is not None else {}
+        reference_matches_cache = (
+            reference_detection is None
+            or (
+                cached_detection.get("target_column")
+                == reference_detection.get("target_column")
+                and cached_detection.get("task_type")
+                == reference_detection.get("task_type")
+            )
+        )
+        if (
+            cached is not None
+            and cached["key"] == sync_key
+            and reference_matches_cache
+        ):
             self._apply_dataset_analysis(
                 generation,
                 dataframe,
@@ -2051,10 +2190,48 @@ class NodeEditorPage(QWidget):
 
         self._start_dataset_analysis(request)
 
+    def _workspace_analysis_detection(self, dataframe):
+        if self._dataset_scope != "workspace":
+            return None
+        if dataframe is not getattr(self.main_window, "current_dataset", None):
+            return None
+        analysis = getattr(self.main_window, "analysis_result", {})
+        readiness = analysis.get("ml_readiness", {}) if isinstance(analysis, dict) else {}
+        if not isinstance(readiness, dict):
+            return None
+        target_name = readiness.get("target")
+        task_type = str(readiness.get("task") or "").strip().casefold()
+        if target_name is None:
+            return None
+        target_column = next(
+            (column for column in dataframe.columns if str(column) == str(target_name)),
+            None,
+        )
+        if target_column is None:
+            return None
+        if task_type not in {
+            "binary_classification",
+            "multiclass_classification",
+            "regression",
+        }:
+            return None
+        return {
+            "target_column": target_column,
+            "task_type": task_type,
+        }
+
     def _start_dataset_analysis(self, request):
         generation, dataframe, target_column, sync_key, dataset_path, loader = request
+        workspace_reference = self._workspace_analysis_detection(dataframe)
+        reference_detection = (
+            workspace_reference
+            if workspace_reference is not None
+            and target_column in (None, workspace_reference.get("target_column"))
+            else None
+        )
         worker = _DatasetAnalysisWorker(
-            generation, dataframe, target_column, dataset_path, loader
+            generation, dataframe, target_column, dataset_path, loader,
+            reference_detection,
         )
         self._dataset_analysis_worker = worker
         self._dataset_analysis_active_key = sync_key
@@ -2144,6 +2321,8 @@ class NodeEditorPage(QWidget):
         self.result_tabs.setTabVisible(self.profile_tab_index, True)
         task_type = detection["task_type"]
         detected_target = detection.get("target_column")
+        if self._dataset_scope == "workspace":
+            self._workspace_target_column = detected_target
 
         task_label = {
             "binary_classification": "Klasifikasi Biner",
@@ -2211,6 +2390,31 @@ class NodeEditorPage(QWidget):
             if node.id in self.items:
                 self.items[node.id].set_status(status)
                 self.items[node.id].set_dataset_context(task_label, True)
+
+        if (
+            self._dataset_scope == "workspace"
+            and self._sync_invalid_workspace_targets(dataframe, detected_target)
+        ):
+            self.validate_graph(show_tab=False)
+            if self.scene.selectedItems():
+                self.show_parameters()
+
+    def _sync_invalid_workspace_targets(self, dataframe, target_column):
+        if not target_column or target_column not in dataframe.columns:
+            return False
+        changed = False
+        for node in self.engine.nodes.values():
+            if "target" not in node.parameters:
+                continue
+            current_target = node.parameters.get("target")
+            if current_target and current_target in dataframe.columns:
+                continue
+            node.parameters["target"] = target_column
+            changed = True
+        if changed:
+            self.engine._cache.clear()
+            self._schedule_history_snapshot()
+        return changed
 
     def _build_dataset_templates(self, dataframe, detection, generated):
         task_type = detection.get("task_type", "")
@@ -2573,8 +2777,10 @@ class NodeEditorPage(QWidget):
     def _refresh_profile_view(self, dataframe, unique_counts=None):
         while self.profile_summary_layout.count():
             item = self.profile_summary_layout.takeAt(0)
-            if item.widget() is not None:
-                item.widget().deleteLater()
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
+                widget.deleteLater()
         self.profile_table.setRowCount(0)
         if dataframe is None:
             self.profile_table.setColumnCount(0)
@@ -3669,8 +3875,10 @@ class NodeEditorPage(QWidget):
     def _render_metric_summary(self, *_):
         while self.metric_summary_layout.count():
             item = self.metric_summary_layout.takeAt(0)
-            if item.widget() is not None:
-                item.widget().deleteLater()
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
+                widget.deleteLater()
         if not self._metric_rows:
             empty = QLabel("Jalankan alur untuk melihat metrik evaluasi.")
             empty.setObjectName("nodeEditorEmptyState")

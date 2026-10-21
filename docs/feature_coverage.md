@@ -17,7 +17,6 @@ Status di bawah berdasarkan keberadaan source dan wiring yang diperiksa. Status 
 | Penjelasan berbantuan AI | Hasil penjelasan pada halaman terkait | `app/ai/gemini_explainer.py`, `local_explainer.py`, `research_gap_explainer.py` | Frontend dan service tersedia | Gemini opsional; kode juga menyediakan jalur lokal. Tidak ada kredensial yang dibaca. |
 | Laporan HTML/PDF | `ResearchReportToolPage` dan handler laporan | `app/reports/generator.py`; worker laporan di `MainWindow` | Frontend dan service tersedia | Build/ekspor belum diuji. |
 | Penyimpanan project dan hasil riset | Tidak ada halaman Projects terpisah dalam page stack aktif | `app/storage/database.py`, `project_repository.py`, `research_service.py`, `version_manager.py` | Service tersedia; frontend khusus belum terpetakan | Sebagian operasi dipakai dari alur halaman aktif. |
-| Telemetry API opsional | Integrasi desktop melalui `app/telemetry.py` | `backend/api.py` dan `backend/graph_api.py` | Client dan API tersedia | API terpisah dari analisis dataset lokal. Tidak dijalankan. |
 | Pengaturan aplikasi | Kontrol skala tersedia pada infrastruktur UI | `app/core/config.py`, `app/ui/scale.py` | Parsial | Tidak ada page Settings tersendiri pada daftar aktif yang diperiksa. |
 
 ## Batas audit

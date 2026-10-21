@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLayout,
     QMainWindow,
+    QMenu,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -96,7 +97,6 @@ from app.ui.scale import SCALE_PRESETS, ScaleManager, build_stylesheet, logical_
 from app.storage import Database, ProjectRepository, DatasetVersionManager
 from app.reports import ReportGenerator
 from app.core.config import get_data_dir
-from app.telemetry import get_telemetry
 
 
 # Set to True to restore the Node Editor page and its navigation entry.
@@ -2235,7 +2235,6 @@ class AnalysisPage(QWidget):
         self._visualization_missing_values = None
         self._analysis_thread: QThread | None = None
         self._analysis_worker: DatasetAnalysisWorker | None = None
-        self._analysis_started_at = 0.0
         self._rendered_result_signature = None
         self._deferred_analysis_result = None
         self._detailed_analysis_prompt = None
@@ -2685,20 +2684,23 @@ class AnalysisPage(QWidget):
             ui_px(112 if logical_width(width) < 720 else 86)
         )
         chart_controls = getattr(self, "chart_controls", None)
-        if chart_controls is not None:
-            try:
-                if logical_width(width) < 900:
-                    chart_controls.setDirection(QBoxLayout.TopToBottom)
-                    self.chart_type.setFixedWidth(max(ui_px(180), width - ui_px(80)))
-                    self.chart_column.setMinimumWidth(0)
-                else:
-                    chart_controls.setDirection(QBoxLayout.LeftToRight)
-                    self.chart_type.setFixedWidth(ui_px(338))
-                    self.chart_column.setMinimumWidth(ui_px(200))
-            except RuntimeError:
-                # Result cards are replaced with deleteLater(); a resize callback
-                # can run before Qt has cleared this Python reference.
-                self.chart_controls = None
+        chart_type = getattr(self, "chart_type", None)
+        chart_column = getattr(self, "chart_column", None)
+        if chart_controls is None or chart_type is None or chart_column is None:
+            return
+        try:
+            if logical_width(width) < 900:
+                chart_controls.setDirection(QBoxLayout.TopToBottom)
+                chart_type.setFixedWidth(max(ui_px(180), width - ui_px(80)))
+                chart_column.setMinimumWidth(0)
+            else:
+                chart_controls.setDirection(QBoxLayout.LeftToRight)
+                chart_type.setFixedWidth(ui_px(338))
+                chart_column.setMinimumWidth(ui_px(200))
+        except (RuntimeError, AttributeError):
+            # Result cards are replaced with deleteLater(); a resize callback
+            # can run before Qt has cleared this Python reference.
+            self.chart_controls = None
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -2831,6 +2833,12 @@ class AnalysisPage(QWidget):
             widget = item.widget()
 
             if widget:
+
+                # Lepaskan dari parent visual segera agar resize/show callback
+                # yang berjalan setelah ini tidak mengakses widget yang sudah
+                # ditandai deleteLater (yang menyebabkan RuntimeError dan
+                # mengakibatkan layout makin rusak tiap kali berpindah menu).
+                widget.setParent(None)
                 widget.deleteLater()
 
     # =====================================================
@@ -2851,7 +2859,6 @@ class AnalysisPage(QWidget):
             self._show_analysis_error(error)
             return
 
-        self._analysis_started_at = time.perf_counter()
         self.analyze_button.setEnabled(False)
         self.analyze_button.setText("Analyzing...")
         self._update_readiness(analyzing=True)
@@ -2902,20 +2909,16 @@ class AnalysisPage(QWidget):
         self.result_layout.addStretch()
 
     def _on_analysis_finished(self, result):
-        duration_ms = int((time.perf_counter() - self._analysis_started_at) * 1000)
         try:
-            self.main_window.complete_dataset_analysis(result, duration_ms)
+            self.main_window.complete_dataset_analysis(result)
             self.display_results(result)
         except Exception as error:
-            self.main_window.fail_dataset_analysis(duration_ms)
             self._show_analysis_error(error)
         finally:
             self.analyze_button.setEnabled(True)
             self.analyze_button.setText("Jalankan Analysis")
 
     def _on_analysis_failed(self, error):
-        duration_ms = int((time.perf_counter() - self._analysis_started_at) * 1000)
-        self.main_window.fail_dataset_analysis(duration_ms)
         self._show_analysis_error(error)
         self.analyze_button.setEnabled(True)
         self.analyze_button.setText("Jalankan Analysis")
@@ -3010,6 +3013,7 @@ class AnalysisPage(QWidget):
         self.result_layout.addWidget(overview)
         self.result_layout.addSpacing(28)
         self.result_layout.addWidget(problem_card)
+        self.add_ml_readiness_sections(ml_readiness)
 
         # Detailed tables, version history, and generated explanations can
         # create many widgets. Keep the first Analysis view quick and build
@@ -3073,7 +3077,6 @@ class AnalysisPage(QWidget):
         self.add_cell_outliers(result.get("outliers") or [])
         self.add_versioning_section()
         self.add_cell_gemini(result)
-        self.add_ml_readiness_sections(result.get("ml_readiness") or {})
         self.result_layout.addStretch()
         self._refresh_analysis_layout(self.width())
 
@@ -3830,8 +3833,14 @@ class AnalysisPage(QWidget):
             return []
         if chart_type in ("histogram", "box"):
             # Do not scan every row just to populate the chart selector.
-            # The selected, bounded plot sample checks for constant columns.
-            return list(dataframe.select_dtypes(include=["number"]).columns)
+            # The bounded plot sample drops constant columns, which keeps the
+            # selector in sync with the data the chart can actually draw.
+            sample = AnalysisPage._plot_sample(dataframe)
+            return [
+                column
+                for column in dataframe.select_dtypes(include=["number"]).columns
+                if sample[column].nunique(dropna=True) > 1
+            ]
         if chart_type == "bar":
             sample = AnalysisPage._plot_sample(dataframe)
             return [
@@ -5279,9 +5288,7 @@ class AnalysisPage(QWidget):
         cfg_row.addStretch()
         layout.addLayout(cfg_row)
 
-        telemetry = get_telemetry()
-        delay_ms = int((telemetry.timeout + 0.5) * 1000) if telemetry.enabled else 0
-        QTimer.singleShot(delay_ms, lambda analysis=result: self._start_gemini_explanation(analysis))
+        QTimer.singleShot(0, lambda analysis=result: self._start_gemini_explanation(analysis))
         self.result_layout.addWidget(card)
 
     def _handle_configure_gemini_key(self):
@@ -5460,10 +5467,7 @@ class AnalysisPage(QWidget):
             )
 
         self.main_window.current_dataset = df_dropped
-        self.main_window.dashboard.update_dataset(
-            df_dropped,
-            self.main_window._current_filename(),
-        )
+        self.main_window.update_dataset_state()
         self.run_analysis()
 
         export_now = QMessageBox.question(
@@ -7556,6 +7560,10 @@ class MLIntelligencePage(QWidget):
 
             if widget is not None:
 
+                # Lepaskan dari parent segera agar tidak tertahan di layout
+                # saat deleteLater diproses event loop (mencegah widget
+                # menumpuk / layout rusak saat berpindah menu bolak-balik).
+                widget.setParent(None)
                 widget.deleteLater()
 
             elif item.layout() is not None:
@@ -7581,6 +7589,7 @@ class MLIntelligencePage(QWidget):
 
             if widget is not None:
 
+                widget.setParent(None)
                 widget.deleteLater()
 
             elif item.layout() is not None:
@@ -11048,9 +11057,19 @@ class PapersToolPage(QWidget):
         self.open_source_button.setEnabled(False)
         self.open_source_button.clicked.connect(self._open_selected_source)
 
+        self.source_menu_button = QToolButton()
+        self.source_menu_button.setObjectName("secondaryButton")
+        self.source_menu_button.setText("Tautan penyedia")
+        self.source_menu_button.setPopupMode(QToolButton.InstantPopup)
+        self.source_menu_button.setToolTip("Buka artikel melalui penyedia lain yang tersedia")
+        self.source_menu = QMenu(self.source_menu_button)
+        self.source_menu_button.setMenu(self.source_menu)
+        self.source_menu_button.setVisible(False)
+
         detail_actions = QHBoxLayout()
         detail_actions.addStretch()
         detail_actions.addWidget(self.open_source_button)
+        detail_actions.addWidget(self.source_menu_button)
 
         detail_layout.addWidget(detail_title)
         detail_layout.addWidget(self.paper_detail)
@@ -11114,6 +11133,8 @@ class PapersToolPage(QWidget):
         self.count_label.setText("0 paper")
         self.accreditation_status_label.setText("Penilaian jurnal otomatis saat proses berjalan")
         self.open_source_button.setEnabled(False)
+        self.source_menu.clear()
+        self.source_menu_button.setVisible(False)
         self.sinta_batch_button.setEnabled(False)
         self.other_index_button.setEnabled(False)
         self.sinta_batch_progress.setVisible(False)
@@ -11495,6 +11516,8 @@ class PapersToolPage(QWidget):
             self.paper_detail.setPlainText(
                 "Tidak ada paper yang cocok dengan pencarian atau filter saat ini."
             )
+            self.source_menu.clear()
+            self.source_menu_button.setVisible(False)
 
     # =====================================================
     # DETAIL
@@ -11506,6 +11529,8 @@ class PapersToolPage(QWidget):
         if not rows:
             self.paper_detail.clear()
             self.open_source_button.setEnabled(False)
+            self.source_menu.clear()
+            self.source_menu_button.setVisible(False)
             return
 
         paper = self._paper_for_row(rows[0].row())
@@ -11639,6 +11664,39 @@ class PapersToolPage(QWidget):
 
         self.paper_detail.setPlainText("\n\n".join(lines))
         self.open_source_button.setEnabled(bool(openable_url))
+        self._populate_source_menu(paper, openable_url)
+
+    def _populate_source_menu(self, paper, primary_url):
+        self.source_menu.clear()
+        primary_key = str(primary_url or "").strip().rstrip("/").casefold()
+        alternate_sources = {}
+        source_urls = paper.get("source_urls", [])
+        if not isinstance(source_urls, list):
+            source_urls = []
+
+        for item in source_urls:
+            if not isinstance(item, dict):
+                continue
+            target_url = str(item.get("url") or "").strip()
+            parsed = urlparse(target_url)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                continue
+            url_key = target_url.rstrip("/").casefold()
+            if not url_key or url_key == primary_key:
+                continue
+            source_name = str(item.get("source") or "Sumber lain").strip()
+            alternate_sources.setdefault(url_key, {"url": target_url, "sources": []})
+            if source_name and source_name not in alternate_sources[url_key]["sources"]:
+                alternate_sources[url_key]["sources"].append(source_name)
+
+        for entry in alternate_sources.values():
+            label = " · ".join(entry["sources"]) or "Sumber lain"
+            action = self.source_menu.addAction(label)
+            action.triggered.connect(
+                lambda _checked=False, target=entry["url"]: self._open_source_url(target)
+            )
+
+        self.source_menu_button.setVisible(bool(alternate_sources))
 
     def _selected_paper(self):
         rows = self.paper_table.selectionModel().selectedRows()
@@ -11685,6 +11743,9 @@ class PapersToolPage(QWidget):
             )
             return
 
+        self._open_source_url(target_url)
+
+    def _open_source_url(self, target_url):
         try:
             opened = QDesktopServices.openUrl(QUrl(target_url))
             if not opened:
@@ -11821,6 +11882,7 @@ class ResearchLandscapeToolPage(QWidget):
             item = self.content.takeAt(0)
             widget = item.widget()
             if widget:
+                widget.hide()
                 widget.deleteLater()
 
     def show_empty_state(self):
@@ -13502,7 +13564,6 @@ class MainWindow(QMainWindow):
         self._restore_window_geometry()
         self._restore_last_page()
         self._startup_restore_complete = True
-        get_telemetry().track("app_open", status="started")
         self._startup_checkpoint("Workspace siap dibuka…")
 
     def _startup_checkpoint(self, message: str):
@@ -15896,26 +15957,23 @@ class MainWindow(QMainWindow):
                 except Exception as error:
                     print(f"Warning: in-memory dataset version could not be saved: {error}")
 
-        get_telemetry().track(
-            "analysis_started", feature_name="dataset_analysis", status="started"
-        )
-
-    def complete_dataset_analysis(self, result, duration_ms):
+    def complete_dataset_analysis(self, result):
         self.analysis_result = result
         project_id = self.current_project_id
         if project_id is not None:
             try:
-                self.repository.save_workflow_section(project_id, "analysis", result)
-                self.repository.save_workflow_section(project_id, "ml_task", None)
-                self.repository.save_workflow_section(project_id, "ml_methods", None)
-                self.repository.save_workflow_section(project_id, "research", None)
+                self.repository.save_workflow_sections(
+                    project_id,
+                    {
+                        "analysis": result,
+                        "ml_task": None,
+                        "ml_methods": None,
+                        "research": None,
+                    },
+                )
             except Exception as error:
                 print(f"Warning: analysis workflow could not be saved: {error}")
 
-        get_telemetry().track(
-            "analysis_completed", feature_name="dataset_analysis",
-            status="completed", duration_ms=duration_ms,
-        )
         self._restored_ml_task = {}
         self._restored_ml_methods = {}
         self._restored_research_result = {}
@@ -15928,12 +15986,6 @@ class MainWindow(QMainWindow):
             self.research_page.show_empty_state()
         self.dashboard.update_workflow_state(
             has_dataset=True, analysis_done=True, ml_done=False
-        )
-
-    def fail_dataset_analysis(self, duration_ms):
-        get_telemetry().track(
-            "analysis_failed", feature_name="dataset_analysis",
-            status="failed", duration_ms=duration_ms,
         )
 
     def run_dataset_analysis(self):
@@ -15949,7 +16001,6 @@ class MainWindow(QMainWindow):
             "correlations": self.correlation_analyzer.analyze,
             "fingerprint": self.fingerprint_analyzer.generate,
         }
-        started = time.perf_counter()
         try:
             with ThreadPoolExecutor(max_workers=len(jobs)) as executor:
                 futures = {name: executor.submit(fn, dataframe) for name, fn in jobs.items()}
@@ -15966,10 +16017,9 @@ class MainWindow(QMainWindow):
             except Exception as error:
                 print(f"Warning: data quality diagnosis failed: {error}")
                 result["data_quality"] = []
-            self.complete_dataset_analysis(result, int((time.perf_counter() - started) * 1000))
+            self.complete_dataset_analysis(result)
             return result
         except Exception:
-            self.fail_dataset_analysis(int((time.perf_counter() - started) * 1000))
             raise
 
 

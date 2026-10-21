@@ -4,7 +4,7 @@ Tanggal audit: 2026-10-16 (Asia/Jakarta)
 
 ## Ringkasan
 
-Aplikasi adalah desktop Python/PySide6. Analisis dataset berjalan dari aplikasi desktop dan modul layanan lokal. API FastAPI berada di `backend/` untuk kebutuhan telemetry terpisah. `MainWindow` menangani shell, navigasi, orkestrasi UI, dan beberapa worker; service analisis, riset, penyimpanan, dan laporan berada di package masing-masing.
+Aplikasi adalah desktop Python/PySide6. Analisis dataset berjalan dari aplikasi desktop dan modul layanan lokal. `MainWindow` menangani shell, navigasi, orkestrasi UI, dan beberapa worker; service analisis, riset, penyimpanan, dan laporan berada di package masing-masing. Backend telemetry FastAPI sudah dihapus karena tidak lagi digunakan.
 
 Audit ini memetakan struktur kode dan sumber desain yang tersedia. Belum ada perubahan UI. Implementasi dibatasi satu frame/halaman per sesi sesuai `AGENTS.md`; frame target masih menunggu pilihan karena link Figma menunjuk ke halaman kanvas yang berisi beberapa layar.
 
@@ -21,7 +21,7 @@ Audit ini memetakan struktur kode dan sumber desain yang tersedia. Belum ada per
 
 - `run.py` memanggil `init_environment()` lalu `app.main.main()`.
 - `app/main.py` mengatur high-DPI scaling, membuat `QApplication`, memuat `MainWindow`, lalu menjalankan event loop.
-- Versi yang terbaca dari `.venv`: Python 3.13.12, PySide6 6.11.2, pandas 3.0.5, NumPy 2.5.3, SciPy 1.18.1, scikit-learn 1.9.1, PyArrow 25.0.1, matplotlib 3.11.2, httpx 0.28.1, Jinja2 3.1.6, python-dotenv 1.2.3, FastAPI 0.143.0, Uvicorn 0.54.0, Pydantic 2.13.5, mysql-connector-python 9.7.0, pytest 9.1.1, Pillow 12.3.0, dan PyInstaller 6.22.3. `requirements.txt` tidak mengunci rentang dukungan resmi.
+- Snapshot versi `.venv` pada audit ini mencakup Python 3.13.12, PySide6 6.11.2, pandas 3.0.5, NumPy 2.5.3, SciPy 1.18.1, scikit-learn 1.9.1, PyArrow 25.0.1, matplotlib 3.11.2, httpx 0.28.1, Jinja2 3.1.6, python-dotenv 1.2.3, pytest 9.1.1, Pillow 12.3.0, dan PyInstaller 6.22.3. `requirements.txt` tidak mengunci rentang dukungan resmi.
 
 ## UI dan navigasi aktif
 
@@ -55,7 +55,6 @@ Beberapa modul halaman berdiri sendiri dan tidak dipakai oleh page stack aktif y
 - `app/dataset_search/`: klien Hugging Face dan Kaggle.
 - `app/storage/`: SQLite, repository project, service riset, versioning dataset, dan transformation trail.
 - `app/reports/`: pembuatan laporan HTML; handler PDF juga terdapat di `MainWindow`.
-- `backend/`: FastAPI telemetry dan API graph. Ini terpisah dari analisis dataset lokal.
 - Worker berbasis `QObject`/`QThread` untuk analisis, ML, pencarian/riset, pemeriksaan jurnal, dan laporan terlihat di UI. Rincian interaksi setiap halaman belum diuji runtime dalam audit ini.
 
 `app/storage/database.py` membuat tabel dengan `CREATE TABLE IF NOT EXISTS`, termasuk `projects`, `research_results`, `project_workflows`, `papers`, `dataset_versions`, `transformation_trail`, dan tabel screening jurnal. Ada penambahan kolom kompatibilitas dengan `ALTER TABLE`; perubahan skema tidak diperlukan untuk pekerjaan UI ini. Mode pengembangan menyimpan data di root `data/`, sedangkan aplikasi terpaket memakai direktori data pengguna melalui `app/core/config.py`.

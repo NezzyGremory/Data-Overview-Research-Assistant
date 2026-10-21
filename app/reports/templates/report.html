@@ -74,7 +74,7 @@ tr, figure { page-break-inside: avoid; break-inside: avoid; }
 {% if chart_paths.research_methods %}<p align="center"><img src="{{ chart_paths.research_methods }}" width="650"><br><i>Gambar 6. Distribusi metode pada literatur yang ditemukan.</i></p>{% endif %}
 {% if not chart_paths %}<p>Grafik belum dapat dibuat karena data numerik atau data penelitian tidak tersedia.</p>{% endif %}
 
-<h2>3. Hasil Pemeriksaan Kualitas Data</h2>
+<h2>3. Diagnostik Kualitas Data</h2>
 {% if quality_diagnoses %}{% for item in quality_diagnoses %}
 <div class="finding"><h3>{{ loop.index }}. {{ item.title }}</h3>
 <p><b>Tingkat temuan:</b> {{ item.severity }}</p>
@@ -87,7 +87,7 @@ tr, figure { page-break-inside: avoid; break-inside: avoid; }
 <h2>4. Evaluasi Machine Learning</h2>
 <p><b>Jenis tugas:</b> {{ primary_task_display }}{% if target_column %}<br><b>Variabel target:</b> {{ target_column }}{% endif %}</p>
 {% if ml_evaluated %}
-<p><b>Model dengan hasil terbaik:</b> {{ best_model_name }}<br><b>Metrik utama:</b> {{ best_model_score }}<br><b>Validasi:</b> {{ validation_protocol }}</p>
+<p><b>Model dengan hasil terbaik:</b> {{ best_model_name }}{% if best_model_status_label %} <span class="meta">({{ best_model_status_label }})</span>{% endif %}<br><b>Metrik utama:</b> {{ best_model_score }}<br><b>Validasi:</b> {{ validation_protocol }}</p>
 {% if candidate_models %}<h3>Hasil per model</h3>{% for model in candidate_models %}<div class="finding"><p><b>{{ loop.index }}. {{ model.method }}</b></p><p><b>Metrik:</b> {{ model.primary_metric_str }}{% if model.std_str != '-' %}; variasi: {{ model.std_str }}{% endif %}</p><p><b>Kekuatan:</b> {{ model.strengths }}</p><p><b>Keterbatasan:</b> {{ model.limitations }}</p></div>{% endfor %}{% endif %}
 {% else %}<p>Evaluasi model belum tersedia.</p>{% endif %}
 
@@ -136,6 +136,11 @@ tr, figure { page-break-inside: avoid; break-inside: avoid; }
 {% for item in readiness_pipeline_checklist %}<tr><td>{{ item.stage }}</td><td>{{ item.status }}</td><td>{{ item.details }}</td></tr>{% endfor %}
 </tbody></table>{% else %}<p>Tidak berlaku untuk dataset ini.</p>{% endif %}
 {% if readiness_summary_note %}<p>{{ readiness_summary_note }}</p>{% endif %}
+{% endif %}
+
+{% if ai_synthesis %}
+<h2>Ringkasan AI</h2>
+<p align="justify">{{ ai_synthesis }}</p>
 {% endif %}
 
 <h2>Kesimpulan</h2>

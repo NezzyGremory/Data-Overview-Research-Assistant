@@ -8,7 +8,6 @@ Pastikan versi berikut sama-sama `5.0.0`:
 
 - `APP_VERSION` pada `build_windows_installer.bat`
 - `AppVersion` pada `installer/DatasetResearch.iss`
-- fallback versi aplikasi pada `app/telemetry.py`
 
 Build harus menghasilkan `hasil_compile/DORA-v5.0.0-Setup.exe`.
 

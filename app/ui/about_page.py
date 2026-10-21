@@ -245,14 +245,6 @@ class AboutPage(QWidget):
                 "Tanpa API key, penjelasan menggunakan engine lokal.",
                 "ai",
             ),
-            (
-                "Telemetry penggunaan",
-                "OPSIONAL",
-                "Telemetry tidak dikirim jika endpoint-nya kosong. Jika diaktifkan, aplikasi mengirim ID "
-                "instalasi acak dan event penggunaan, versi aplikasi, durasi, serta waktu. IP tidak ada di "
-                "payload telemetry; server tetap dapat melihat IP koneksi.",
-                "telemetry",
-            ),
         ):
             self.privacy_cards.append(self._make_privacy_card(title, tag, text, kind))
         self.privacy_layout.addSpacing(2)
@@ -272,8 +264,8 @@ class AboutPage(QWidget):
             self._make_privacy_note(
                 "Kunci API Gemini",
                 "Kunci yang disimpan melalui aplikasi berada di file konfigurasi lokal dan tidak "
-                "dienkripsi oleh aplikasi. Kunci tidak masuk telemetry; kunci dikirim ke Google "
-                "sebagai kredensial saat fitur Gemini digunakan.",
+                "dienkripsi oleh aplikasi. Kunci dikirim ke Google sebagai kredensial saat fitur "
+                "Gemini digunakan.",
                 "key",
             ),
         ]

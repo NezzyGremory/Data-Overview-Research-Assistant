@@ -191,8 +191,15 @@ class DropMissingOptionsDialog(QDialog):
         dialog_layout.addWidget(content_scroll, 1)
         dialog_layout.addWidget(buttons)
 
-        self.zero_mode_combo.currentIndexChanged.connect(self._update_zero_visibility)
-        self.strategy_combo.currentIndexChanged.connect(self._update_strategy_visibility)
+        # Route these UI-only callbacks through Python callables. This avoids
+        # PySide trying to add a dynamic meta-method to a QWidget wrapper when
+        # the dialog is parented and shown from the Analysis page.
+        self.zero_mode_combo.currentIndexChanged.connect(
+            lambda index: self._update_zero_visibility(index)
+        )
+        self.strategy_combo.currentIndexChanged.connect(
+            lambda index: self._update_strategy_visibility(index)
+        )
         self._update_zero_visibility()
         self._update_strategy_visibility()
         _fit_dialog_to_available_screen(self)

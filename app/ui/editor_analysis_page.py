@@ -227,6 +227,21 @@ class EditorAnalysisPage(QWidget):
     """Guided notebook-style editor with editable templates and local run output."""
 
     TARGET_ASSIGNMENT = re.compile(r"(?m)^target_column\s*=.*$")
+    MISSING_MODULE_PACKAGES = {
+        "xgboost": "xgboost",
+        "lightgbm": "lightgbm",
+        "catboost": "catboost",
+        "sklearn": "scikit-learn",
+        "imblearn": "imbalanced-learn",
+        "seaborn": "seaborn",
+        "statsmodels": "statsmodels",
+        "optuna": "optuna",
+        "yaml": "PyYAML",
+        "pil": "Pillow",
+        "cv2": "opencv-python-headless",
+        "bs4": "beautifulsoup4",
+        "openpyxl": "openpyxl",
+    }
 
     MODEL_METHODS = {
         "Klasifikasi": [
@@ -694,6 +709,9 @@ print(f"Rata-rata: {scores.mean():.3f} ± {scores.std():.3f}")
         self._package_process: QProcess | None = None
         self._package_log = ""
         self._installing_packages: list[str] = []
+        self._package_install_mode = ""
+        self._auto_install_context: dict | None = None
+        self._auto_install_attempted: set[str] = set()
         self._notebook_path: Path | None = None
         self._notebook_metadata: dict = {}
         self._notebook_minor = 5
@@ -816,7 +834,15 @@ print(f"Rata-rata: {scores.mean():.3f} ± {scores.std():.3f}")
 
         self.page_scroll.setWidget(container)
         outer.addWidget(self.page_scroll)
-        self._steps = [
+        self._steps = self._build_default_notebook_steps()
+        self._populate_step_list()
+        self.step_list.setCurrentRow(0)
+        self.set_dataset(None, "")
+        self._initializing = False
+        self._apply_responsive_layout(self.width())
+
+    def _build_default_notebook_steps(self):
+        return [
             {
                 "title": title,
                 "description": description,
@@ -836,11 +862,6 @@ print(f"Rata-rata: {scores.mean():.3f} ± {scores.std():.3f}")
             }
             for index, (title, description) in enumerate(self.STEPS)
         ]
-        self._populate_step_list()
-        self.step_list.setCurrentRow(0)
-        self.set_dataset(None, "")
-        self._initializing = False
-        self._apply_responsive_layout(self.width())
 
     def _build_template_groups(self):
         groups = {name: dict(templates) for name, templates in self.BASE_TEMPLATE_GROUPS.items()}
@@ -1171,27 +1192,34 @@ plt.tight_layout()
         self.notebook_toolbar = QHBoxLayout()
         self.open_notebook_button = QPushButton("Buka notebook")
         self.open_notebook_button.setObjectName("editorAnalysisNotebookButton")
-        self.open_notebook_button.clicked.connect(self._open_notebook)
-        self.open_notebook_button.setFixedSize(132, 34)
+        self.open_notebook_button.clicked.connect(lambda: self._open_notebook())
+        self.open_notebook_button.setFixedSize(112, 34)
         self.notebook_toolbar.addWidget(self.open_notebook_button)
+        self.reload_notebook_button = QPushButton("Muat ulang notebook")
+        self.reload_notebook_button.setObjectName("editorAnalysisNotebookButton")
+        self.reload_notebook_button.clicked.connect(self._reload_notebook)
+        self.reload_notebook_button.setFixedSize(160, 34)
+        self.reload_notebook_button.setEnabled(True)
+        self.reload_notebook_button.setToolTip(
+            "Pulihkan sel template bawaan DORA dan bersihkan sel dari notebook yang diimpor."
+        )
+        self.notebook_toolbar.addWidget(self.reload_notebook_button)
         self.save_notebook_button = QPushButton("Simpan notebook")
         self.save_notebook_button.setObjectName("editorAnalysisNotebookButton")
         self.save_notebook_button.clicked.connect(self._save_notebook)
-        self.save_notebook_button.setFixedSize(142, 34)
+        self.save_notebook_button.setFixedSize(138, 34)
         self.notebook_toolbar.addWidget(self.save_notebook_button)
         self.restart_kernel_button = QPushButton("Mulai ulang Python")
         self.restart_kernel_button.setObjectName("editorAnalysisNotebookButton")
         self.restart_kernel_button.clicked.connect(self._restart_kernel)
-        self.restart_kernel_button.setText("Muat ulang")
         self.restart_kernel_button.setToolTip("Mulai ulang kernel Python notebook.")
-        self.restart_kernel_button.setFixedSize(118, 34)
+        self.restart_kernel_button.setFixedSize(144, 34)
         self.notebook_toolbar.addWidget(self.restart_kernel_button)
         self.notebook_status_label = QLabel("Belum disimpan")
         self.notebook_status_label.setObjectName("editorAnalysisMuted")
-        self.notebook_status_label.setFixedWidth(94)
         self.notebook_toolbar.addWidget(self.notebook_status_label)
         self.notebook_toolbar.addStretch(1)
-        heading_row.addLayout(self.notebook_toolbar)
+        layout.addLayout(self.notebook_toolbar)
 
         self.cell_type_combo = QComboBox()
         self.cell_type_combo.setObjectName("editorAnalysisCategoryCombo")
@@ -1484,6 +1512,7 @@ plt.tight_layout()
             "dataset_scope_combo",
             "choose_dataset_button",
             "open_notebook_button",
+            "reload_notebook_button",
             "save_notebook_button",
             "restart_kernel_button",
             "cell_type_combo",
@@ -1507,6 +1536,8 @@ plt.tight_layout()
             self.target_combo.setEnabled(
                 is_code and self._dataframe is not None and self.target_combo.count() > 0
             )
+        if hasattr(self, "reload_notebook_button"):
+            self.reload_notebook_button.setEnabled(not locked)
         self._update_cell_controls()
 
     @Slot()
@@ -1668,6 +1699,7 @@ plt.tight_layout()
                 self._notebook_minor = 5
             notebook_path = state.get("notebook_path")
             self._notebook_path = Path(notebook_path) if isinstance(notebook_path, str) and notebook_path else None
+            self.reload_notebook_button.setEnabled(not self._execution_controls_locked)
             self._notebook_dirty = bool(state.get("notebook_dirty", True))
             self._dataset_scope = (
                 "custom" if state.get("dataset_scope") == "custom" else "workspace"
@@ -2048,6 +2080,8 @@ plt.tight_layout()
         self._execution_total = len(self._execution_queue)
         self._execution_completed = 0
         self._queue_had_error = False
+        self._auto_install_attempted.clear()
+        self._auto_install_context = None
         self._advance_after_run = self._advance_after_run and len(self._execution_queue) == 1
         self._set_execution_controls_locked(True)
         self.run_button.setEnabled(False)
@@ -2216,6 +2250,123 @@ plt.tight_layout()
             return
         self._dataset_pickle_path = None
 
+    def _missing_module_package(self, output: str) -> tuple[str, str] | None:
+        match = re.search(
+            r"ModuleNotFoundError:\s+No module named ['\"]([^'\"]+)['\"]",
+            output,
+        )
+        if match is None:
+            return None
+        module = match.group(1).split(".", 1)[0]
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}", module):
+            return module, ""
+        if module.casefold() in getattr(sys, "stdlib_module_names", ()):
+            return module, ""
+        package = self.MISSING_MODULE_PACKAGES.get(module.casefold())
+        return module, package or ""
+
+    @staticmethod
+    def _dataset_compatibility_hint(output: str) -> str:
+        lowered = output.casefold()
+        if "could not convert string to float" in lowered or "could not convert string" in lowered:
+            detail = "Ada fitur teks/kategori yang perlu diubah menjadi angka sebelum metode ini dijalankan."
+        elif "unknown label type: continuous" in lowered or "continuous target" in lowered:
+            detail = "Target tampak numerik kontinu; gunakan regresi, atau kelompokkan target menjadi kelas untuk klasifikasi."
+        elif (
+            "invalid classes inferred" in lowered
+            or "at least 2 classes" in lowered
+            or "least populated class" in lowered
+            or "target contains only one unique value" in lowered
+        ):
+            detail = "Target klasifikasi perlu memiliki sedikitnya dua kelas dan cukup banyak baris pada tiap kelas."
+        elif "contains nan" in lowered or "input y contains nan" in lowered or "missing values" in lowered:
+            detail = "Fitur atau target masih berisi NaN; bersihkan atau imputasi nilai kosong sebelum menjalankan metode."
+        elif "dtypes for data" in lowered or "categorical" in lowered and "unsupported" in lowered:
+            detail = "Metode ini belum menerima tipe kolom kategorikal tersebut; lakukan encoding sebelum pemodelan."
+        elif (
+            "n_samples" in lowered
+            or "minimum of" in lowered
+            or "at least 2" in lowered
+            or "inconsistent numbers of samples" in lowered
+        ):
+            detail = "Jumlah baris atau pembagian train/test tidak memenuhi batas minimum metode ini."
+        elif "0 feature" in lowered or "no features" in lowered:
+            detail = "Tidak ada kolom fitur yang dapat dipakai setelah kolom target dipisahkan."
+        elif "keyerror" in lowered or "not in index" in lowered or "column" in lowered and "not found" in lowered:
+            detail = "Kolom yang diminta tidak ada di dataset; pilih kolom target dan fitur yang tersedia."
+        elif "valueerror" in lowered or "typeerror" in lowered:
+            detail = "Periksa kecocokan jenis metode, kolom target, tipe fitur, nilai kosong, dan jumlah baris dataset."
+        else:
+            return ""
+        return f"Pemeriksaan dataset: {detail}\nTraceback lengkap ada di bawah.\n\n"
+
+    def _start_automatic_package_install(
+        self, index: int, module: str, package: str, original_output: str
+    ):
+        continuing_install = self._auto_install_context is not None
+        self._auto_install_attempted.add(module)
+        self._auto_install_context = {
+            "index": index,
+            "module": module,
+            "package": package,
+            "original_output": original_output,
+        }
+        self._package_install_mode = "auto"
+        self._installing_packages = [package]
+        if not continuing_install:
+            self._package_log = ""
+            self.library_output.clear()
+        self.output_tabs.setCurrentIndex(2)
+        self._append_library_log(
+            f"$ python -m pip install --no-deps --target \"{self._environment_site_packages()}\" {package}\n\n"
+        )
+        self._append_library_log(
+            f"Dependency '{module}' belum tersedia. DORA memasang '{package}' otomatis.\n"
+        )
+        self.library_status.setText(f"Memasang {package} otomatis untuk sel notebook...")
+        self.execution_note.setText(f"Memasang library {package}; sel akan dijalankan ulang setelah selesai...")
+        self._run_timeout.stop()
+        self._kernel_busy = False
+        self._running_step_index = -1
+        self._execution_queue.insert(0, index)
+        self._ensure_environment(lambda: self._start_package_install([package]))
+
+    def _finish_automatic_install_failure(self, exit_code: int):
+        context = self._auto_install_context
+        self._auto_install_context = None
+        if context is None:
+            return
+        index = context["index"]
+        if self._execution_queue and self._execution_queue[0] == index:
+            self._execution_queue.pop(0)
+        if 0 <= index < len(self._steps):
+            step = self._steps[index]
+            step["output"] = (
+                context["original_output"].rstrip()
+                + f"\n\nDORA mencoba memasang '{context['package']}' otomatis, tetapi pemasangan gagal "
+                + f"(kode {exit_code}). Buka tab Library untuk melihat log pemasangan."
+            )
+            step["charts"] = []
+            step["has_error"] = True
+            step["notebook_outputs"] = None
+            self._queue_had_error = True
+            self._execution_completed += 1
+            self._mark_notebook_dirty()
+            self._populate_step_list()
+            if index == self._selected_step:
+                self._render_step_output(step)
+        self._kernel_busy = False
+        self._running_step_index = -1
+        self._run_timeout.stop()
+        self.library_status.setText(
+            f"Pemasangan {context['package']} otomatis gagal. Lihat log di tab Library."
+        )
+        if self._execution_queue:
+            self._run_animation.start()
+            self._send_next_cell()
+        else:
+            self._finish_execution(False)
+
     def _handle_kernel_message(self, message: dict):
         if message.get("kind") == "ready":
             self._kernel_ready = True
@@ -2228,11 +2379,51 @@ plt.tight_layout()
         if not 0 <= index < len(self._steps):
             return
         step = self._steps[index]
-        step["output"] = message.get("output", "")
+        output = str(message.get("output", ""))
+        has_error = bool(message.get("error"))
+        retry_context = self._auto_install_context
+        is_auto_retry = bool(retry_context and retry_context.get("index") == index)
+        missing = self._missing_module_package(output) if has_error else None
+        if missing is not None:
+            module, package = missing
+            if package and module not in self._auto_install_attempted:
+                self._start_automatic_package_install(index, module, package, output)
+                return
+            if package:
+                output = (
+                    output.rstrip()
+                    + f"\n\nLibrary '{module}' masih belum tersedia setelah dicoba dipasang. "
+                    + "Periksa versi Python, koneksi internet, dan log pada tab Library."
+                )
+            else:
+                output = (
+                    output.rstrip()
+                    + f"\n\nModul '{module}' belum dikenali sebagai dependensi yang bisa dipasang otomatis. "
+                    + "Pastikan nama paket PyPI-nya, lalu pasang melalui tab Library."
+                )
+                self.output_tabs.setCurrentIndex(2)
+                self.library_status.setText(
+                    f"Modul {module} belum ada. Masukkan nama paket PyPI yang sesuai di Library."
+                )
+        elif has_error:
+            output = self._dataset_compatibility_hint(output) + output
+
+        if is_auto_retry:
+            if has_error:
+                self.library_status.setText(
+                    f"{retry_context['package']} sudah dipasang; sel masih gagal. Periksa output sel."
+                )
+            else:
+                self.library_status.setText(
+                    f"{retry_context['package']} terpasang otomatis; sel berhasil dijalankan ulang."
+                )
+            self._auto_install_context = None
+
+        step["output"] = output
         step["charts"] = message.get("charts", [])
         step["rich_outputs"] = message.get("rich_outputs", [])
         step["notebook_outputs"] = None
-        step["has_error"] = bool(message.get("error"))
+        step["has_error"] = has_error
         step["execution_count"] = (step.get("execution_count") or 0) + 1
         self._mark_notebook_dirty()
         self._populate_step_list()
@@ -2426,6 +2617,7 @@ plt.tight_layout()
             return
         self._stop_kernel()
         self._installing_packages = packages
+        self._package_install_mode = "manual"
         self._package_log = ""
         self.library_output.clear()
         self.output_tabs.setCurrentIndex(2)
@@ -2443,20 +2635,25 @@ plt.tight_layout()
         process = QProcess(self)
         self._package_process = process
         process.setProgram(str(self._execution_interpreter()))
+        pip_arguments = [
+            "install",
+            "--disable-pip-version-check",
+            "--upgrade",
+        ]
+        if self._package_install_mode == "auto":
+            pip_arguments.extend(
+                ["--no-deps", "--target", str(self._environment_site_packages())]
+            )
         if getattr(sys, "frozen", False):
+            if self._package_install_mode != "auto":
+                pip_arguments.extend(["--target", str(self._environment_site_packages())])
             process.setArguments([
                 "--dora-editor-pip",
-                "install",
-                "--disable-pip-version-check",
-                "--upgrade",
-                "--target",
-                str(self._environment_site_packages()),
+                *pip_arguments,
                 *packages,
             ])
         else:
-            process.setArguments([
-                "-m", "pip", "install", "--disable-pip-version-check", "--upgrade", *packages,
-            ])
+            process.setArguments(["-m", "pip", *pip_arguments, *packages])
         process.setWorkingDirectory(str(self._project_workspace))
         environment = QProcessEnvironment.systemEnvironment()
         environment.insert("PYTHONUTF8", "1")
@@ -2493,6 +2690,28 @@ plt.tight_layout()
         process.deleteLater()
         self._run_animation.stop()
         self._run_opacity_effect.setOpacity(1.0)
+        mode = self._package_install_mode
+        self._package_install_mode = ""
+        if mode == "auto":
+            context = self._auto_install_context
+            if (
+                exit_code == 0
+                and context is not None
+                and self._kernel_process is not None
+                and self._kernel_ready
+            ):
+                self.library_status.setText(
+                    f"{context['package']} terpasang. Menjalankan ulang sel notebook..."
+                )
+                self.execution_note.setText("Library siap; mengulangi sel yang tadi gagal...")
+                self._run_animation.start()
+                self._send_next_cell()
+            else:
+                self._append_library_log(
+                    f"\nPemasangan otomatis berakhir dengan kode {exit_code}.\n"
+                )
+                self._finish_automatic_install_failure(exit_code if exit_code else -1)
+            return
         self.install_library_button.setEnabled(self._dataframe is not None)
         self.run_button.setEnabled(self._dataframe is not None)
         self.run_all_button.setEnabled(self._dataframe is not None)
@@ -2565,6 +2784,7 @@ plt.tight_layout()
             item = self.graphics_layout.takeAt(0)
             widget = item.widget()
             if widget is not None:
+                widget.setParent(None)
                 widget.deleteLater()
         self._graphics = []
 
@@ -2670,6 +2890,7 @@ plt.tight_layout()
             self.library_status.setText(f"Notebook gagal disimpan: {error}")
             return
         self._notebook_path = path
+        self.reload_notebook_button.setEnabled(not self._execution_controls_locked)
         self._notebook_dirty = False
         self.notebook_status_label.setText(f"Tersimpan: {path.name}")
         self.library_status.setText(f"Notebook disimpan: {path.name}")
@@ -2678,7 +2899,46 @@ plt.tight_layout()
         self.notebook_status_label.setText(f"Tersimpan: {path.name}")
 
     @Slot()
-    def _open_notebook(self):
+    def _reload_notebook(self):
+        if self._kernel_busy or self._execution_queue:
+            self.execution_note.setText("Hentikan proses sebelum memuat ulang notebook.")
+            return
+
+        if self._notebook_path is not None or self._notebook_dirty:
+            response = QMessageBox.question(
+                self,
+                "Pulihkan notebook DORA",
+                (
+                    "Pulihkan sel bawaan DORA? Sel dari notebook .ipynb yang terbuka "
+                    "dan perubahan saat ini akan dihapus dari editor. File sumber tetap aman."
+                ),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if response != QMessageBox.Yes:
+                return
+
+        self._stop_kernel()
+        self._steps = self._build_default_notebook_steps()
+        self._selected_step = -1
+        self._notebook_metadata = {}
+        self._notebook_minor = 5
+        self._notebook_path = None
+        self._notebook_dirty = False
+        self._populate_step_list()
+        if self._steps:
+            self.step_list.setCurrentRow(0)
+        else:
+            self._select_step(-1)
+        self.notebook_status_label.setText("Notebook bawaan DORA")
+        self.library_status.setText(
+            f"Notebook bawaan DORA dipulihkan: {len(self._steps)} sel template."
+        )
+        self._autosave_timer.stop()
+        self._save_autosave_state()
+
+    @Slot()
+    def _open_notebook(self, filename=None):
         if self._kernel_busy or self._execution_queue:
             self.execution_note.setText("Hentikan proses sebelum membuka notebook lain.")
             return
@@ -2692,11 +2952,13 @@ plt.tight_layout()
             )
             if response != QMessageBox.Yes:
                 return
-        filename, _ = QFileDialog.getOpenFileName(
-            self, "Buka notebook", str(self._notebook_path or ""), "Jupyter Notebook (*.ipynb)"
-        )
+        if filename is None:
+            filename, _ = QFileDialog.getOpenFileName(
+                self, "Buka notebook", str(self._notebook_path or ""), "Jupyter Notebook (*.ipynb)"
+            )
         if not filename:
             return
+        filename = str(filename)
         try:
             document = json.loads(Path(filename).read_text(encoding="utf-8"))
             if (
@@ -2809,9 +3071,12 @@ plt.tight_layout()
         else:
             self._select_step(-1)
         self._notebook_path = Path(filename)
+        self.reload_notebook_button.setEnabled(not self._execution_controls_locked)
         self._notebook_dirty = False
         self.notebook_status_label.setText(f"Tersimpan: {Path(filename).name}")
-        self.library_status.setText(f"{len(steps)} bagian dimuat dari {Path(filename).name}.")
+        self.library_status.setText(
+            f"{len(steps)} sel dimuat ke notebook DORA dari {Path(filename).name}."
+        )
         self._schedule_autosave()
 
     @Slot()

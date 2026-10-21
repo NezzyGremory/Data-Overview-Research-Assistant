@@ -247,6 +247,68 @@ class ProjectRepository:
             (project_id,),
         )
 
+    def save_workflow_sections(
+        self,
+        project_id: int,
+        sections: dict[str, Any],
+    ) -> None:
+        """Persist several workflow results atomically with one connection."""
+        if not sections:
+            return
+
+        columns = {
+            "analysis": "analysis_result_json",
+            "ml_task": "ml_task_result_json",
+            "ml_methods": "ml_methods_result_json",
+            "research": "research_result_json",
+        }
+        unknown_sections = [section for section in sections if section not in columns]
+        if unknown_sections:
+            raise ValueError(
+                f"Bagian workflow tidak dikenal: {unknown_sections[0]}"
+            )
+
+        values = {
+            columns[section]: self._json(value)
+            for section, value in sections.items()
+        }
+        value_columns = list(values)
+        insert_columns = ["project_id", *value_columns]
+        placeholders = ", ".join("?" for _ in insert_columns)
+        assignments = ", ".join(
+            f"{column} = excluded.{column}" for column in value_columns
+        )
+        query = (
+            f"INSERT INTO project_workflows ({', '.join(insert_columns)}) "
+            f"VALUES ({placeholders}) "
+            "ON CONFLICT(project_id) DO UPDATE SET "
+            f"{assignments}, updated_at = CURRENT_TIMESTAMP"
+        )
+
+        connection = self.database.connect()
+        try:
+            exists = connection.execute(
+                "SELECT 1 FROM projects WHERE id = ?",
+                (project_id,),
+            ).fetchone()
+            if exists is None:
+                raise ValueError(f"Project dengan ID {project_id} tidak ditemukan.")
+
+            connection.execute(
+                query,
+                (project_id, *values.values()),
+            )
+            connection.execute(
+                "UPDATE projects SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (project_id,),
+            )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
     def get_workflow_state(self, project_id: int) -> dict[str, Any] | None:
         """Load saved feature results for a project without loading its dataset."""
         row = self.database.fetch_one(

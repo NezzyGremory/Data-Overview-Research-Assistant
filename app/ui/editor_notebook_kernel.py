@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import base64
 import contextlib
+import importlib
 import io
 import json
 import os
@@ -69,6 +70,7 @@ def _execute(request: dict, namespace: dict, pyplot):
         _format_value(value, output, rich_outputs)
 
     try:
+        importlib.invalidate_caches()
         tree = ast.parse(source, filename="<DORA Editor Analysis>", mode="exec")
         trailing_expression = tree.body[-1] if tree.body and isinstance(tree.body[-1], ast.Expr) else None
         statements = tree.body[:-1] if trailing_expression else tree.body

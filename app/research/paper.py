@@ -20,6 +20,24 @@ class Paper:
     issn: List[str] = field(default_factory=list)
     sinta_screening: Dict[str, Any] = field(default_factory=dict)
     accreditation_screening: Dict[str, Any] = field(default_factory=dict)
+    source_urls: List[Dict[str, str]] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        cleaned_sources = []
+        if isinstance(self.source_urls, list):
+            for item in self.source_urls:
+                if not isinstance(item, dict):
+                    continue
+                source = str(item.get("source") or "").strip()
+                url = str(item.get("url") or "").strip()
+                if url:
+                    cleaned_sources.append({"source": source or "Sumber", "url": url})
+
+        if not cleaned_sources and self.url:
+            cleaned_sources.append(
+                {"source": str(self.source or "Sumber").strip(), "url": str(self.url).strip()}
+            )
+        self.source_urls = cleaned_sources
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -37,6 +55,7 @@ class Paper:
             "issn": self.issn,
             "sinta_screening": self.sinta_screening,
             "accreditation_screening": self.accreditation_screening,
+            "source_urls": [dict(item) for item in self.source_urls],
         }
 
     @property

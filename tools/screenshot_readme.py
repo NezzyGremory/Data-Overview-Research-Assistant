@@ -8,7 +8,6 @@ import tempfile
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-os.environ["TELEMETRY_API_URL"] = ""
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -23,10 +22,6 @@ from app.dataset_search.huggingface import DatasetFile, DatasetSearchResult
 from app.ui.main_window import MainWindow
 from app.ui.views.credits_overlay import show_credits_overlay
 from app.reports import ReportGenerator
-
-# app.core.config loads .env during imports; explicitly disable telemetry again
-# before MainWindow creates the telemetry client for this offline preview run.
-os.environ["TELEMETRY_API_URL"] = ""
 
 OUTPUT_DIR = PROJECT_ROOT / "screenshots" / "readme"
 WIDTH = 1920

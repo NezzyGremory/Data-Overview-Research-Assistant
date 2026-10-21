@@ -201,7 +201,6 @@ Snapshot lingkungan pengembangan yang digunakan saat ini:
 - pandas, NumPy, SciPy, scikit-learn, PyArrow, dan matplotlib
 - httpx untuk koneksi layanan pencarian
 - SQLite lokal untuk penyimpanan aplikasi
-- FastAPI dan MySQL hanya untuk API telemetry opsional
 
 Versi di `requirements.txt` tidak dikunci; snapshot di atas bukan pernyataan rentang versi resmi.
 
@@ -230,9 +229,6 @@ Salin `.env.example` menjadi `.env` hanya jika perlu mengatur layanan tambahan. 
 - `GEMINI_API_KEY`: penjelasan opsional berbasis Gemini pada fitur yang mendukungnya.
 - `SEMANTIC_SCHOLAR_API_KEY`: opsional untuk batas pemakaian layanan yang lebih tinggi.
 - `ELSEVIER_API_KEY`: diperlukan untuk pemeriksaan Scopus dan tetap bergantung pada entitlement akun Elsevier.
-- `TELEMETRY_API_URL`: kosong secara default untuk menonaktifkan pengiriman telemetry.
-
-Telemetry hanya mengirim event penggunaan yang dibatasi; konten dataset, hasil analisis, input pengguna, dan API key tidak disertakan dalam event.
 
 ## Struktur project
 
@@ -249,7 +245,6 @@ app/
   storage/        Penyimpanan lokal SQLite dan versi dataset
   ui/             Halaman PySide6, kernel editor, QSS, dan aset
   utils/          Utilitas bersama
-backend/          API FastAPI opsional untuk telemetry
 data/             Data runtime lokal; diabaikan oleh Git
 docs/             Panduan project
 screenshots/      Gambar dokumentasi UI
@@ -272,7 +267,6 @@ Runner evaluasi cepat bekerja offline. Evaluasi benchmark final memerlukan datas
 - [Panduan GitHub Release DORA](docs/GITHUB_RELEASE_DORA.md) — langkah rilis v5.0.0, pemeriksaan versi/tag, dan deskripsi siap-tempel.
 - [Panduan Windows Installer](docs/WINDOWS_INSTALLER.md)
 - [Protokol Evaluasi](docs/EVALUATION_PROTOCOL.md)
-- [Pengaturan Usage Telemetry](docs/USAGE_TELEMETRY.md)
 - [Catatan UI](docs/UI_PROGRESS.md)
 
 ## Tim dan lisensi

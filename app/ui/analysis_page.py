@@ -177,6 +177,8 @@ class AnalysisPage(QWidget):
             widget = item.widget()
 
             if widget:
+
+                widget.setParent(None)
                 widget.deleteLater()
 
     # =====================================================

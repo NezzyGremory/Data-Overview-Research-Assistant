@@ -47,6 +47,18 @@ class PaperDeduplicator:
         if not first.url and second.url:
             first.url = second.url
 
+        source_urls = list(first.source_urls)
+        known_source_urls = {
+            (item["source"].casefold(), item["url"].casefold())
+            for item in source_urls
+        }
+        for item in second.source_urls:
+            key = (item["source"].casefold(), item["url"].casefold())
+            if key not in known_source_urls:
+                source_urls.append(dict(item))
+                known_source_urls.add(key)
+        first.source_urls = source_urls
+
         if not first.venue and second.venue:
             first.venue = second.venue
 

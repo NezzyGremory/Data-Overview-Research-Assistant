@@ -1705,6 +1705,7 @@ class MLIntelligencePage(QWidget):
 
             if widget is not None:
 
+                widget.setParent(None)
                 widget.deleteLater()
 
             elif item.layout() is not None:
@@ -1730,6 +1731,7 @@ class MLIntelligencePage(QWidget):
 
             if widget is not None:
 
+                widget.setParent(None)
                 widget.deleteLater()
 
             elif item.layout() is not None:
