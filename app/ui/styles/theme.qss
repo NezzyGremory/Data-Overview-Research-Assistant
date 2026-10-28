@@ -413,7 +413,7 @@ QTableView#datasetPreviewAnalysisTable QHeaderView::section { background: #F6FBF
 QWidget#sidebar[figmaPage4="true"], QWidget#sidebar[figmaPage4="true"] QScrollArea { background: #FFFFFF; border: none; }
 QWidget#sidebar[figmaPage4="true"] QLabel#brandTitle, QLabel#brandTitle[figmaPage4="true"] { color: #17243A; font-family: "Inter"; font-size: @px(24); font-weight: 700; }
 QWidget#sidebar[figmaPage4="true"] QLabel#brandSubtitle, QLabel#brandSubtitle[figmaPage4="true"] { color: #6D7787; font-family: "Inter"; font-size: @px(11); }
-QWidget#sidebar[figmaPage4="true"] QLabel#sectionLabel, QLabel#sectionLabel[figmaPage4="true"] { color: #6F7784; font-family: "Inter"; font-size: @px(11); font-weight: 600; letter-spacing: @px(0.5); padding: @px(4) 0 @px(4) @px(12); }
+QWidget#sidebar[figmaPage4="true"] QLabel#sectionLabel, QLabel#sectionLabel[figmaPage4="true"] { color: #6F7784; font-family: "Inter"; font-size: @px(10); font-weight: 600; letter-spacing: @px(0.3); padding: @px(4) 0; }
 QWidget#sidebar[figmaPage4="true"] QFrame#sidebarMenuCard, QFrame#sidebarMenuCard[figmaPage4="true"] { background: transparent; border: none; border-radius: 0; }
 QWidget#sidebar[figmaPage4="true"] QPushButton#navButton, QPushButton#navButton[figmaPage4="true"] { background: transparent; border: 1px solid transparent; border-radius: @px(7); min-height: @px(28); padding: 0 @px(4); }
 QWidget#sidebar[figmaPage4="true"] QPushButton#navButton:hover:!disabled, QPushButton#navButton[figmaPage4="true"]:hover:!disabled { background: #EEF4FF; border-color: #CFE3FF; }

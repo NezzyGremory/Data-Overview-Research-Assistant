@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import importlib
+import importlib.util
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
@@ -27,9 +27,8 @@ class ModelSpec:
 
 def _is_package_installed(pkg_name: str) -> bool:
     try:
-        importlib.import_module(pkg_name)
-        return True
-    except (ImportError, Exception):
+        return importlib.util.find_spec(pkg_name) is not None
+    except (ImportError, ModuleNotFoundError, ValueError):
         return False
 
 
@@ -117,6 +116,16 @@ def _make_qda(rs: int):
 def _make_mlp_classifier(rs: int):
     from sklearn.neural_network import MLPClassifier
     return MLPClassifier(hidden_layer_sizes=(64, 32), max_iter=400, random_state=rs)
+
+
+def _make_torch_mlp_classifier(rs: int):
+    from app.ml.neural_estimators import TorchMLPClassifier
+    return TorchMLPClassifier(random_state=rs)
+
+
+def _make_tensorflow_mlp_classifier(rs: int):
+    from app.ml.neural_estimators import TensorFlowMLPClassifier
+    return TensorFlowMLPClassifier(random_state=rs)
 
 
 # Modern Boosting (Classification)
@@ -214,6 +223,16 @@ def _make_knn_regressor(rs: int):
 def _make_mlp_regressor(rs: int):
     from sklearn.neural_network import MLPRegressor
     return MLPRegressor(hidden_layer_sizes=(64, 32), max_iter=400, random_state=rs)
+
+
+def _make_torch_mlp_regressor(rs: int):
+    from app.ml.neural_estimators import TorchMLPRegressor
+    return TorchMLPRegressor(random_state=rs)
+
+
+def _make_tensorflow_mlp_regressor(rs: int):
+    from app.ml.neural_estimators import TensorFlowMLPRegressor
+    return TensorFlowMLPRegressor(random_state=rs)
 
 
 # Modern Boosting (Regression)
@@ -434,6 +453,34 @@ MODEL_REGISTRY: Dict[str, ModelSpec] = {
         max_recommended_rows=30_000,
         description="Feedforward neural network for tabular data.",
     ),
+    "pytorch_mlp_classifier": ModelSpec(
+        id="pytorch_mlp_classifier",
+        name="PyTorch MLP Classifier (CPU)",
+        task_types=["binary_classification", "multiclass_classification"],
+        category="Classification",
+        family="neural_net",
+        factory=_make_torch_mlp_classifier,
+        requires_scaling=True,
+        max_recommended_rows=20_000,
+        supports_sparse=False,
+        check_package="torch",
+        default_enabled=False,
+        description="Optional feedforward classifier powered by PyTorch.",
+    ),
+    "tensorflow_mlp_classifier": ModelSpec(
+        id="tensorflow_mlp_classifier",
+        name="TensorFlow MLP Classifier (CPU)",
+        task_types=["binary_classification", "multiclass_classification"],
+        category="Classification",
+        family="neural_net",
+        factory=_make_tensorflow_mlp_classifier,
+        requires_scaling=True,
+        max_recommended_rows=20_000,
+        supports_sparse=False,
+        check_package="tensorflow",
+        default_enabled=False,
+        description="Optional feedforward classifier powered by TensorFlow.",
+    ),
     # Modern Boosting (Classification)
     "xgboost_classifier": ModelSpec(
         id="xgboost_classifier",
@@ -619,6 +666,34 @@ MODEL_REGISTRY: Dict[str, ModelSpec] = {
         requires_scaling=True,
         max_recommended_rows=30_000,
         description="Neural network regressor.",
+    ),
+    "pytorch_mlp_regressor": ModelSpec(
+        id="pytorch_mlp_regressor",
+        name="PyTorch MLP Regressor (CPU)",
+        task_types=["regression"],
+        category="Regression",
+        family="neural_net",
+        factory=_make_torch_mlp_regressor,
+        requires_scaling=True,
+        max_recommended_rows=20_000,
+        supports_sparse=False,
+        check_package="torch",
+        default_enabled=False,
+        description="Optional feedforward regressor powered by PyTorch.",
+    ),
+    "tensorflow_mlp_regressor": ModelSpec(
+        id="tensorflow_mlp_regressor",
+        name="TensorFlow MLP Regressor (CPU)",
+        task_types=["regression"],
+        category="Regression",
+        family="neural_net",
+        factory=_make_tensorflow_mlp_regressor,
+        requires_scaling=True,
+        max_recommended_rows=20_000,
+        supports_sparse=False,
+        check_package="tensorflow",
+        default_enabled=False,
+        description="Optional feedforward regressor powered by TensorFlow.",
     ),
     # Modern Boosting (Regression)
     "xgboost_regressor": ModelSpec(
@@ -839,12 +914,11 @@ class CandidateModelSelector:
             valid_requested = []
             for mid in requested_methods:
                 spec = ModelRegistry.get_spec(mid)
-                if spec:
+                if spec and task in spec.task_types:
                     avail, _ = ModelRegistry.is_available(spec)
                     if avail:
                         valid_requested.append(mid)
-            if valid_requested:
-                return valid_requested
+            return valid_requested
 
         available_specs = ModelRegistry.get_models_for_task(task, available_only=True)
         if not available_specs:

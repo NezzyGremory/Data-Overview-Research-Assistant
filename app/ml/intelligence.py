@@ -40,6 +40,10 @@ class MLIntelligenceEngine:
         dataframe: pd.DataFrame,
         fingerprint: Dict[str, Any],
         evaluate_models: bool = True,
+        task_override: Optional[str] = None,
+        target_override: Optional[str] = None,
+        time_column: Optional[str] = None,
+        requested_methods: Optional[list[str]] = None,
     ) -> Dict[str, Any]:
         if dataframe is None or dataframe.empty:
             return self._error("Dataset kosong.")
@@ -69,6 +73,38 @@ class MLIntelligenceEngine:
         primary_task = task_result.get("primary_task", {}) or {}
         task = primary_task.get("task", "unknown_task")
         target = primary_task.get("target")
+        if task_override:
+            from app.ml.task_detector import MLTaskDetector
+
+            task = task_override
+            target = target_override
+            primary_task = {
+                "task": task,
+                "label": MLTaskDetector.TASK_LABELS.get(task, task.replace("_", " ").title()),
+                "target": target,
+                "score": 100,
+                "reasons": ["Task dipilih manual oleh pengguna."],
+            }
+            task_result = dict(task_result)
+            task_result["primary_task"] = primary_task
+            task_result["selection_mode"] = "manual"
+        elif task == "time_series_forecasting":
+            target = target or next(
+                (column for column in dataframe.select_dtypes(include=["number"]).columns),
+                None,
+            )
+            time_column = time_column or next(
+                (
+                    column for column in dataframe.columns
+                    if pd.api.types.is_datetime64_any_dtype(dataframe[column])
+                    or self.task_detector._is_datetime_series(dataframe[column])
+                ),
+                None,
+            )
+            primary_task = dict(primary_task)
+            primary_task.update({"target": target, "time_column": time_column})
+            task_result = dict(task_result)
+            task_result["primary_task"] = primary_task
 
         dataset_info = self._extract_dataset_info(
             dataframe,
@@ -106,6 +142,7 @@ class MLIntelligenceEngine:
             "regression",
             "clustering",
             "anomaly_detection",
+            "time_series_forecasting",
         }
 
         # ---------------------------------------------------------
@@ -122,10 +159,12 @@ class MLIntelligenceEngine:
                     eval_kwargs: Dict[str, Any] = {
                         "dataframe": dataframe,
                         "task": str(task),
-                        "methods": None,
+                        "methods": requested_methods,
                     }
                     if not is_unsupervised:
                         eval_kwargs["target"] = str(target)
+                    if task == "time_series_forecasting":
+                        eval_kwargs["time_column"] = time_column
 
                     evaluation = self.evaluator.evaluate(**eval_kwargs)
                 except Exception as exc:
@@ -259,6 +298,9 @@ class MLIntelligenceEngine:
             elif "score_spread" in metrics:
                 score_type = "score_spread"
                 score = float(metrics.get("score_spread", 0.0))
+            elif "mae" in metrics:
+                score_type = "mae"
+                score = float(metrics.get("mae", 0.0))
             else:
                 score_type = evaluation.get(
                     "ranking_metric",
@@ -319,7 +361,7 @@ class MLIntelligenceEngine:
                     "method_id": method_id,
                     "method": info.get(
                         "method",
-                        self._pretty_method(method_id),
+                        result.get("method") or self._pretty_method(method_id),
                     ),
                     "category": info.get(
                         "category",
@@ -432,6 +474,7 @@ class MLIntelligenceEngine:
             "davies_bouldin": "Davies-Bouldin",
             "score_spread": "Score Spread",
             "anomaly_ratio": "Anomaly Ratio",
+            "mae": "Mean Absolute Error (lower is better)",
         }
         return names.get(value, str(value).replace("_", " ").title())
 
@@ -467,6 +510,8 @@ class MLIntelligenceEngine:
             return "Clustering"
         if method_id in anomaly_ids:
             return "Anomaly Detection"
+        if method_id in {"naive", "seasonal_naive", "arima", "exponential_smoothing", "sarimax"}:
+            return "Time-Series Forecasting"
         if "regressor" in method_id or "regression" in method_id:
             return "Regression"
         return "Classification"

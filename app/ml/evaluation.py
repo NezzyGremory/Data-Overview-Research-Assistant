@@ -109,6 +109,7 @@ class MLEvaluator:
         target: Optional[str] = None,
         task: str = "binary_classification",
         methods: Optional[List[str]] = None,
+        time_column: Optional[str] = None,
     ) -> Dict[str, Any]:
         if dataframe is None or dataframe.empty:
             return self._error("Dataset kosong.")
@@ -119,9 +120,13 @@ class MLEvaluator:
             "regression",
             "clustering",
             "anomaly_detection",
+            "time_series_forecasting",
         }
         if task not in supported:
             return self._error(f"Task '{task}' belum didukung evaluator.")
+
+        if task == "time_series_forecasting":
+            return self._evaluate_forecasting(dataframe, target, time_column, methods)
 
         # -----------------------------------------------------
         # UNSUPERVISED TASKS (No target required)
@@ -138,7 +143,10 @@ class MLEvaluator:
                 n_rows=len(X),
                 n_cols=X.shape[1],
                 requested_methods=methods,
-            ) or self.CLUSTERING_METHODS
+            )
+            if methods and not requested:
+                return self._error("Algoritma clustering yang dipilih tidak tersedia.")
+            requested = requested or self.CLUSTERING_METHODS
             return self._evaluate_clustering(X, requested)
 
         if task == "anomaly_detection":
@@ -153,7 +161,10 @@ class MLEvaluator:
                 n_rows=len(X),
                 n_cols=X.shape[1],
                 requested_methods=methods,
-            ) or self.ANOMALY_METHODS
+            )
+            if methods and not requested:
+                return self._error("Algoritma deteksi anomali yang dipilih tidak tersedia.")
+            requested = requested or self.ANOMALY_METHODS
             return self._evaluate_anomaly_detection(X, requested)
 
         # -----------------------------------------------------
@@ -183,7 +194,10 @@ class MLEvaluator:
                 n_rows=len(X),
                 n_cols=X.shape[1],
                 requested_methods=methods,
-            ) or self.REGRESSION_METHODS
+            )
+            if methods and not requested:
+                return self._error("Algoritma regresi yang dipilih tidak tersedia.")
+            requested = requested or self.REGRESSION_METHODS
             return self._evaluate_regression(X, y, requested)
 
         class_count = int(y.nunique(dropna=True))
@@ -201,8 +215,119 @@ class MLEvaluator:
             n_rows=len(X),
             n_cols=X.shape[1],
             requested_methods=methods,
-        ) or self.CLASSIFICATION_METHODS
+        )
+        if methods and not requested:
+            return self._error("Algoritma klasifikasi yang dipilih tidak tersedia.")
+        requested = requested or self.CLASSIFICATION_METHODS
         return self._evaluate_classification(X, y, task, requested)
+
+    # =========================================================
+    # TIME-SERIES FORECASTING
+    # =========================================================
+    def _evaluate_forecasting(
+        self,
+        dataframe: pd.DataFrame,
+        target: Optional[str],
+        time_column: Optional[str],
+        methods: Optional[List[str]],
+    ) -> Dict[str, Any]:
+        if not target or target not in dataframe.columns:
+            return self._error("Pilih kolom target numerik untuk forecasting.")
+        if not pd.api.types.is_numeric_dtype(dataframe[target]):
+            return self._error("Target forecasting harus berupa nilai numerik.")
+        if not time_column or time_column not in dataframe.columns:
+            time_column = next(
+                (column for column in dataframe.columns if self._looks_datetime(dataframe[column])),
+                None,
+            )
+        if not time_column:
+            return self._error("Pilih kolom tanggal atau waktu untuk forecasting.")
+        if time_column == target:
+            return self._error("Kolom target dan kolom waktu harus berbeda.")
+
+        frame = dataframe[[time_column, target]].copy()
+        frame[time_column] = pd.to_datetime(frame[time_column], errors="coerce")
+        frame[target] = pd.to_numeric(frame[target], errors="coerce")
+        frame = frame.dropna().sort_values(time_column, kind="stable")
+        if len(frame) < 10:
+            return self._error("Forecasting membutuhkan minimal 10 baris bertanggal dan bernilai numerik.")
+
+        holdout = max(1, int(np.ceil(len(frame) * self.test_size)))
+        split_at = len(frame) - holdout
+        if split_at < 3:
+            return self._error("Data training forecasting terlalu sedikit.")
+        train = frame[target].iloc[:split_at].to_numpy(dtype=float)
+        actual = frame[target].iloc[split_at:].to_numpy(dtype=float)
+        requested = methods or ["naive", "seasonal_naive"]
+        labels = {
+            "naive": "Naive Forecast",
+            "seasonal_naive": "Seasonal Naive",
+            "arima": "ARIMA",
+            "exponential_smoothing": "Exponential Smoothing",
+            "sarimax": "SARIMAX",
+        }
+        results = []
+        failed = []
+        for method in requested:
+            if method not in labels:
+                failed.append({"method_id": method, "error": "Metode forecasting tidak dikenal."})
+                continue
+            try:
+                if method == "naive":
+                    predictions = np.full(len(actual), train[-1], dtype=float)
+                elif method == "seasonal_naive":
+                    period = min(12, len(train))
+                    predictions = np.asarray(
+                        [train[-period + index % period] for index in range(len(actual))],
+                        dtype=float,
+                    )
+                elif method == "arima":
+                    from statsmodels.tsa.arima.model import ARIMA
+                    predictions = np.asarray(ARIMA(train, order=(1, 1, 1)).fit().forecast(len(actual)))
+                elif method == "exponential_smoothing":
+                    from statsmodels.tsa.holtwinters import ExponentialSmoothing
+                    predictions = np.asarray(ExponentialSmoothing(train).fit().forecast(len(actual)))
+                else:
+                    from statsmodels.tsa.statespace.sarimax import SARIMAX
+                    predictions = np.asarray(
+                    SARIMAX(train, order=(1, 1, 1), seasonal_order=(1, 0, 0, max(2, min(12, len(train) // 2)))).fit(disp=False).forecast(len(actual))
+                    )
+                error = actual - predictions
+                nonzero = np.abs(actual) > np.finfo(float).eps
+                metrics = {
+                    "mae": round(float(np.mean(np.abs(error))), 4),
+                    "rmse": round(float(np.sqrt(np.mean(np.square(error)))), 4),
+                    "mape": round(float(np.mean(np.abs(error[nonzero] / actual[nonzero])) * 100), 2)
+                    if nonzero.any() else None,
+                }
+                results.append({
+                    "method_id": method,
+                    "method": labels[method],
+                    "status": "EVALUATED",
+                    "metrics": metrics,
+                    "validation": "chronological_holdout",
+                    "folds": None,
+                })
+            except Exception as exc:
+                failed.append({"method_id": method, "error": str(exc)})
+
+        results.sort(key=lambda item: (item["metrics"]["mae"], item["metrics"]["rmse"]))
+        return {
+            "status": "EVALUATION" if results else "FAILED",
+            "task": "time_series_forecasting",
+            "target": target,
+            "time_column": time_column,
+            "dataset": {"rows": len(frame), "features": 1},
+            "validation": "chronological_holdout",
+            "folds": None,
+            "metrics_used": ["mae", "rmse", "mape"],
+            "ranking_metric": "mae",
+            "results": results,
+            "failed_methods": failed,
+            "result_count": len(results),
+            "message": "Model forecasting diuji pada bagian waktu terbaru tanpa mengacak urutan data.",
+        }
+
 
     # =========================================================
     # CLASSIFICATION

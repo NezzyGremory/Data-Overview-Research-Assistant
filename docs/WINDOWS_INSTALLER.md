@@ -20,10 +20,10 @@ Open PowerShell in the repository folder and run:
 All compiled output is kept in the new `hasil_compile` directory. The installer is written to:
 
 ```text
-hasil_compile\DORA-v5.0.0-Setup.exe
+hasil_compile\DORA-v7.0.0-Setup.exe
 ```
 
-The standalone application folder is also available at `hasil_compile\DORA\payload\DORA\`. The build generates `app\ui\assets\dataset_research.ico` from the project logo, bundles the application with PyInstaller, then compiles the setup program with Inno Setup.
+The standalone application folder is also available at `hasil_compile\DORA-v7.0.0\payload\DORA\`. The build bundles the application with PyInstaller, then compiles the setup program with Inno Setup.
 
 ## Existing Data
 

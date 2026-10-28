@@ -3,13 +3,13 @@ setlocal
 cd /d "%~dp0"
 
 set "PYTHON=.venv\Scripts\python.exe"
-set "APP_NAME=Data Overview Research & Assistant v6"
+set "APP_NAME=DORA-v7.0.0"
 set "APP_EXE_NAME=DORA.exe"
-set "APP_VERSION=6.0.0"
-set "BUILD_DIR=build\installer-dora-v6-named"
+set "APP_VERSION=7.0.0"
+set "BUILD_DIR=build\installer-dora-v7.0.0"
 set "PAYLOAD_ROOT=hasil_compile\%APP_NAME%\payload"
 set "PAYLOAD_DIR=%PAYLOAD_ROOT%\DORA"
-set "INSTALLER=hasil_compile\Data-Overview-Research-Assistant-v6-Setup.exe"
+set "INSTALLER=hasil_compile\DORA-v7.0.0-Setup.exe"
 set "ISCC="
 
 if not exist "%PYTHON%" (

@@ -376,24 +376,91 @@ class MLTrainingWorker(QObject):
 
     finished = Signal(object)
     failed = Signal(str)
+    phase = Signal(str)
 
-    def __init__(self, intelligence_engine, dataframe, fingerprint):
+    def __init__(self, intelligence_engine, dataframe, fingerprint, options=None):
         super().__init__()
         self.intelligence_engine = intelligence_engine
         self.dataframe = dataframe
         self.fingerprint = fingerprint
+        self.options = options or {}
 
     def run(self):
         try:
+            self._install_optional_dependencies()
             # Keep the full evaluation path and all configured estimators.
             result = self.intelligence_engine.analyze(
                 dataframe=self.dataframe,
                 fingerprint=self.fingerprint,
                 evaluate_models=True,
+                **self.options,
             )
             self.finished.emit(result)
         except Exception as error:
             self.failed.emit(str(error))
+
+    def _install_optional_dependencies(self):
+        import importlib.util
+        from app.ml.registry import ModelRegistry
+
+        package_target = None
+        if getattr(sys, "frozen", False):
+            from PySide6.QtCore import QStandardPaths
+
+            app_data = QStandardPaths.writableLocation(QStandardPaths.AppLocalDataLocation)
+            app_data_root = Path(app_data) if app_data else Path.home() / ".dora"
+            package_target = app_data_root / "node_editor" / "site-packages"
+            if package_target.is_dir() and str(package_target) not in sys.path:
+                sys.path.insert(0, str(package_target))
+                importlib.invalidate_caches()
+
+        requested = self.options.get("requested_methods") or []
+        required = {}
+        for method_id in requested:
+            spec = ModelRegistry.get_spec(method_id)
+            package = spec.check_package if spec else None
+            if not package and method_id in {"arima", "exponential_smoothing", "sarimax"}:
+                package = "statsmodels"
+            if package in {"xgboost", "lightgbm", "catboost", "torch", "tensorflow", "statsmodels"}:
+                required[package] = package
+
+        missing = []
+        for import_name, distribution in required.items():
+            try:
+                installed = importlib.util.find_spec(import_name) is not None
+            except (ImportError, ModuleNotFoundError, ValueError):
+                installed = False
+            if not installed:
+                missing.append(distribution)
+        if not missing:
+            return
+
+        self.phase.emit(f"Mengunduh library opsional: {', '.join(missing)}")
+        if getattr(sys, "frozen", False):
+            package_target.mkdir(parents=True, exist_ok=True)
+            command = [
+                sys.executable, "--dora-editor-pip", "install",
+                "--disable-pip-version-check", "--target", str(package_target), *missing,
+            ]
+        else:
+            command = [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", *missing]
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PIP_NO_INPUT": "1", "PYTHONUTF8": "1"},
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if completed.returncode:
+            details = (completed.stdout + "\n" + completed.stderr).strip()[-1800:]
+            raise RuntimeError(
+                f"Library opsional gagal dipasang. Periksa koneksi internet dan kompatibilitas Python.\n{details}"
+            )
+        if package_target is not None:
+            target = str(package_target)
+            if target not in sys.path:
+                sys.path.insert(0, target)
+        importlib.invalidate_caches()
 
 
 class AcademicResearchWorker(QObject):
@@ -917,7 +984,6 @@ class LoadingCard(QFrame):
         self._timer = QTimer(self)
         self._timer.setInterval(110)
         self._timer.timeout.connect(lambda: self._advance_spinner())
-        self._timer.start()
 
         heading = QHBoxLayout()
         heading.addWidget(self.spinner_label)
@@ -935,6 +1001,14 @@ class LoadingCard(QFrame):
     def _advance_spinner(self):
         self._spinner_index = (self._spinner_index + 1) % len(self._spinner_frames)
         self.spinner_label.setText(self._spinner_frames[self._spinner_index])
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._timer.start()
+
+    def hideEvent(self, event):
+        self._timer.stop()
+        super().hideEvent(event)
 
 
 class StatCard(QFrame):
@@ -5951,6 +6025,8 @@ class MethodCard(QFrame):
             score_text = f"Silhouette {float(score):.3f}"
         elif score_type == "score_spread":
             score_text = f"Spread {float(score):.4f}"
+        elif score_type == "mae":
+            score_text = f"MAE {float(score):.4g}"
         else:
             score_text = f"{score}% match"
 
@@ -6138,6 +6214,8 @@ class MethodRankingRow(QFrame):
             score_text = f"Silhouette {score:.3f}"
         elif score_type == "score_spread":
             score_text = f"Spread {score:.4f}"
+        elif score_type == "mae":
+            score_text = f"MAE {score:.4g}"
         else:
             score_text = f"{score:g} match"
 
@@ -6473,6 +6551,7 @@ class MLIntelligencePage(QWidget):
         self.intelligence_engine = None
         self._ml_thread: QThread | None = None
         self._ml_worker: MLTrainingWorker | None = None
+        self._ml_loading_card: LoadingCard | None = None
 
         self.last_task_result = {}
         self.last_method_result = {}
@@ -6563,6 +6642,11 @@ class MLIntelligencePage(QWidget):
             self.run_detection
         )
 
+        self.options_button = QPushButton("Opsi ML")
+        self.options_button.setObjectName("secondaryButton")
+        self.options_button.clicked.connect(self.show_run_options)
+
+        header.addWidget(self.options_button)
         header.addWidget(
             self.refresh_button
         )
@@ -6716,6 +6800,25 @@ class MLIntelligencePage(QWidget):
     # ======================================================
 
     def run_detection(self):
+        self._start_ml_run()
+
+    def show_run_options(self):
+        if self._ml_thread is not None:
+            return
+        dataframe = getattr(self.main_window, "current_dataset", None)
+        analysis_result = getattr(self.main_window, "analysis_result", {})
+        fingerprint = analysis_result.get("fingerprint") if analysis_result else None
+        if dataframe is None or not fingerprint:
+            self.show_empty_state()
+            return
+
+        from app.ui.ml_run_options_dialog import MLRunOptionsDialog
+
+        dialog = MLRunOptionsDialog(dataframe, self.last_task_result, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._start_ml_run(dialog.options())
+
+    def _start_ml_run(self, options=None):
         if self._ml_thread is not None:
             return
         analysis_result = getattr(self.main_window, "analysis_result", {})
@@ -6734,26 +6837,33 @@ class MLIntelligencePage(QWidget):
             )
 
         self.refresh_button.setEnabled(False)
+        self.options_button.setEnabled(False)
         self.refresh_button.setText("Training models...")
         self.clear_content()
-        self.content_layout.addWidget(LoadingCard(
+        self._ml_loading_card = LoadingCard(
             "Training and comparing models",
-            "Running the full configured model training and validation. This may take a while.",
+            "Menyiapkan library pilihan lalu mengevaluasi model di latar belakang.",
             self.content,
-        ))
+        )
+        self.content_layout.addWidget(self._ml_loading_card)
         self.content_layout.addStretch()
 
         self._ml_thread = QThread(self)
-        self._ml_worker = MLTrainingWorker(self.intelligence_engine, dataframe, fingerprint)
+        self._ml_worker = MLTrainingWorker(self.intelligence_engine, dataframe, fingerprint, options)
         self._ml_worker.moveToThread(self._ml_thread)
         self._ml_thread.started.connect(self._ml_worker.run)
         self._ml_worker.finished.connect(self._on_ml_finished)
         self._ml_worker.failed.connect(self._on_ml_failed)
+        self._ml_worker.phase.connect(self._on_ml_phase)
         self._ml_worker.finished.connect(self._ml_thread.quit)
         self._ml_worker.failed.connect(self._ml_thread.quit)
         self._ml_thread.finished.connect(self._ml_worker.deleteLater)
         self._ml_thread.finished.connect(self._cleanup_ml_worker)
         self._ml_thread.start()
+
+    def _on_ml_phase(self, message):
+        if self._ml_loading_card is not None:
+            self._ml_loading_card.title_label.setText(message)
 
     def _on_ml_finished(self, intelligence_result):
         try:
@@ -6808,6 +6918,7 @@ class MLIntelligencePage(QWidget):
 
     def _finish_ml_run(self):
         self.refresh_button.setEnabled(True)
+        self.options_button.setEnabled(True)
         self.refresh_button.setText("Jalankan Ulang ML" if self.last_task_result else "Jalankan ML")
 
     def _cleanup_ml_worker(self):
@@ -13498,7 +13609,7 @@ class MainWindow(QMainWindow):
         # widget is styled as soon as it is created.
         self._load_stylesheet()
 
-        self.setWindowTitle("Data Overview Research & Assistant v6")
+        self.setWindowTitle("DORA v7.0.0")
         app_icon = _resource_path("assets/dataset_research.ico")
         if app_icon.exists():
             self.setWindowIcon(QIcon(str(app_icon)))
@@ -13514,6 +13625,8 @@ class MainWindow(QMainWindow):
         self._startup_restore_complete = False
         self._project_restore_pending = False
         self._project_restore_thread = None
+        self._node_editor_setup_thread = None
+        self._node_editor_setup_worker = None
         self._dataset_session_changed = False
         self._restored_ml_task = {}
         self._restored_ml_methods = {}
@@ -13608,6 +13721,9 @@ class MainWindow(QMainWindow):
         restore_thread = getattr(self, "_project_restore_thread", None)
         if restore_thread is not None and restore_thread.isRunning():
             active.append(restore_thread)
+        node_editor_setup_thread = getattr(self, "_node_editor_setup_thread", None)
+        if node_editor_setup_thread is not None and node_editor_setup_thread.isRunning():
+            active.append(node_editor_setup_thread)
         return active
 
     def _poll_shutdown(self):
@@ -13629,7 +13745,7 @@ class MainWindow(QMainWindow):
         except Exception as error:
             self._shutdown_pending = False
             self._shutdown_idle_checks = 0
-            self.setWindowTitle("Data Overview Research & Assistant v6")
+            self.setWindowTitle("DORA v7.0.0")
             if self.centralWidget() is not None:
                 self.centralWidget().setEnabled(True)
             self.statusBar().clearMessage()
@@ -13691,7 +13807,7 @@ class MainWindow(QMainWindow):
 
         self._shutdown_pending = True
         self._shutdown_idle_checks = 0
-        self.setWindowTitle("Data Overview Research & Assistant v6 — Menutup sesi")
+        self.setWindowTitle("DORA v7.0.0 — Menutup sesi")
         if self.centralWidget() is not None:
             self.centralWidget().setEnabled(False)
         self.statusBar().showMessage(
@@ -14416,62 +14532,44 @@ class MainWindow(QMainWindow):
         datasets_layout.setSpacing(0)
         datasets_layout.addWidget(self.datasets_tabs)
 
+        def deferred_page(object_name, feature_name):
+            page = QWidget()
+            page.setObjectName(object_name)
+            layout = QVBoxLayout(page)
+            layout.setContentsMargins(32, 32, 32, 32)
+            layout.addStretch(1)
+            loading = LoadingCard(
+                "Fitur sedang disiapkan",
+                f"Memuat {feature_name}.\nHalaman akan tampil otomatis.",
+            )
+            loading.setMaximumWidth(560)
+            loading.setMinimumHeight(158)
+            loading.description_label.setMinimumHeight(40)
+            loading.layout().setSpacing(16)
+            loading.setAccessibleName(f"Status pemuatan {feature_name}")
+            loading.progress.setAccessibleName(f"Memuat {feature_name}")
+            layout.addWidget(loading, 0, Qt.AlignHCenter)
+            layout.addStretch(1)
+            return page
+
         self._startup_checkpoint("Menyiapkan analisis…")
         self.analysis_page = None
         self._analysis_build_scheduled = False
-        self._analysis_placeholder = QWidget()
-        self._analysis_placeholder.setObjectName("analysisLoadingPlaceholder")
-        analysis_placeholder_layout = QVBoxLayout(self._analysis_placeholder)
-        analysis_placeholder_layout.setContentsMargins(32, 32, 32, 32)
-        analysis_placeholder_layout.addStretch(1)
-        analysis_placeholder_message = QLabel(
-            "Dataset Analysis akan disiapkan saat dibuka."
+        self._analysis_placeholder = deferred_page(
+            "analysisLoadingPlaceholder", "Dataset Analysis"
         )
-        analysis_placeholder_message.setObjectName("emptyState")
-        analysis_placeholder_message.setAlignment(Qt.AlignCenter)
-        analysis_placeholder_layout.addWidget(analysis_placeholder_message)
-        analysis_placeholder_layout.addStretch(1)
         self._startup_checkpoint("Analisis siap; menyiapkan halaman lain…")
         self.editor_analysis_page = None
         self._editor_analysis_build_scheduled = False
-        self._editor_analysis_placeholder = QWidget()
-        self._editor_analysis_placeholder.setObjectName(
-            "editorAnalysisLoadingPlaceholder"
+        self._editor_analysis_placeholder = deferred_page(
+            "editorAnalysisLoadingPlaceholder", "Editor Analysis"
         )
-        placeholder_layout = QVBoxLayout(self._editor_analysis_placeholder)
-        placeholder_layout.setContentsMargins(32, 32, 32, 32)
-        placeholder_layout.addStretch(1)
-        placeholder_message = QLabel("Editor Analysis akan disiapkan saat dibuka.")
-        placeholder_message.setObjectName("emptyState")
-        placeholder_message.setAlignment(Qt.AlignCenter)
-        placeholder_layout.addWidget(placeholder_message)
-        placeholder_layout.addStretch(1)
         self.node_editor_page = None
         self._node_editor_build_scheduled = False
         if NODE_EDITOR_UI_ENABLED:
-            self._node_editor_placeholder = QWidget()
-            self._node_editor_placeholder.setObjectName(
-                "nodeEditorLoadingPlaceholder"
+            self._node_editor_placeholder = deferred_page(
+                "nodeEditorLoadingPlaceholder", "Node Editor"
             )
-            node_placeholder_layout = QVBoxLayout(self._node_editor_placeholder)
-            node_placeholder_layout.setContentsMargins(32, 32, 32, 32)
-            node_placeholder_layout.addStretch(1)
-            node_placeholder_message = QLabel(
-                "Memuat Node Editor..."
-            )
-            node_placeholder_message.setObjectName("emptyState")
-            node_placeholder_message.setAlignment(Qt.AlignCenter)
-            node_placeholder_layout.addWidget(node_placeholder_message)
-            node_loading_progress = QProgressBar()
-            node_loading_progress.setObjectName("nodeEditorLoadingProgress")
-            node_loading_progress.setRange(0, 0)
-            node_loading_progress.setTextVisible(False)
-            node_loading_progress.setFixedWidth(320)
-            node_loading_progress.setAccessibleName("Memuat Node Editor")
-            node_placeholder_layout.addWidget(
-                node_loading_progress, 0, Qt.AlignHCenter
-            )
-            node_placeholder_layout.addStretch(1)
         self._startup_checkpoint("Menyiapkan tools riset…")
         # These tools contain large tables, charts, and report widgets. Keep
         # lightweight placeholders in the stack and build each tool only when
@@ -14488,30 +14586,17 @@ class MainWindow(QMainWindow):
         self._insights_page_build_scheduled = False
         self._report_page_build_scheduled = False
 
-        def deferred_page(object_name, message):
-            page = QWidget()
-            page.setObjectName(object_name)
-            layout = QVBoxLayout(page)
-            layout.setContentsMargins(32, 32, 32, 32)
-            layout.addStretch(1)
-            label = QLabel(message)
-            label.setObjectName("emptyState")
-            label.setAlignment(Qt.AlignCenter)
-            layout.addWidget(label)
-            layout.addStretch(1)
-            return page
-
         self._ml_placeholder = deferred_page(
-            "mlLoadingPlaceholder", "ML Intelligence akan disiapkan saat dibuka."
+            "mlLoadingPlaceholder", "ML Intelligence"
         )
         self._research_placeholder = deferred_page(
-            "researchLoadingPlaceholder", "Academic Research akan disiapkan saat dibuka."
+            "researchLoadingPlaceholder", "Academic Research"
         )
         self._insights_placeholder = deferred_page(
-            "insightsLoadingPlaceholder", "Research Insights akan disiapkan saat dibuka."
+            "insightsLoadingPlaceholder", "Research Insights"
         )
         self._report_placeholder = deferred_page(
-            "reportLoadingPlaceholder", "Research Report akan disiapkan saat dibuka."
+            "reportLoadingPlaceholder", "Research Report"
         )
         self._startup_checkpoint("Menyiapkan halaman bantuan…")
         self.about_page = AboutPage()
@@ -15404,7 +15489,7 @@ class MainWindow(QMainWindow):
             self._show_page("analysis")
             if not self._analysis_build_scheduled:
                 self._analysis_build_scheduled = True
-                QTimer.singleShot(0, self._create_analysis_page)
+                QTimer.singleShot(40, self._create_analysis_page)
             return
         if self.current_dataset is not None:
             self.analysis_page.update_dataset(
@@ -15429,7 +15514,7 @@ class MainWindow(QMainWindow):
             self._show_page("editor_analysis")
             if not self._editor_analysis_build_scheduled:
                 self._editor_analysis_build_scheduled = True
-                QTimer.singleShot(0, self._create_editor_analysis_page)
+                QTimer.singleShot(40, self._create_editor_analysis_page)
             return
         self.editor_analysis_page.set_dataset(
             self.current_dataset,
@@ -15509,9 +15594,36 @@ class MainWindow(QMainWindow):
         if self.node_editor_page is not None:
             self._node_editor_build_scheduled = False
             return
+        loading = self._node_editor_placeholder.findChild(LoadingCard)
+        if loading is not None:
+            loading.title_label.setText("Fitur sedang disiapkan")
+            loading.description_label.setText("Memuat Node Editor.\nHalaman akan tampil otomatis.")
+            loading.spinner_label.show()
+            loading.progress.show()
+        from app.ui.node_editor.page import NodeEditorSetupWorker
+
+        self._node_editor_setup_thread = QThread(self)
+        self._node_editor_setup_worker = NodeEditorSetupWorker()
+        self._node_editor_setup_worker.moveToThread(self._node_editor_setup_thread)
+        self._node_editor_setup_thread.started.connect(self._node_editor_setup_worker.run)
+        self._node_editor_setup_worker.ready.connect(self._on_node_editor_engine_ready)
+        self._node_editor_setup_worker.failed.connect(self._on_node_editor_setup_failed)
+        self._node_editor_setup_worker.ready.connect(self._node_editor_setup_thread.quit)
+        self._node_editor_setup_worker.failed.connect(self._node_editor_setup_thread.quit)
+        self._node_editor_setup_thread.finished.connect(self._node_editor_setup_worker.deleteLater)
+        self._node_editor_setup_thread.finished.connect(self._cleanup_node_editor_setup)
+        self._node_editor_setup_thread.start()
+
+    def _on_node_editor_engine_ready(self, engine):
+        if self.node_editor_page is not None:
+            return
         from app.ui.node_editor import NodeEditorPage
 
-        page = NodeEditorPage(self)
+        try:
+            page = NodeEditorPage(self, engine=engine)
+        except Exception as error:
+            self._on_node_editor_setup_failed(str(error))
+            return
 
         def show_ready_page():
             if self.node_editor_page is not None:
@@ -15523,12 +15635,25 @@ class MainWindow(QMainWindow):
 
         page.prepare_for_open(on_ready=show_ready_page)
 
+    def _on_node_editor_setup_failed(self, error):
+        self._node_editor_build_scheduled = False
+        loading = self._node_editor_placeholder.findChild(LoadingCard)
+        if loading is not None:
+            loading.title_label.setText("Node Editor belum dapat dibuka")
+            loading.description_label.setText(str(error))
+            loading.progress.hide()
+            loading.spinner_label.hide()
+
+    def _cleanup_node_editor_setup(self):
+        self._node_editor_setup_worker = None
+        self._node_editor_setup_thread = None
+
     def _schedule_page_build(self, key, flag_name, builder_name):
         self._show_page(key)
         if getattr(self, flag_name):
             return
         setattr(self, flag_name, True)
-        QTimer.singleShot(0, getattr(self, builder_name))
+        QTimer.singleShot(40, getattr(self, builder_name))
 
     def _create_ml_page(self):
         self._ml_page_build_scheduled = False

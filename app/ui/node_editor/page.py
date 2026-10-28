@@ -423,6 +423,7 @@ class GraphView(QGraphicsView):
                 return
         super().wheelEvent(event)
 
+
     def set_zoom(self, value):
         value = max(self.MIN_ZOOM, min(self.MAX_ZOOM, float(value)))
         current = self.transform().m11()
@@ -1025,13 +1026,26 @@ def _restore_graph(graph_data):
     return graph
 
 
+class NodeEditorSetupWorker(QObject):
+    """Build the dynamic graph catalog without blocking the Qt event loop."""
+
+    ready = Signal(object)
+    failed = Signal(str)
+
+    def run(self):
+        try:
+            self.ready.emit(GraphEngine())
+        except Exception as error:
+            self.failed.emit(str(error))
+
+
 class NodeEditorPage(QWidget):
     """Editor visual untuk membangun alur analisis machine learning."""
 
-    def __init__(self, main_window=None):
+    def __init__(self, main_window=None, engine=None):
         super().__init__()
         self.main_window = main_window
-        self.engine = GraphEngine()
+        self.engine = engine or GraphEngine()
         self.items = {}
         self.cables = {}
         self._node_connections = {}
