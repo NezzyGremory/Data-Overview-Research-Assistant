@@ -1,0 +1,16 @@
+services:
+  - type: web
+    runtime: static
+    name: dora-public-web
+    buildCommand: cd web && npm ci && npm run build
+    staticPublishPath: web/dist
+    headers:
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
