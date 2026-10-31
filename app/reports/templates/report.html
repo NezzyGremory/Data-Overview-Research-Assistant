@@ -4,58 +4,56 @@
 <meta charset="utf-8">
 <title>Laporan Penelitian - {{ dataset_name }}</title>
 <style>
-@page { size: A4; margin: 18mm; }
+@page { size: A4; margin: 30mm 30mm 25mm 40mm; }
 html { font-size: 12pt; }
 body {
   font-family: 'Times New Roman', Times, serif;
   font-size: 12pt;
-  color: #172033;
+  color: #111111;
   line-height: 1.5;
-  text-align: justify;
+  text-align: center;
   orphans: 3;
   widows: 3;
 }
-h1, h2, h3 { color: #172033; page-break-after: avoid; break-after: avoid; }
-h1 { font-size: 20pt; line-height: 1.2; text-align: center; margin: 0 0 16pt; }
-h2 { font-size: 14pt; line-height: 1.25; margin: 20pt 0 8pt; border-bottom: 1px solid #9AA7B7; padding-bottom: 4pt; }
-h3 { font-size: 12pt; line-height: 1.3; margin: 14pt 0 5pt; }
-p { margin: 0 0 8pt; }
-ol, ul { margin: 4pt 0 10pt; padding-left: 22pt; }
+h1, h2, h3 { color: #111111; font-weight: bold; page-break-after: avoid; break-after: avoid; }
+h1 { font-size: 16pt; line-height: 1.2; text-align: center; margin: 0 0 4pt; }
+h2 { font-size: 14pt; line-height: 1.25; text-align: center; margin: 20pt 0 9pt; }
+h3 { font-size: 12pt; line-height: 1.3; text-align: center; margin: 14pt 0 5pt; }
+p { margin: 0 0 8pt; text-align: center; }
+ol, ul { margin: 4pt 0 10pt; padding-left: 0; list-style-position: inside; text-align: center; }
 li { margin: 0 0 4pt; }
-a { color: #173D78; text-decoration: underline; }
-.cover { text-align: center; margin: 80pt 0 0; page-break-after: avoid; }
-.cover h1 { font-size: 22pt; letter-spacing: .4pt; margin: 0 0 18pt; }
-.cover h2 { border: 0; font-size: 17pt; margin: 0 0 12pt; padding: 0; }
-.cover p { text-align: center; margin: 0 0 8pt; }
-.meta { color: #45546a; }
-.summary { border-collapse: collapse; width: 100%; margin: 10pt 0 16pt; page-break-inside: avoid; break-inside: avoid; }
-.summary th { text-align: left; background: #EEF3F8; font-weight: bold; }
-.summary td, .summary th { border: 1px solid #B8C0CC; padding: 6pt 8pt; vertical-align: top; }
-.summary td:first-child { font-weight: bold; width: 38%; }
-.finding { margin: 9pt 0 15pt; padding: 2pt 0 2pt 9pt; border-left: 2px solid #98A5B5; page-break-inside: avoid; break-inside: avoid; }
+a { color: #111111; text-decoration: underline; }
+.report-title { text-align: center; margin: 0 0 22pt; }
+.report-title p { text-align: center; margin: 0 0 4pt; }
+.report-title .dataset-name { font-size: 14pt; font-weight: bold; }
+.meta { color: #333333; font-size: 10pt; }
+.summary { border-collapse: collapse; margin: 10pt auto 16pt; border-bottom: 1px solid #333333; page-break-inside: avoid; break-inside: avoid; }
+.summary th, .summary td { text-align: center; }
+.summary th { font-weight: bold; border-top: 1px solid #333333; border-bottom: 1px solid #333333; }
+.summary td, .summary th { border-left: 0; border-right: 0; padding: 5pt 7pt; vertical-align: top; }
+.summary td:first-child { font-weight: bold; }
+.finding { margin: 9pt 0 15pt; page-break-inside: avoid; break-inside: avoid; }
 .paper { margin: 8pt 0 14pt; page-break-inside: avoid; break-inside: avoid; }
-.pagebreak { page-break-before: always; break-before: page; }
 .center { text-align: center; }
-.chart { text-align: center; margin: 12pt 0 18pt; page-break-inside: avoid; break-inside: avoid; }
+.chart { text-align: center; margin: 10pt 0 16pt; page-break-inside: avoid; break-inside: avoid; }
+.chart p { text-align: center; line-height: 100%; margin: 0 0 6pt; }
 .chart img, img { max-width: 100%; height: auto; }
-.caption { font-size: 10pt; font-style: italic; text-align: center; }
-tr, figure { page-break-inside: avoid; break-inside: avoid; }
+.caption { font-size: 10pt; font-weight: bold; font-style: normal; text-align: center; }
+tr, .chart { page-break-inside: avoid; break-inside: avoid; }
 </style>
 </head>
 <body>
-<div class="cover">
+<div class="report-title">
 <h1>LAPORAN PENELITIAN</h1>
-<h2>{{ dataset_name }}</h2>
-<p>Analisis Dataset, Evaluasi Machine Learning, dan Tinjauan Literatur</p>
-<p class="meta">Dataset Research<br>Dibuat pada {{ generated_at }}</p>
+<p class="dataset-name">{{ dataset_name }}</p>
+<p class="meta">{{ generated_at }}</p>
 </div>
-<div class="pagebreak"></div>
 
 <h2>Abstrak</h2>
-<p align="justify">Laporan ini menyajikan hasil pemeriksaan kualitas dataset, evaluasi model machine learning, serta ringkasan literatur akademik yang terkait. Hasil menggambarkan data dan sumber yang berhasil dianalisis oleh aplikasi; temuan research gap merupakan indikasi awal yang perlu diverifikasi melalui kajian pustaka.</p>
+<p>Laporan ini menyajikan hasil pemeriksaan kualitas dataset, evaluasi model machine learning, serta ringkasan literatur akademik yang terkait. Hasil menggambarkan data dan sumber yang berhasil dianalisis oleh aplikasi; temuan research gap merupakan indikasi awal yang perlu diverifikasi melalui kajian pustaka.</p>
 
 <h2>1. Profil Dataset</h2>
-<table class="summary"><tbody>
+<table class="summary" align="center" cellpadding="7" cellspacing="0"><tbody>
 <tr><td>Jumlah observasi</td><td>{{ total_rows_fmt }} baris</td></tr>
 <tr><td>Jumlah variabel</td><td>{{ total_columns_fmt }} kolom ({{ numeric_col_count }} numerik, {{ categorical_col_count }} kategorikal)</td></tr>
 <tr><td>Nilai kosong</td><td>{{ missing_cells_fmt }} ({{ missing_percentage }}% dari seluruh sel)</td></tr>
@@ -65,85 +63,94 @@ tr, figure { page-break-inside: avoid; break-inside: avoid; }
 </tbody></table>
 {% if column_summary %}<h3>Rincian variabel</h3>{% for col in column_summary %}<p><b>{{ col.name }}</b> ({{ col.dtype }}) — nilai kosong {{ col.null_count }} ({{ col.null_pct }}%).</p>{% endfor %}{% endif %}
 
+{% for key, caption, alt in [
+    ('histograms', 'Distribusi variabel numerik yang memiliki variasi, hingga empat variabel.', 'Distribusi variabel numerik'),
+    ('correlation', 'Matriks korelasi Pearson antarvariabel numerik. Nilai mendekati 1 atau -1 menunjukkan hubungan linear yang lebih kuat; korelasi tidak membuktikan sebab-akibat.', 'Matriks korelasi variabel numerik'),
+    ('missing_values', 'Persentase nilai kosong pada variabel dengan nilai kosong terbanyak.', 'Persentase nilai kosong per variabel'),
+    ('model_comparison', 'Perbandingan model berdasarkan metrik evaluasi yang sama.', 'Perbandingan hasil evaluasi model'),
+    ('publication_trend', 'Jumlah paper yang ditemukan menurut tahun publikasi.', 'Tren publikasi menurut tahun'),
+    ('research_methods', 'Distribusi metode pada literatur yang ditemukan.', 'Distribusi metode pada literatur')
+] if chart_paths.get(key) %}
+<table class="chart" align="center" width="100%" border="0" cellpadding="0" cellspacing="0"><tr><td align="center">
+{% if loop.first %}<h2>2. Visualisasi Hasil Analisis</h2>{% endif %}
+<p align="center"><img src="{{ chart_paths[key] }}" width="500" alt="{{ alt }}"></p>
+<p class="caption" align="center">Gambar {{ loop.index }}. {{ caption }}</p>
+</td></tr></table>
+{% else %}
 <h2>2. Visualisasi Hasil Analisis</h2>
-{% if chart_paths.histograms %}<p align="center"><img src="{{ chart_paths.histograms }}" width="650"><br><i>Gambar 1. Distribusi empat variabel numerik pertama yang memiliki variasi.</i></p>{% endif %}
-{% if chart_paths.correlation %}<p align="center"><img src="{{ chart_paths.correlation }}" width="650"><br><i>Gambar 2. Matriks korelasi Pearson antarvariabel numerik. Nilai mendekati 1 atau -1 menunjukkan hubungan linear yang lebih kuat; korelasi tidak membuktikan sebab-akibat.</i></p>{% endif %}
-{% if chart_paths.missing_values %}<p align="center"><img src="{{ chart_paths.missing_values }}" width="650"><br><i>Gambar 3. Persentase nilai kosong pada variabel dengan nilai kosong terbanyak.</i></p>{% endif %}
-{% if chart_paths.model_comparison %}<p align="center"><img src="{{ chart_paths.model_comparison }}" width="650"><br><i>Gambar 4. Perbandingan model berdasarkan metrik evaluasi yang sama.</i></p>{% endif %}
-{% if chart_paths.publication_trend %}<p align="center"><img src="{{ chart_paths.publication_trend }}" width="650"><br><i>Gambar 5. Jumlah paper yang ditemukan menurut tahun publikasi.</i></p>{% endif %}
-{% if chart_paths.research_methods %}<p align="center"><img src="{{ chart_paths.research_methods }}" width="650"><br><i>Gambar 6. Distribusi metode pada literatur yang ditemukan.</i></p>{% endif %}
-{% if not chart_paths %}<p>Grafik belum dapat dibuat karena data numerik atau data penelitian tidak tersedia.</p>{% endif %}
+<p>Grafik belum dapat dibuat karena data numerik atau data penelitian tidak tersedia.</p>
+{% endfor %}
 
 <h2>3. Diagnostik Kualitas Data</h2>
 {% if quality_diagnoses %}{% for item in quality_diagnoses %}
 <div class="finding"><h3>{{ loop.index }}. {{ item.title }}</h3>
 <p><b>Tingkat temuan:</b> {{ item.severity }}</p>
-{% if item.problem %}<p align="justify"><b>Temuan:</b> {{ item.problem }}</p>{% endif %}
-{% if item.magnitude %}<p align="justify"><b>Besaran:</b> {{ item.magnitude }}</p>{% endif %}
-{% if item.impact %}<p align="justify"><b>Dampak:</b> {{ item.impact }}</p>{% endif %}
+{% if item.problem %}<p><b>Temuan:</b> {{ item.problem }}</p>{% endif %}
+{% if item.magnitude %}<p><b>Besaran:</b> {{ item.magnitude }}</p>{% endif %}
+{% if item.impact %}<p><b>Dampak:</b> {{ item.impact }}</p>{% endif %}
 {% if item.options %}<p><b>Saran penanganan:</b></p><ol>{% for option in item.options %}<li>{{ option }}</li>{% endfor %}</ol>{% endif %}</div>
 {% endfor %}{% else %}<p>Tidak ada temuan diagnostik kualitas data yang tercatat.</p>{% endif %}
 
-<h2>4. Evaluasi Machine Learning</h2>
+<h2>4. Evaluasi dan Kesiapan Machine Learning</h2>
 <p><b>Jenis tugas:</b> {{ primary_task_display }}{% if target_column %}<br><b>Variabel target:</b> {{ target_column }}{% endif %}</p>
 {% if ml_evaluated %}
 <p><b>Model dengan hasil terbaik:</b> {{ best_model_name }}{% if best_model_status_label %} <span class="meta">({{ best_model_status_label }})</span>{% endif %}<br><b>Metrik utama:</b> {{ best_model_score }}<br><b>Validasi:</b> {{ validation_protocol }}</p>
 {% if candidate_models %}<h3>Hasil per model</h3>{% for model in candidate_models %}<div class="finding"><p><b>{{ loop.index }}. {{ model.method }}</b></p><p><b>Metrik:</b> {{ model.primary_metric_str }}{% if model.std_str != '-' %}; variasi: {{ model.std_str }}{% endif %}</p><p><b>Kekuatan:</b> {{ model.strengths }}</p><p><b>Keterbatasan:</b> {{ model.limitations }}</p></div>{% endfor %}{% endif %}
 {% else %}<p>Evaluasi model belum tersedia.</p>{% endif %}
 
-<h2>5. Tinjauan Literatur dan Landscape Penelitian</h2>
-{% if research_executed %}
-<p><b>Bidang penelitian:</b> {{ research_domain }}{% if keywords_list %}<br><b>Kata kunci:</b> {{ keywords_list|join(', ') }}{% endif %}<br><b>Paper yang ditemukan:</b> {{ papers_count }}</p>
-{% if method_distribution %}<h3>Metode yang sering muncul</h3><ol>{% for method in method_distribution %}<li>{{ method.name or method.method or method.label or 'Metode' }} — {{ method.percentage or method.count or method.value or method.share or '-' }}{% if method.percentage is defined %}%{% endif %}</li>{% endfor %}</ol>{% endif %}
-{% if publication_trend %}<h3>Tren publikasi menurut tahun</h3><p>{% for point in publication_trend %}{{ point.year }}: {{ point.paper_count }} paper{% if not loop.last %}; {% endif %}{% endfor %}.</p>{% endif %}
-{% if papers_list %}<h3>Paper terkait</h3>{% for paper in papers_list %}<div class="paper"><p><b>{{ loop.index }}. {% if paper.url %}<a href="{{ paper.url }}">{{ paper.title }}</a>{% else %}{{ paper.title }}{% endif %}</b></p><p>{{ paper.authors_display }}{% if paper.year %} ({{ paper.year }}){% endif %}; {{ paper.relevance_display }}{% if paper.citation_display != 'Sitasi: -' %}; {{ paper.citation_display }}{% endif %}.</p>{% if paper.url %}<p><b>Sumber:</b> <a href="{{ paper.url }}">{{ paper.url }}</a></p>{% endif %}{% if paper.abstract %}<p align="justify">{{ paper.abstract }}</p>{% endif %}</div>{% endfor %}{% else %}<p>Penelusuran telah dijalankan, tetapi tidak ada paper yang ditemukan untuk ditampilkan.</p>{% endif %}
-{% else %}<p>Academic Research belum dijalankan.</p>{% endif %}
-
-<h2>6. Potensi Research Gap dan Saran Penelitian</h2>
-<p align="justify">Bagian ini menunjukkan pola atau topik yang relatif kurang terwakili pada paper yang ditemukan. Indikasi ini bukan bukti bahwa topik belum pernah diteliti; verifikasi melalui penelusuran literatur yang lebih luas tetap diperlukan.</p>
-{% if research_gaps %}<ol>{% for gap in research_gaps %}<li>{{ gap }}</li>{% endfor %}</ol>{% else %}<p>Tidak ada kandidat research gap yang terdeteksi dari hasil pencarian ini.</p>{% endif %}
-{% if gap_explanation_lines %}<h3>Penjelasan dan rekomendasi</h3>{% for line in gap_explanation_lines %}<p align="justify">{{ line }}</p>{% endfor %}{% endif %}
-
 {% if ml_readiness_available %}
-<h2>Data Quality Summary</h2>
+<h3>Ringkasan Kualitas Data</h3>
 <p><b>Ringkasan:</b> {{ readiness_quality_summary }}</p>
-<table class="summary"><tbody>
+<table class="summary" align="center" width="100%"><tbody>
 {% for item in readiness_quality_rows %}<tr><td>{{ item.check }}</td><td>{{ item.value }}</td></tr>{% endfor %}
 </tbody></table>
 
-{% if readiness_class_balance.applicable %}<h2>Class Balance</h2>
+{% if readiness_class_balance.applicable %}<h3>Keseimbangan Kelas</h3>
 <p><b>Ringkasan:</b> {{ readiness_class_balance.summary or 'Tidak berlaku untuk dataset ini.' }}{% if readiness_class_balance.imbalance_ratio is not none %}<br><b>Rasio Ketidakseimbangan:</b> {{ '%.2f'|format(readiness_class_balance.imbalance_ratio) }}:1<br><b>Status:</b> {{ readiness_class_balance.status }}{% endif %}</p>
-{% if readiness_class_balance.classes %}<table class="summary"><thead><tr><th>Class</th><th>Jumlah</th><th>Persentase</th></tr></thead><tbody>
+{% if readiness_class_balance.classes %}<table class="summary" align="center" width="100%"><thead><tr><th>Kelas</th><th>Jumlah</th><th>Persentase</th></tr></thead><tbody>
 {% for item in readiness_class_balance.classes %}<tr><td>{{ item.class }}</td><td>{{ item.count }}</td><td>{{ '%.1f'|format(item.percentage) }}%</td></tr>{% endfor %}
 </tbody></table>{% endif %}{% endif %}
 
-<h2>Preprocessing Recommendation</h2>
+<h3>Rekomendasi Prapemrosesan</h3>
 <p><b>Ringkasan:</b> {{ readiness_preprocessing_summary }}</p>
-{% if readiness_preprocessing_rows %}<table class="summary"><thead><tr><th>Bagian</th><th>Kolom atau Cakupan</th><th>Rekomendasi</th></tr></thead><tbody>
+{% if readiness_preprocessing_rows %}<table class="summary" align="center" width="100%"><thead><tr><th>Bagian</th><th>Kolom atau Cakupan</th><th>Rekomendasi</th></tr></thead><tbody>
 {% for item in readiness_preprocessing_rows %}<tr><td>{{ item.area }}</td><td>{{ item.scope }}</td><td>{{ item.recommendation }}</td></tr>{% endfor %}
 </tbody></table>{% else %}<p>Tidak berlaku untuk dataset ini.</p>{% endif %}
-<p><b>Pengendalian Leakage:</b> {{ readiness_fit_note }}</p>
+<p><b>Pengendalian kebocoran data:</b> {{ readiness_fit_note }}</p>
 
-<h2>Feature Selection Hints</h2>
+<h3>Petunjuk Seleksi Fitur</h3>
 <p><b>Ringkasan:</b> {{ readiness_feature_summary }}</p>
-{% if readiness_feature_rows %}<table class="summary"><thead><tr><th>Petunjuk</th><th>Feature</th><th>Hasil</th></tr></thead><tbody>
+{% if readiness_feature_rows %}<table class="summary" align="center" width="100%"><thead><tr><th>Petunjuk</th><th>Fitur</th><th>Hasil</th></tr></thead><tbody>
 {% for item in readiness_feature_rows %}<tr><td>{{ item.hint }}</td><td>{{ item.feature }}</td><td>{{ item.result }}</td></tr>{% endfor %}
 </tbody></table>{% else %}<p>Tidak berlaku untuk dataset ini.</p>{% endif %}
 {% if readiness_feature_importance_note %}<p>{{ readiness_feature_importance_note }}</p>{% endif %}
 
-<h2>ML Pipeline Checklist</h2>
-{% if readiness_pipeline_checklist %}<table class="summary"><thead><tr><th>Tahap</th><th>Status</th><th>Rincian</th></tr></thead><tbody>
+<h3>Daftar Periksa Alur Machine Learning</h3>
+{% if readiness_pipeline_checklist %}<table class="summary" align="center" width="100%"><thead><tr><th>Tahap</th><th>Status</th><th>Rincian</th></tr></thead><tbody>
 {% for item in readiness_pipeline_checklist %}<tr><td>{{ item.stage }}</td><td>{{ item.status }}</td><td>{{ item.details }}</td></tr>{% endfor %}
 </tbody></table>{% else %}<p>Tidak berlaku untuk dataset ini.</p>{% endif %}
 {% if readiness_summary_note %}<p>{{ readiness_summary_note }}</p>{% endif %}
 {% endif %}
 
+<h2>5. Tinjauan Literatur dan Peta Penelitian</h2>
+{% if research_executed %}
+<p><b>Bidang penelitian:</b> {{ research_domain }}{% if keywords_list %}<br><b>Kata kunci:</b> {{ keywords_list|join(', ') }}{% endif %}<br><b>Paper yang ditemukan:</b> {{ papers_count }}</p>
+{% if method_distribution %}<h3>Metode yang sering muncul</h3><ol>{% for method in method_distribution %}<li>{{ method.name or method.method or method.label or 'Metode' }} — {{ method.percentage or method.count or method.value or method.share or '-' }}{% if method.percentage is defined %}%{% endif %}</li>{% endfor %}</ol>{% endif %}
+{% if publication_trend %}<h3>Tren publikasi menurut tahun</h3><p>{% for point in publication_trend %}{{ point.year }}: {{ point.paper_count }} paper{% if not loop.last %}; {% endif %}{% endfor %}.</p>{% endif %}
+{% if papers_list %}<h3>Paper terkait</h3>{% for paper in papers_list %}<div class="paper"><p><b>{{ loop.index }}. {% if paper.url %}<a href="{{ paper.url }}">{{ paper.title }}</a>{% else %}{{ paper.title }}{% endif %}</b></p><p>{{ paper.authors_display }}{% if paper.year %} ({{ paper.year }}){% endif %}; {{ paper.relevance_display }}{% if paper.citation_display != 'Sitasi: -' %}; {{ paper.citation_display }}{% endif %}.</p>{% if paper.url %}<p><b>Sumber:</b> <a href="{{ paper.url }}">{{ paper.url }}</a></p>{% endif %}{% if paper.abstract %}<p>{{ paper.abstract }}</p>{% endif %}</div>{% endfor %}{% else %}<p>Penelusuran telah dijalankan, tetapi tidak ada paper yang ditemukan untuk ditampilkan.</p>{% endif %}
+{% else %}<p>Academic Research belum dijalankan.</p>{% endif %}
+
+<h2>6. Potensi Research Gap dan Saran Penelitian</h2>
+<p>Bagian ini menunjukkan pola atau topik yang relatif kurang terwakili pada paper yang ditemukan. Indikasi ini bukan bukti bahwa topik belum pernah diteliti; verifikasi melalui penelusuran literatur yang lebih luas tetap diperlukan.</p>
+{% if research_gaps %}<ol>{% for gap in research_gaps %}<li>{{ gap }}</li>{% endfor %}</ol>{% else %}<p>Tidak ada kandidat research gap yang terdeteksi dari hasil pencarian ini.</p>{% endif %}
+{% if gap_explanation_lines %}<h3>Penjelasan dan rekomendasi</h3>{% for line in gap_explanation_lines %}<p>{{ line }}</p>{% endfor %}{% endif %}
+
 {% if ai_synthesis %}
 <h2>Ringkasan AI</h2>
-<p align="justify">{{ ai_synthesis }}</p>
+<p>{{ ai_synthesis }}</p>
 {% endif %}
 
 <h2>Kesimpulan</h2>
-<p align="justify">Hasil laporan merangkum kondisi dataset, performa model yang diuji, dan pola literatur yang ditemukan. Gunakan diagnostik kualitas untuk merencanakan prapemrosesan, bandingkan metrik model sesuai tujuan analisis, dan validasi arah penelitian dengan membaca sumber paper terkait.</p>
-<p class="meta">Laporan dibuat otomatis oleh Dataset Research berdasarkan hasil yang tersimpan pada proyek aktif.</p>
+<p>Hasil laporan merangkum kondisi dataset, performa model yang diuji, dan pola literatur yang ditemukan. Gunakan diagnostik kualitas untuk merencanakan prapemrosesan, bandingkan metrik model sesuai tujuan analisis, dan validasi arah penelitian dengan membaca sumber paper terkait.</p>
+<p class="meta">Laporan dibuat otomatis oleh Data Overview &amp; Research Assistant berdasarkan hasil yang tersimpan pada proyek aktif.</p>
 </body></html>

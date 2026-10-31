@@ -1,9 +1,34 @@
 services:
   - type: web
+    runtime: python
+    name: dora-analysis-api
+    plan: free # Preview tier; Render spins it down after 15 minutes without traffic.
+    buildCommand: pip install -r requirements-web.txt
+    startCommand: uvicorn backend.web_api:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.12
+      - key: WEB_ORIGINS
+        fromService:
+          type: web
+          name: dora-public-web
+          envVarKey: RENDER_EXTERNAL_URL
+  - type: web
     runtime: static
     name: dora-public-web
     buildCommand: cd web && npm ci && npm run build
     staticPublishPath: web/dist
+    envVars:
+      - key: VITE_API_URL
+        fromService:
+          type: web
+          name: dora-analysis-api
+          envVarKey: RENDER_EXTERNAL_URL
+    routes:
+      - type: rewrite
+        source: /workspace
+        destination: /index.html
     headers:
       - path: /*
         name: X-Content-Type-Options

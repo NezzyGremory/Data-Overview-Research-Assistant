@@ -1,0 +1,22 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+[functions]
+  directory = "netlify/functions"
+
+# Proxy dataset search API calls to the Netlify Function (must come BEFORE SPA fallback)
+[[redirects]]
+  from = "/api/datasets/search"
+  to = "/.netlify/functions/datasets-search"
+  status = 200
+  force = true
+
+# SPA fallback — all routes → index.html
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

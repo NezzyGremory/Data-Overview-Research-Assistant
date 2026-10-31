@@ -8,15 +8,17 @@
   <a href="https://github.com/NezzyGremory/Dataset-Research/blob/main/LICENSE"><img alt="License: MIT" src="https://img.shields.io/github/license/NezzyGremory/Dataset-Research?color=0F766E&style=flat-square" /></a>
   <a href="https://github.com/NezzyGremory/Dataset-Research/commits/main"><img alt="Latest commit" src="https://img.shields.io/github/last-commit/NezzyGremory/Dataset-Research?color=2563EB&style=flat-square" /></a>
   <a href="https://github.com/NezzyGremory/Dataset-Research/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/NezzyGremory/Dataset-Research?color=7C3AED&style=flat-square" /></a>
-  <img alt="Project status: not declared" src="https://img.shields.io/badge/status-not%20declared-64748B?style=flat-square" />
-  <!-- ISI: set an official project status (for example, active, maintenance, or archived) when confirmed. -->
+  <img alt="Web app stage: beta" src="https://img.shields.io/badge/web%20app-beta-7C3AED?style=flat-square" />
 </div>
 
 **Data Overview Research & Assistant (DORA)** is the Python desktop application in this repository. It brings local tabular-data exploration, machine-learning workflow tools, and academic-literature discovery into one workspace. The GitHub repository is named `Dataset-Research`.
 
+The repository also includes a browser-based **web beta** for dataset analysis, basic cleaning, dataset discovery, and academic research. The web beta has a narrower feature set and different data-handling limits than the desktop application. No public deployment URL is recorded here yet; see [`docs/web_deployment.md`](docs/web_deployment.md) for local use and deployment.
+
 ## Table of Contents
 
 - [About the Project](#about-the-project)
+- [Web Beta](#web-beta)
 - [Features](#features)
 - [Dataset](#dataset)
 - [Project Structure](#project-structure)
@@ -33,9 +35,22 @@
 
 ## About the Project
 
-DORA helps researchers inspect and prepare tabular datasets, explore machine-learning approaches, and connect a research topic to relevant academic publications. Dataset loading, profiling, cleaning, and model evaluation are implemented in the desktop application; online dataset and paper providers require an internet connection.
+DORA helps researchers inspect and prepare tabular datasets, explore machine-learning approaches, and connect a research topic to relevant academic publications. The desktop application provides the full local workflow; the web beta exposes a smaller subset of dataset analysis and cleaning, plus online dataset and paper discovery. Online providers require an internet connection.
 
 The project is a research-support tool rather than a source of authoritative scientific conclusions. Review the original dataset, paper, provider metadata, and model evaluation before relying on an output.
+
+## Web Beta
+
+The browser-based beta is built with React, TypeScript, and Vite, with a FastAPI service that reuses the desktop analysis modules. It currently supports:
+
+- Uploading CSV datasets for profiling, quality checks, statistics, ML task estimates, and method recommendations.
+- Reviewing dataset structure and previews, then imputing missing values or dropping rows with missing values and downloading the cleaned CSV.
+- Searching dataset catalogs and academic literature, reviewing research trends and landscapes, and exploring candidate research gaps.
+- Generating a research report that can be printed or saved as PDF from the browser.
+
+The web beta accepts CSV files up to **10 MB**. It has no sign-in, so uploaded files are sent to the API for processing and are removed from temporary storage after the request. Desktop-only features include the Node Editor, notebook/kernel tooling, project version history, and local runtime package installation. The Render Blueprint is in [`render.yaml`](render.yaml); the deployment dashboard supplies the public URL after deployment.
+
+See [`docs/web_deployment.md`](docs/web_deployment.md) for API endpoints, access limits, deployment steps, and local development instructions.
 
 ## Features
 
@@ -78,7 +93,7 @@ This repository is an application, not a dataset release. There is no fixed rese
 | Public community datasets | Kaggle and Hugging Face results; available file types depend on the provider entry. | Varies by dataset and selected file. | Search by keyword in **Dataset Search**, review the source page and license, then download. |
 | Evaluation datasets | OpenML IDs and provenance are described by the local evaluation manifest when available; downloaded copies are stored as CSV under `data/evaluation/`. | Varies by dataset ID and split. No single row or feature count applies to the suite. | Provide `evaluation/manifests/dataset_ground_truth.csv`, then run the evaluation download command below. |
 
-The dataset loader accepts files up to **100 MB**. Dataset Search can directly download JSONL files from supported provider entries, but `.jsonl` is not one of the dataset loader's accepted input suffixes; convert it to a supported format before importing it into analysis.
+The desktop dataset loader accepts files up to **100 MB**. The web beta accepts CSV files up to **10 MB**. Dataset Search can directly download JSONL files from supported provider entries, but `.jsonl` is not one of the dataset loader's accepted input suffixes; convert it to a supported format before importing it into analysis.
 
 Evaluation manifests, downloaded datasets, application databases, and evaluation results are local runtime data and are not included in the versioned source. Do not commit user data, provider credentials, or `.env` files.
 
@@ -99,8 +114,10 @@ Evaluation manifests, downloaded datasets, application databases, and evaluation
 │   ├── research/           Paper providers, ranking, trends, landscape, and gap analysis
 │   ├── storage/            SQLite repositories and dataset-version management
 │   └── ui/                 PySide6 pages, notebook editor, Node Editor, QSS, and assets
+├── backend/                FastAPI service for the browser-based web beta
+├── web/                    React, TypeScript, and Vite web client
 ├── assets/                 README title and results-placeholder illustrations
-├── docs/                   Evaluation, installer, release, and implementation notes
+├── docs/                   Web deployment, evaluation, installer, release, and implementation notes
 ├── evaluation/             Evaluation runners, metrics, and protocol (data manifest supplied separately)
 ├── installer/              Inno Setup installer definition
 ├── scripts/                Project utility scripts
@@ -111,6 +128,8 @@ Evaluation manifests, downloaded datasets, application databases, and evaluation
 ├── LICENSE                 MIT license
 ├── pytest.ini              Test discovery configuration
 ├── requirements.txt        Desktop application dependencies
+├── requirements-web.txt    Web API dependencies
+├── package.json            Root scripts for the web client
 ├── requirements-build.txt  Windows packaging dependencies
 ├── run.py                  Application launcher
 └── build_windows_installer.bat  Windows packaging entry point
@@ -130,10 +149,14 @@ The application creates a local `data/` workspace for databases, downloads, data
   <img alt="PyArrow" src="https://img.shields.io/badge/PyArrow-4A90D9?logo=apache&logoColor=white" />
   <img alt="Matplotlib" src="https://img.shields.io/badge/Matplotlib-11557C?logo=plotly&logoColor=white" />
   <img alt="httpx" src="https://img.shields.io/badge/httpx-2563EB?logo=python&logoColor=white" />
+  <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white" />
+  <img alt="React" src="https://img.shields.io/badge/React-149ECA?logo=react&logoColor=white" />
+  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white" />
+  <img alt="Vite" src="https://img.shields.io/badge/Vite-646CFF?logo=vite&logoColor=white" />
   <img alt="SQLite" src="https://img.shields.io/badge/SQLite-003B57?logo=sqlite&logoColor=white" />
 </div>
 
-The dependency list also includes `python-dotenv`, `Jinja2`, `openpyxl`, and `xlrd`. `pytest`, Pillow, and PyInstaller are included in the project requirement files for development or packaging workflows. Dependency versions in `requirements.txt` are not pinned.
+The desktop dependency list also includes `python-dotenv`, `Jinja2`, `openpyxl`, and `xlrd`. The web API has its own pinned dependency list in `requirements-web.txt`; the browser client dependencies are managed by `web/package-lock.json`. `pytest`, Pillow, and PyInstaller are included in the project requirement files for development or packaging workflows. Dependency versions in `requirements.txt` are not pinned.
 
 ## Installation
 
@@ -174,6 +197,24 @@ If PowerShell blocks virtual-environment activation, call its interpreter direct
 </details>
 
 ## Usage
+
+### Run the web beta locally
+
+Start the API from the repository root:
+
+```powershell
+python -m pip install -r requirements-web.txt
+python -m uvicorn backend.web_api:app --host 127.0.0.1 --port 8000
+```
+
+In a second terminal, start the web client:
+
+```powershell
+npm ci --prefix web
+npm run dev
+```
+
+Open the local URL printed by Vite. The default web API address is `http://127.0.0.1:8000`; set `VITE_API_URL` in `web/.env` when using a different API address. The web beta currently accepts CSV files up to 10 MB. For deployment, follow [`docs/web_deployment.md`](docs/web_deployment.md).
 
 ### Open the desktop application
 
@@ -245,6 +286,7 @@ The repository contains analysis and evaluation code, but no published aggregate
 - [x] ML task detection, recommendations, evaluation, and visual node workflows
 - [x] Academic paper discovery, ranking, trend/landscape analysis, and gap candidates
 - [x] Report generation and a separate evaluation runner
+- [x] Browser-based web beta for dataset analysis, cleaning, dataset search, and literature exploration
 
 ### Follow-up documentation and evaluation
 

@@ -33,7 +33,8 @@ class ResearchGapExplainer:
             reason = "API key Gemini tidak ditemukan di pengaturan aplikasi atau environment."
             return self._local_explanation(items, context), "local", reason
 
-        prompt = self._build_prompt(items)
+        paper_count = len(context.get("papers", []))
+        prompt = self._build_prompt(items, paper_count)
         default_model = "gemini-3.8-flash"
         fallback_model = "gemini-3.5-flash"
         models = []
@@ -44,7 +45,7 @@ class ResearchGapExplainer:
 
         failures = []
         # Bound total wait even when the provider is repeatedly unavailable.
-        deadline = time.monotonic() + 20.0
+        deadline = time.monotonic() + min(self.timeout, 10.0)
         transient_statuses = {408, 429, 500, 502, 503, 504}
         # Try at most two configured keys; additional keys rarely help an outage
         # and would make the UI wait too long.
@@ -196,15 +197,16 @@ class ResearchGapExplainer:
         return safe
 
     @staticmethod
-    def _build_prompt(items: list[dict[str, Any]]) -> str:
+    def _build_prompt(items: list[dict[str, Any]], paper_count: int) -> str:
         evidence = json.dumps(items, ensure_ascii=False, default=str)
         return f"""Kamu adalah pembimbing penelitian yang menjelaskan hasil kepada mahasiswa.
-Tulis dalam Bahasa Indonesia yang mudah dipahami, ringkas, dan gunakan Markdown.
+Tulis dalam Bahasa Indonesia yang alami, mudah dipahami, ringkas, dan gunakan Markdown.
 Jangan menampilkan JSON mentah. Gunakan hanya kandidat dan bukti yang diberikan.
 Hitungan hanya berlaku untuk paper yang ditemukan aplikasi. Jangan mengklaim gap sebagai fakta pasti atau mengarang angka, sumber, maupun kebaruan.
+Jumlah paper yang dianalisis: {paper_count}. Sebut angka ini sebagai cakupan hasil pencarian saat ini, bukan seluruh literatur.
 
 Awali dengan ringkasan dua kalimat yang menyebutkan cakupan dan keterbatasan pencarian.
-Untuk setiap kandidat, pertahankan judul dan tulis tiga bagian singkat:
+Untuk setiap kandidat, gunakan judul Bahasa Indonesia yang jelas dan tulis tiga bagian singkat:
 **Makna** - jelaskan pola dengan bahasa sederhana.
 **Bukti dan batasan** - pertahankan angka yang tersedia dan jelaskan apa yang belum dapat disimpulkan.
 **Arah penelitian** - beri satu usulan yang dapat diuji dan contoh pertanyaan penelitian; sebutkan pembanding atau evaluasi bila relevan.

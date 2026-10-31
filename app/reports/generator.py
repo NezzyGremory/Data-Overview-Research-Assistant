@@ -545,6 +545,7 @@ class ReportGenerator:
         output_dir = Path(chart_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         charts: Dict[str, str] = {}
+        figure_width = 5.2
 
         def save_figure(name: str, figure) -> None:
             target = output_dir / name
@@ -567,7 +568,7 @@ class ReportGenerator:
             # Histogram panels describe real numeric-column distributions.
             histogram_columns = [name for name in visual_numeric.columns if visual_numeric[name].nunique(dropna=True) > 1][:4]
             if histogram_columns:
-                figure = Figure(figsize=(8.0, 5.2), constrained_layout=True)
+                figure = Figure(figsize=(figure_width, 4.2), constrained_layout=True)
                 axes = figure.subplots(2, 2).ravel()
                 for index, axis in enumerate(axes):
                     if index >= len(histogram_columns):
@@ -579,7 +580,8 @@ class ReportGenerator:
                         values = values.sample(100_000, random_state=42)
                     axis.hist(values, bins="fd", color="#3975c6", edgecolor="white")
                     axis.set_title(str(column), fontsize=9)
-                    axis.set_ylabel("Frekuensi")
+                    axis.set_ylabel("Frekuensi", fontsize=8)
+                    axis.tick_params(axis="both", labelsize=8)
                     axis.grid(axis="y", alpha=0.2)
                 figure.suptitle("Distribusi variabel numerik", fontsize=12)
                 save_figure("histograms.png", figure)
@@ -600,13 +602,13 @@ class ReportGenerator:
                         selected = selected.sample(50_000, random_state=42)
                     matrix = selected.corr()
                 if matrix.shape[0] >= 2:
-                    size = max(6.0, min(9.0, 0.55 * len(matrix) + 3.0))
-                    figure = Figure(figsize=(size, size * 0.82), constrained_layout=True)
+                    figure = Figure(figsize=(figure_width, figure_width * 0.9), constrained_layout=True)
                     axis = figure.subplots()
                     image = axis.imshow(matrix.to_numpy(), cmap="RdBu_r", vmin=-1, vmax=1)
                     labels = [str(name) for name in matrix.columns]
-                    axis.set_xticks(range(len(labels)), labels=labels, rotation=45, ha="right", fontsize=8)
-                    axis.set_yticks(range(len(labels)), labels=labels, fontsize=8)
+                    label_size = 6 if len(labels) > 8 else 8
+                    axis.set_xticks(range(len(labels)), labels=labels, rotation=45, ha="right", fontsize=label_size)
+                    axis.set_yticks(range(len(labels)), labels=labels, fontsize=label_size)
                     for row in range(len(labels)):
                         for col in range(len(labels)):
                             value = matrix.iloc[row, col]
@@ -633,7 +635,7 @@ class ReportGenerator:
                 missing_names = list(missing)
                 missing_counts = np.asarray(list(missing.values()), dtype=float)
                 percentages = missing_counts / max(1, len(dataframe)) * 100
-                figure = Figure(figsize=(8.0, 4.2), constrained_layout=True)
+                figure = Figure(figsize=(figure_width, 3.8), constrained_layout=True)
                 axis = figure.subplots()
                 positions = np.arange(len(missing_names))
                 axis.barh(positions, percentages, color="#d88945")
@@ -655,7 +657,7 @@ class ReportGenerator:
             if metric_name:
                 labels = [str(row.get("method") or row.get("method_id") or "Model") for row in model_rows]
                 scores = [float(row["metrics"][metric_name]) for row in model_rows]
-                figure = Figure(figsize=(8.0, max(3.2, min(7.0, 0.42 * len(labels) + 1.5))), constrained_layout=True)
+                figure = Figure(figsize=(figure_width, max(3.2, min(7.0, 0.42 * len(labels) + 1.5))), constrained_layout=True)
                 axis = figure.subplots()
                 positions = np.arange(len(labels))
                 axis.barh(positions, scores, color="#4c87c9")
@@ -672,7 +674,7 @@ class ReportGenerator:
                 years = [str(item.get("year")) for item in trend if item.get("year") is not None]
                 counts = [int(item.get("paper_count", 0)) for item in trend if item.get("year") is not None]
                 if years:
-                    figure = Figure(figsize=(8.0, 3.8), constrained_layout=True)
+                    figure = Figure(figsize=(figure_width, 3.6), constrained_layout=True)
                     axis = figure.subplots()
                     axis.bar(years, counts, color="#56866a")
                     axis.set_ylabel("Jumlah paper")
@@ -687,7 +689,7 @@ class ReportGenerator:
                 methods = [item for item in methods if isinstance(item, dict) and item.get("name")]
                 methods = methods[:10]
                 if methods:
-                    figure = Figure(figsize=(8.0, max(3.2, min(6.0, 0.38 * len(methods) + 1.4))), constrained_layout=True)
+                    figure = Figure(figsize=(figure_width, max(3.2, min(6.0, 0.38 * len(methods) + 1.4))), constrained_layout=True)
                     axis = figure.subplots()
                     names = [str(item["name"]) for item in methods]
                     values = [float(item.get("percentage", item.get("count", 0)) or 0) for item in methods]
@@ -715,18 +717,31 @@ class ReportGenerator:
 <html>
 <head>
 <meta charset="utf-8">
-<title>{dataset_name} - Research Report</title>
+<title>Laporan Penelitian - {dataset_name}</title>
 <style>
-body {{ font-family: 'Times New Roman', Times, serif; background: #ffffff; color: #1e293b; padding: 30px; }}
-.card {{ background: white; padding: 24px; border-radius: 12px; border: 1px solid #e2e8f0; margin-bottom: 20px; }}
-h1 {{ color: #1e3a8a; }}
+@page {{ size: A4; margin: 30mm 30mm 25mm 40mm; }}
+body {{ font-family: 'Times New Roman', Times, serif; font-size: 12pt; color: #111111; line-height: 1.5; text-align: center; }}
+.report-title {{ text-align: center; margin-bottom: 22pt; }}
+.report-title p {{ margin: 0 0 4pt; text-align: center; }}
+.dataset-name {{ font-size: 14pt; font-weight: bold; }}
+.meta {{ font-size: 10pt; }}
+h1 {{ font-size: 16pt; text-align: center; margin: 0 0 4pt; }}
+h2 {{ font-size: 14pt; text-align: center; margin: 20pt 0 9pt; }}
+.summary {{ border-collapse: collapse; margin: 10pt auto 16pt; border-bottom: 1px solid #333333; }}
+.summary th, .summary td {{ padding: 5pt 7pt; vertical-align: top; text-align: center; }}
+.summary td:first-child {{ font-weight: bold; }}
 </style>
 </head>
 <body>
-<div class="card">
-<h1>{dataset_name}</h1>
-<p>Generated: {generated_at}</p>
-<p>Rows: {total_rows} | Columns: {total_cols}</p>
+<div class="report-title">
+<h1>LAPORAN PENELITIAN</h1>
+<p class="dataset-name">{dataset_name}</p>
+<p class="meta">{generated_at}</p>
 </div>
+<h2>Ringkasan Dataset</h2>
+<table class="summary" align="center" cellpadding="7" cellspacing="0"><tbody>
+<tr><td>Jumlah observasi</td><td>{total_rows} baris</td></tr>
+<tr><td>Jumlah variabel</td><td>{total_cols} kolom</td></tr>
+</tbody></table>
 </body>
 </html>"""
