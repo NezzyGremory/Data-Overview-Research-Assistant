@@ -359,6 +359,15 @@ QPushButton#datasetPreviewActionButton:hover { background: #F2F7FF; border-color
 QPushButton#datasetPreviewActionButton:disabled { color: var(--muted); }
 QPushButton#datasetPreviewContinueButton { background: #0060FF; border: 1px solid #0060FF; border-radius: @px(8); color: #FFFFFF; font-family: "Inter"; font-size: @px(13); font-weight: 600; padding: 0 @px(12); }
 QPushButton#datasetPreviewContinueButton:hover { background: #0758D9; border-color: #0758D9; }
+QDialog#datasetCleaningDialog { background: #FFFFFF; border: 1px solid #D8E6FA; }
+QLabel#datasetCleaningDialogTitle { color: #0C1648; font-family: "Plus Jakarta Sans"; font-size: @px(18); font-weight: 700; }
+QLabel#datasetCleaningDialogDescription { color: #536391; font-family: "Inter"; font-size: @px(13); }
+QPushButton#datasetCleaningActionButton { background: #FFFFFF; border: 1px solid #D8E6FA; border-radius: @px(8); color: #24344D; font-family: "Inter"; font-size: @px(13); font-weight: 600; padding: 0 @px(12); text-align: left; }
+QPushButton#datasetCleaningActionButton:hover:!disabled { background: #F2F7FF; border-color: #9CC5FF; }
+QPushButton#datasetCleaningActionButton:disabled { background: #F7F9FC; color: #98A2B3; }
+QLabel#datasetCleaningDialogNote { background: #FFF8E8; border-radius: @px(6); color: #7A5B13; font-family: "Inter"; font-size: @px(12); padding: @px(8); }
+QDialog#datasetCleaningDialog QDialogButtonBox QPushButton { background: #F5F8FC; border: 1px solid #D8E6FA; border-radius: @px(7); color: #344054; font-family: "Inter"; font-size: @px(12); min-height: @px(34); padding: 0 @px(14); }
+QDialog#datasetCleaningDialog QDialogButtonBox QPushButton:hover { background: #EAF2FF; }
 #datasetPreviewFileCard, #datasetPreviewMetricCard, #datasetPreviewTableCard, #datasetPreviewColumnsCard { background: #FFFFFF; border: 1px solid #E0EEFF; border-radius: @px(10); }
 #datasetPreviewFileIdentity { background: transparent; border: none; }
 #datasetPreviewLoadedBadge { background: #EAF8F0; border: 1px solid #C8EBD7; border-radius: @px(12); color: #16804A; font-family: "Inter"; font-size: @px(11); font-weight: 600; padding: @px(4) @px(8); }

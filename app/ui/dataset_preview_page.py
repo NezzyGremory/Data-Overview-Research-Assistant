@@ -14,6 +14,8 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QBoxLayout,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QFrame,
     QGridLayout,
     QHeaderView,
@@ -21,7 +23,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLayout,
     QLineEdit,
-    QMenu,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -487,6 +488,7 @@ class DatasetPreviewPage(QWidget):
         columns_layout.setContentsMargins(0, 0, 0, 0)
         columns_layout.setSpacing(0)
         columns_heading = QHBoxLayout()
+        columns_heading.setSpacing(6)
         columns_title = QLabel("Informasi Kolom")
         columns_title.setObjectName("datasetPreviewSectionTitle")
         columns_heading.addWidget(columns_title)
@@ -500,14 +502,6 @@ class DatasetPreviewPage(QWidget):
         columns_heading.addWidget(self.column_count_label)
         columns_heading.setContentsMargins(16, 12, 16, 8)
         columns_layout.addLayout(columns_heading)
-        column_info_header = QHBoxLayout()
-        column_info_header.setContentsMargins(16, 0, 16, 7)
-        column_info_header.setSpacing(8)
-        for label_text, stretch in (("Kolom", 4), ("Tipe", 3), ("Informasi", 6)):
-            label = QLabel(label_text)
-            label.setObjectName("datasetPreviewColumnInfoHeader")
-            column_info_header.addWidget(label, stretch)
-        columns_layout.addLayout(column_info_header)
         self.columns_scroll = QScrollArea()
         self.columns_scroll.setObjectName("datasetPreviewColumnsScroll")
         self.columns_scroll.setWidgetResizable(True)
@@ -627,10 +621,41 @@ class DatasetPreviewPage(QWidget):
     def _open_cleaning_actions(self):
         if self._main_window is None or self._dataframe is None:
             return
+
+        # Cleaning handlers persist each result as a project version. A newly
+        # loaded dataset may not have a project yet, so prepare the existing
+        # project/version flow before building the menu.
+        prepare_dataset = getattr(self._main_window, "prepare_dataset_analysis", None)
+        if callable(prepare_dataset):
+            prepare_dataset()
+
         analysis_page = getattr(self._main_window, "analysis_page", None)
         if analysis_page is None:
+            create_analysis_page = getattr(self._main_window, "_create_analysis_page", None)
+            if callable(create_analysis_page):
+                create_analysis_page()
+            analysis_page = getattr(self._main_window, "analysis_page", None)
+        if analysis_page is None:
             return
-        menu = QMenu(self)
+
+        dialog = QDialog(self)
+        dialog.setObjectName("datasetCleaningDialog")
+        dialog.setWindowTitle("Bersihkan Data")
+        dialog.setMinimumWidth(420)
+        dialog_layout = QVBoxLayout(dialog)
+        dialog_layout.setContentsMargins(20, 18, 20, 16)
+        dialog_layout.setSpacing(10)
+
+        title = QLabel("Pilih tindakan pembersihan")
+        title.setObjectName("datasetCleaningDialogTitle")
+        dialog_layout.addWidget(title)
+        description = QLabel(
+            "Hasil pembersihan disimpan sebagai versi baru. Dataset asli tetap aman."
+        )
+        description.setObjectName("datasetCleaningDialogDescription")
+        description.setWordWrap(True)
+        dialog_layout.addWidget(description)
+
         actions = (
             ("Imputasi Missing Values", "_handle_impute_missing"),
             ("Hapus baris dengan Missing Values", "_handle_drop_missing"),
@@ -640,15 +665,35 @@ class DatasetPreviewPage(QWidget):
             getattr(self._main_window, "version_manager", None)
             and getattr(self._main_window, "current_project_id", None)
         )
+        selected_handler = [None]
         for label, handler_name in actions:
-            action = menu.addAction(label)
             handler = getattr(analysis_page, handler_name, None)
-            action.setEnabled(can_version and callable(handler))
+            action_button = QPushButton(label)
+            action_button.setObjectName("datasetCleaningActionButton")
+            action_button.setMinimumHeight(42)
+            action_button.setEnabled(can_version and callable(handler))
             if callable(handler):
-                action.triggered.connect(handler)
+                action_button.clicked.connect(
+                    lambda _checked=False, selected=handler: (
+                        selected_handler.__setitem__(0, selected),
+                        dialog.accept(),
+                    )
+                )
+            dialog_layout.addWidget(action_button)
+
         if not can_version:
-            menu.addSection("Simpan dataset sebagai project untuk membuat versi bersih")
-        menu.exec(self.clean_button.mapToGlobal(self.clean_button.rect().bottomLeft()))
+            note = QLabel(
+                "Project dataset belum siap. Muat ulang dataset atau lanjutkan ke Analisis."
+            )
+            note.setObjectName("datasetCleaningDialogNote")
+            note.setWordWrap(True)
+            dialog_layout.addWidget(note)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Cancel)
+        buttons.rejected.connect(lambda: dialog.reject())
+        dialog_layout.addWidget(buttons)
+        if dialog.exec() == QDialog.DialogCode.Accepted and selected_handler[0]:
+            selected_handler[0]()
 
     def _filter_table(self, query: str):
         dataframe = self._dataframe
@@ -1004,13 +1049,18 @@ class DatasetPreviewPage(QWidget):
             unique_count = int(non_null.nunique())
             row = QFrame()
             row.setObjectName("datasetPreviewColumnRow")
-            row_layout = QHBoxLayout(row)
+            row_layout = QVBoxLayout(row)
             row_layout.setContentsMargins(16, 6, 16, 6)
-            row_layout.setSpacing(8)
+            row_layout.setSpacing(3)
+            identity_layout = QHBoxLayout()
+            identity_layout.setContentsMargins(0, 0, 0, 0)
+            identity_layout.setSpacing(8)
             column_name = QLabel(name)
             column_name.setObjectName("datasetPreviewColumnName")
             column_name.setMinimumWidth(0)
-            row_layout.addWidget(column_name, 4)
+            column_name.setWordWrap(True)
+            column_name.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+            identity_layout.addWidget(column_name, 1)
             kind = QLabel(self._column_type(name, series))
             kind.setObjectName("datasetPreviewColumnType")
             kind.setProperty(
@@ -1018,11 +1068,17 @@ class DatasetPreviewPage(QWidget):
                 "target" if "(Target)" in kind.text() else kind.text().lower(),
             )
             kind.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+            kind.setWordWrap(True)
+            kind.setMinimumWidth(0)
+            kind.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
             kind.setMaximumHeight(22)
-            row_layout.addWidget(kind, 3)
+            identity_layout.addWidget(kind, 0, Qt.AlignRight | Qt.AlignVCenter)
+            row_layout.addLayout(identity_layout)
             details = QLabel()
             details.setObjectName("datasetPreviewColumnInformation")
             details.setWordWrap(True)
+            details.setMinimumWidth(0)
+            details.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
             if pd.api.types.is_numeric_dtype(series.dtype):
                 numeric_values = pd.to_numeric(non_null, errors="coerce").dropna()
                 if numeric_values.empty:
@@ -1045,8 +1101,8 @@ class DatasetPreviewPage(QWidget):
                 sample = ", ".join(non_null.astype(str).head(3).tolist())
                 detail_text = f"{unique_count:,} unik · {missing:,} Missing Values\n{sample}"
             details.setText(detail_text)
-            row_layout.addWidget(details, 6)
-            row.setMinimumHeight(55)
+            row_layout.addWidget(details)
+            row.setMinimumHeight(62)
             self.columns_content_layout.addWidget(row)
         self.columns_content_layout.addStretch(1)
 
