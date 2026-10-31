@@ -24,11 +24,12 @@ from shiboken6 import isValid as is_qt_object_valid
 
 from PySide6.QtCore import Qt, QUrl, QObject, QThread, QTimer, Signal, Slot, QMarginsF, QSize, QPoint, QRect, QRectF, QEvent, QEventLoop
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation
-from PySide6.QtGui import QAction, QActionGroup, QIcon, QPixmap, QDesktopServices, QTextDocument, QFont, QFontDatabase, QColor, QPalette, QPageSize, QPageLayout, QPainter, QPen, QRegion
+from PySide6.QtGui import QAction, QActionGroup, QIcon, QPixmap, QDesktopServices, QTextDocument, QFont, QFontDatabase, QColor, QPalette, QPageSize, QPageLayout, QPainter, QPen, QRegion, QImage
 from PySide6.QtPrintSupport import QPrinter
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
+    QGraphicsOpacityEffect,
     QBoxLayout,
     QFrame,
     QGridLayout,
@@ -940,15 +941,23 @@ class ReportPdfWorker(QObject):
             printer = QPrinter(QPrinter.HighResolution)
             printer.setOutputFormat(QPrinter.PdfFormat)
             printer.setOutputFileName(self.output_path)
+            # QTextDocument.print_ adds 20 mm per side to unpaginated HTML.
             layout = QPageLayout(
                 QPageSize(QPageSize.A4), QPageLayout.Portrait,
-                QMarginsF(18, 18, 18, 18), QPageLayout.Millimeter,
+                QMarginsF(20, 10, 10, 5), QPageLayout.Millimeter,
             )
             printer.setPageLayout(layout)
             document = QTextDocument()
-            document.setDefaultFont(QFont("Times New Roman", 11))
+            document.setDefaultFont(QFont("Times New Roman", 12))
             if self.chart_dir:
-                document.setBaseUrl(QUrl.fromLocalFile(Path(self.chart_dir).as_posix() + "/"))
+                chart_dir = Path(self.chart_dir)
+                document.setBaseUrl(QUrl.fromLocalFile(chart_dir.as_posix() + "/"))
+                for image_path in chart_dir.glob("*.png"):
+                    document.addResource(
+                        QTextDocument.ResourceType.ImageResource,
+                        QUrl(image_path.name),
+                        QImage(str(image_path)),
+                    )
             document.setHtml(self.content)
             document.print_(printer)
             output = Path(self.output_path)
@@ -1596,8 +1605,9 @@ class UploadDatasetDialog(QDialog):
         super().__init__(main_window)
         self.main_window = main_window
         self.file_path = Path(file_path)
+        # Read only the header row (nrows=0) so large CSV files don't stall the UI.
         try:
-            self.columns = [str(column) for column in pd.read_csv(self.file_path, nrows=0).columns]
+            self.columns = [str(c) for c in pd.read_csv(self.file_path, nrows=0).columns]
         except Exception:
             self.columns = []
         self.setObjectName("uploadDatasetDialog")
@@ -2519,6 +2529,10 @@ class AnalysisPage(QWidget):
             self.analyze_button.setIcon(QIcon(str(run_icon)))
             self.analyze_button.setIconSize(QSize(ui_px(18), ui_px(18)))
 
+        self.analyze_button.setToolTip(
+            "Jalankan profiling dan statistik dataset yang aktif"
+        )
+        self.analyze_button.setCursor(Qt.PointingHandCursor)
         self.analyze_button.clicked.connect(
             self.run_analysis
         )
@@ -7835,6 +7849,9 @@ class ResearchPage(QWidget):
             Qt.PointingHandCursor
         )
 
+        self.run_button.setToolTip(
+            "Mulai pencarian paper dan analisis research gap berdasarkan dataset aktif"
+        )
         self.run_button.clicked.connect(
             self.run_research
         )
@@ -12587,13 +12604,13 @@ class ResearchGapToolPage(QWidget):
             "Gemini" if explanation_source == "gemini"
             else ("Gagal" if explanation_source == "error" else ("Lokal" if explanation else "Belum dibuat"))
         )
-        metrics.addWidget(InfoCard("Penjelasan", explanation_status, "Gemini opsional; otomatis beralih ke analisis lokal"))
+        metrics.addWidget(InfoCard("Penjelasan", explanation_status, "Ringkasan lokal tersedia jika Gemini tidak merespons"))
         self.content.addLayout(metrics)
 
         if self._explanation_thread is not None:
             self.content.addWidget(LoadingCard(
                 "Menyusun penjelasan Research Gap",
-                "Menganalisis bukti dan batas hasil. Jika Gemini tidak tersedia atau kuotanya habis, penjelasan lokal tetap dibuat.",
+                "Menyiapkan ringkasan. Jika Gemini tidak tersedia, penjelasan lokal akan ditampilkan.",
                 self.container,
             ))
         elif isinstance(explanation, dict) and explanation.get("text"):
@@ -12607,7 +12624,7 @@ class ResearchGapToolPage(QWidget):
                 "menunggu",
             )
 
-        heading = QLabel("Kandidat yang ditemukan dari literatur")
+        heading = QLabel("Sinyal yang terlihat di literatur")
         heading.setObjectName("sectionTitle")
         self.content.addWidget(heading)
         if not items:
@@ -12628,7 +12645,7 @@ class ResearchGapToolPage(QWidget):
             for index, item in enumerate(items, 1):
                 self.content.addWidget(self._gap_card(index, item))
 
-        note = QLabel("Kandidat gap merupakan indikasi dari literatur yang berhasil ditemukan. Periksa paper terbaru dan validasi kebaruan sebelum menetapkan topik penelitian.")
+        note = QLabel("Sinyal ini berasal dari paper yang ditemukan, bukan bukti pasti adanya celah. Periksa paper terbaru dan validasi kebaruan sebelum memilih topik.")
         note.setObjectName("cardDescription")
         note.setWordWrap(True)
         self.content.addWidget(note)
@@ -12647,10 +12664,10 @@ class ResearchGapToolPage(QWidget):
         title = QLabel("Penjelasan dan saran penelitian")
         title.setObjectName("sectionTitle")
         source_names = {
-            "gemini": "Gemini menggunakan API key tersimpan",
-            "local": "Penjelasan lokal",
+            "gemini": "Dibantu Gemini",
+            "local": "Ringkasan lokal",
             "error": "Penjelasan belum berhasil dibuat",
-            "menunggu": "Belum dibuat",
+            "menunggu": "Menunggu analisis",
         }
         source_label = QLabel(f"Sumber: {source_names.get(source, source)}")
         source_label.setObjectName("statusLabel")
@@ -12682,24 +12699,79 @@ class ResearchGapToolPage(QWidget):
         card.setObjectName("contentCard")
         layout = QVBoxLayout(card)
         layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(9)
         if isinstance(item, dict):
-            title = item.get("title") or item.get("gap") or "Kandidat celah riset"
-            description = item.get("description") or ""
+            kind = item.get("type")
             evidence = item.get("evidence")
+            evidence = evidence if isinstance(evidence, dict) else {}
         else:
-            title, description, evidence = str(item), "", None
+            kind, evidence = "", {}
+
+        titles = {
+            "METHOD_DISTRIBUTION": "Perbedaan penggunaan metode",
+            "UNDERUSED_RECOMMENDED_METHOD": "Peluang penggunaan metode",
+            "TEMPORAL": "Keterwakilan penelitian terbaru",
+            "DATASET_CONCENTRATION": "Konsentrasi pada dataset tertentu",
+            "TOPIC_DIVERSITY": "Konsep yang jarang dibahas",
+        }
+        title = titles.get(kind) or (
+            (item.get("title") or item.get("gap"))
+            if isinstance(item, dict) else None
+        ) or "Kandidat celah riset"
+
+        description = "Pola ini dapat menjadi arah untuk ditelaah lebih lanjut."
+        evidence_text = ""
+        if kind == "METHOD_DISTRIBUTION":
+            dominant = evidence.get("dominant_method") or "Metode yang lebih sering muncul"
+            less_common = evidence.get("less_common_method") or "metode pembanding"
+            description = f"{dominant} lebih sering muncul daripada {less_common} pada paper yang ditemukan."
+            evidence_text = (
+                f"{dominant}: {evidence.get('dominant_count', '—')} paper · "
+                f"{less_common}: {evidence.get('less_common_count', '—')} paper"
+            )
+        elif kind == "UNDERUSED_RECOMMENDED_METHOD":
+            method = evidence.get("method") or "Metode yang direkomendasikan"
+            description = f"Metode {method} direkomendasikan untuk dataset ini, tetapi belum terdeteksi pada paper yang ditemukan."
+            evidence_text = f"Belum terdeteksi dalam kumpulan paper: {method}."
+        elif kind == "TEMPORAL":
+            latest = evidence.get("latest_year")
+            period = f"{latest - 1}–{latest}" if isinstance(latest, int) else str(latest or "periode terbaru")
+            ratio = evidence.get("recent_ratio")
+            ratio_text = f" ({str(ratio).replace('.', ',')}%)" if isinstance(ratio, (int, float)) else ""
+            description = "Paper terbaru masih menjadi bagian yang relatif kecil dari hasil pencarian."
+            evidence_text = (
+                f"{evidence.get('recent_papers', '—')} dari {evidence.get('total_papers', '—')} paper "
+                f"terbit pada {period}{ratio_text}."
+            )
+        elif kind == "DATASET_CONCENTRATION":
+            dataset = evidence.get("dominant_dataset") or "dataset yang sama"
+            description = f"Paper yang ditemukan banyak membahas dataset {dataset}."
+            evidence_text = f"{dataset} disebut pada {evidence.get('paper_count', '—')} paper."
+        elif kind == "TOPIC_DIVERSITY":
+            concepts = evidence.get("rare_concepts") or []
+            if not isinstance(concepts, list):
+                concepts = [concepts]
+            concepts = [str(value) for value in concepts if value]
+            visible_concepts = ", ".join(concepts[:6])
+            if len(concepts) > 6:
+                visible_concepts += f" (+{len(concepts) - 6} lainnya)"
+            description = "Sejumlah konsep hanya muncul sekali dalam abstrak yang dianalisis."
+            evidence_text = f"Konsep yang jarang muncul: {visible_concepts or 'rincian tidak tersedia'}."
+
         heading = QLabel(f"{index:02d}  {title}")
         heading.setObjectName("sectionTitle")
+        heading.setTextFormat(Qt.PlainText)
         heading.setWordWrap(True)
         layout.addWidget(heading)
-        if description and description != title:
-            detail = QLabel(description)
-            detail.setObjectName("cardDescription")
-            detail.setWordWrap(True)
-            layout.addWidget(detail)
-        if evidence:
-            evidence_label = QLabel("Bukti ringkas: " + ResearchPage._format_value(evidence))
-            evidence_label.setObjectName("cardDescription")
+        detail = QLabel(description)
+        detail.setObjectName("cardDescription")
+        detail.setTextFormat(Qt.PlainText)
+        detail.setWordWrap(True)
+        layout.addWidget(detail)
+        if evidence_text:
+            evidence_label = QLabel("Bukti: " + evidence_text)
+            evidence_label.setObjectName("researchGapEvidence")
+            evidence_label.setTextFormat(Qt.PlainText)
             evidence_label.setWordWrap(True)
             layout.addWidget(evidence_label)
         return card
@@ -12842,6 +12914,10 @@ class ResearchReportToolPage(QWidget):
 
         self.export_button = QPushButton("Simpan sebagai PDF")
         self.export_button.setObjectName("primaryButton")
+        self.export_button.setToolTip(
+            "Ekspor laporan analisis sebagai file PDF ke komputer Anda"
+        )
+        self.export_button.setCursor(Qt.PointingHandCursor)
         self.export_button.clicked.connect(self.export_pdf)
         self.export_button.setEnabled(False)
         self.header_actions.addWidget(self.export_button)
@@ -13219,10 +13295,10 @@ def _load_credits_manifest() -> dict[str, Any]:
 
     visible_roles = {
         "Academic Supervisor",
-        "Software Engineering",
+        "Team Lead",
         "UI/UX Design",
-        "Graphic Design & Web Developer",
-        "Scientific Paper Writing",
+        "Design & Web Development",
+        "Design Analysis",
     }
     contributors = [
         {"role": section.get("role", ""), "names": section.get("names", [])}
@@ -13609,7 +13685,7 @@ class MainWindow(QMainWindow):
         # widget is styled as soon as it is created.
         self._load_stylesheet()
 
-        self.setWindowTitle("DORA v7.0.0")
+        self.setWindowTitle("Data Overview & Research Assistant")
         app_icon = _resource_path("assets/dataset_research.ico")
         if app_icon.exists():
             self.setWindowIcon(QIcon(str(app_icon)))
@@ -13745,7 +13821,7 @@ class MainWindow(QMainWindow):
         except Exception as error:
             self._shutdown_pending = False
             self._shutdown_idle_checks = 0
-            self.setWindowTitle("DORA v7.0.0")
+            self.setWindowTitle("Data Overview & Research Assistant")
             if self.centralWidget() is not None:
                 self.centralWidget().setEnabled(True)
             self.statusBar().clearMessage()
@@ -13807,7 +13883,7 @@ class MainWindow(QMainWindow):
 
         self._shutdown_pending = True
         self._shutdown_idle_checks = 0
-        self.setWindowTitle("DORA v7.0.0 — Menutup sesi")
+        self.setWindowTitle("Data Overview & Research Assistant — Menutup sesi")
         if self.centralWidget() is not None:
             self.centralWidget().setEnabled(False)
         self.statusBar().showMessage(
@@ -14250,6 +14326,7 @@ class MainWindow(QMainWindow):
         # A new child only changes the relevant page's scale hooks. Keep other
         # pages' cached hook lists intact instead of forcing full rescans.
         seen_pages = set()
+        affected_pages = []
         for page in getattr(self, "pages", {}).values():
             page_key = id(page)
             if page_key in seen_pages:
@@ -14262,8 +14339,17 @@ class MainWindow(QMainWindow):
                 for root in roots
             ):
                 self._page_scale_hook_cache.pop(page_key, None)
+                self._page_scale_values.pop(page_key, None)
+                affected_pages.append(page)
 
         scale = self.scale_manager.get_scale()
+        if abs(scale - 1.0) < 0.001:
+            current_page = self.pages.get(self._current_page_key)
+            for page in affected_pages:
+                if page is current_page:
+                    self._apply_active_page_layout(page, scale)
+                    self._page_scale_values[id(page)] = scale
+            return
         self._apply_widget_scale(scale, roots)
         stylesheet = getattr(self, "_active_scale_stylesheet", "")
         if stylesheet:
@@ -14504,6 +14590,19 @@ class MainWindow(QMainWindow):
         self._navigation_loading_animation = None
         self._navigation_loading_pending = False
         self._navigation_loading_started_at = None
+        self._page_transition_animation = None
+        self._page_transition_overlay = QWidget(self.page_stack)
+        self._page_transition_overlay.setObjectName("pageTransitionOverlay")
+        self._page_transition_overlay.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self._page_transition_overlay.setAutoFillBackground(True)
+        self._apply_canvas_background(self._page_transition_overlay)
+        self._page_transition_overlay.setFocusPolicy(Qt.NoFocus)
+        self._page_transition_effect = QGraphicsOpacityEffect(
+            self._page_transition_overlay
+        )
+        self._page_transition_effect.setOpacity(0.0)
+        self._page_transition_overlay.setGraphicsEffect(self._page_transition_effect)
+        self._page_transition_overlay.hide()
 
         root_layout.addWidget(content, 1)
 
@@ -14988,6 +15087,9 @@ class MainWindow(QMainWindow):
         page_stack = getattr(self, "page_stack", None)
         if progress is not None and page_stack is not None:
             progress.setGeometry(0, 0, page_stack.width(), 8)
+        overlay = getattr(self, "_page_transition_overlay", None)
+        if overlay is not None and page_stack is not None:
+            overlay.setGeometry(page_stack.rect())
         sidebar = getattr(self, "sidebar_container", None)
         if sidebar is None:
             return
@@ -15388,12 +15490,14 @@ class MainWindow(QMainWindow):
         current_scale = self.scale_manager.get_scale()
         page_scales = getattr(self, "_page_scale_values", {})
         if abs(page_scales.get(id(page), -1.0) - current_scale) >= 0.001:
-            stylesheet = getattr(self, "_active_scale_stylesheet", "")
-            if not stylesheet:
-                stylesheet = self._build_scaled_stylesheet(current_scale)
-                self._active_scale_stylesheet = stylesheet
-            self._apply_scale_stylesheet(stylesheet, (target,))
-            self._apply_widget_scale(current_scale, [target])
+            if abs(current_scale - 1.0) >= 0.001:
+                stylesheet = getattr(self, "_active_scale_stylesheet", "")
+                if not stylesheet:
+                    stylesheet = self._build_scaled_stylesheet(current_scale)
+                    self._active_scale_stylesheet = stylesheet
+                self._apply_scale_stylesheet(stylesheet, (target,))
+                self._apply_widget_scale(current_scale, [target])
+            # The application stylesheet already has the correct 1x sizes.
             self._apply_active_page_layout(page, current_scale)
             page_scales[id(page)] = current_scale
             self._page_scale_values = page_scales
@@ -15402,11 +15506,52 @@ class MainWindow(QMainWindow):
         self.page_title.setText(self._page_titles[key])
         self.set_active_button("dashboard" if key == "about" else key)
         self._sync_page_chrome(self.width(), self.height())
+        if previous_key is not None and (target_changed or route_changed):
+            self._start_page_transition()
         if navigation_started is not None:
             elapsed_ms = (time.perf_counter() - navigation_started) * 1000
             self._navigation_loading_pending = False
             self._navigation_loading_started_at = None
             self._start_navigation_feedback(elapsed_ms)
+
+    def _start_page_transition(self):
+        if (
+            not self.page_stack.isVisible()
+            or not self.page_stack.width()
+            or not self.page_stack.height()
+        ):
+            return
+
+        # Fade a flat overlay so heavy pages keep their native painting path.
+        overlay = self._page_transition_overlay
+        overlay.setGeometry(self.page_stack.rect())
+        effect = self._page_transition_effect
+        effect.setOpacity(1.0)
+        overlay.show()
+        overlay.raise_()
+
+        animation = QPropertyAnimation(effect, b"opacity", self)
+        animation.setDuration(180)
+        animation.setStartValue(1.0)
+        animation.setEndValue(0.0)
+        animation.setEasingCurve(QEasingCurve.OutCubic)
+        animation.finished.connect(
+            lambda animation=animation, overlay=overlay: self._finish_page_transition(
+                animation, overlay
+            )
+        )
+        self._page_transition_animation = animation
+        self._page_transition_effect = effect
+        self._page_transition_overlay = overlay
+        animation.start()
+
+    def _finish_page_transition(self, animation, overlay):
+        if self._page_transition_animation is not animation:
+            return
+        self._page_transition_animation = None
+        self._page_transition_effect.setOpacity(0.0)
+        overlay.hide()
+        animation.deleteLater()
 
     def _prepare_navigation_feedback(self, checked=False):
         already_pending = self._navigation_loading_pending
@@ -15456,9 +15601,14 @@ class MainWindow(QMainWindow):
             animation.stop()
             animation.deleteLater()
             self._page_transition_animation = None
+        overlay = getattr(self, "_page_transition_overlay", None)
+        if overlay is not None:
+            overlay.hide()
+        effect = getattr(self, "_page_transition_effect", None)
+        if effect is not None:
+            effect.setOpacity(0.0)
         if self.page_stack.graphicsEffect() is not None:
             self.page_stack.setGraphicsEffect(None)
-        self._page_transition_effect = None
 
     def open_dashboard(self):
         self.dashboard.refresh_summary()
@@ -15468,10 +15618,12 @@ class MainWindow(QMainWindow):
         if self.current_dataset is not None:
             # Keep the established dataset preview as the main Dataset view.
             # The spreadsheet-style upload preview remains outside this route.
-            self.dataset_preview_page.update_dataset(
-                self.current_dataset,
-                self._current_filename(),
-            )
+            filename = self._current_filename()
+            if (
+                self.dataset_preview_page._dataframe is not self.current_dataset
+                or self.dataset_preview_page._dataset_name != (filename or "Dataset")
+            ):
+                self.dataset_preview_page.update_dataset(self.current_dataset, filename)
             self.dataset_preview_page._select_tab(0)
             self.datasets_tabs.setCurrentWidget(self.dataset_preview_page)
         else:
@@ -15587,8 +15739,8 @@ class MainWindow(QMainWindow):
                 # Let Qt paint the loading state before building the page.
                 QTimer.singleShot(40, self._create_node_editor_page)
             return
-        self.node_editor_page.prepare_for_open()
         self._show_page("node_editor")
+        QTimer.singleShot(30, self.node_editor_page.prepare_for_open)
 
     def _create_node_editor_page(self):
         if self.node_editor_page is not None:

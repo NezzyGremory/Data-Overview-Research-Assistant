@@ -15,8 +15,7 @@ QMainWindow,
 }
 
 QWidget {
-
-
+    color: #172033;
 }
 
 /* ============================================================
@@ -24,65 +23,54 @@ QWidget {
    ============================================================ */
 
 #sidebar {
-
     border: none;
-
+    background: #FFFFFF;
 }
 
 #brandLogo {
-
-
-
-
-
-
+    /* Logo label — size set in Python */
 }
 
 #brandTitle {
-
-
+    color: #172033;
     font-weight: 800;
     letter-spacing: @px(1.6);
 }
 
 #brandAccent {
-
+    color: #4F8CFF;
     font-size: @px(18);
     font-weight: 800;
     letter-spacing: @px(1.6);
 }
 
 #brandSubtitle {
-
-
+    color: #8899AF;
     font-weight: 600;
     letter-spacing: @px(0.4);
 }
 
 #sectionLabel {
-
-
+    color: #8A98AB;
+    font-size: @px(10);
     font-weight: 700;
-
-
+    letter-spacing: @px(0.9);
 }
 
 #navButton {
     background: transparent;
-
-    
-
-
+    border: @px(1) solid transparent;
+    border-radius: @px(8);
     text-align: left;
 }
 
 #navButton:hover {
-
-
+    background: #F0F6FF;
+    border-color: #E1ECFD;
 }
 
 #navButton[active="true"] {
-
+    background: #E8F2FF;
     border: @px(1) solid #CFE3FF;
 }
 
@@ -98,36 +86,35 @@ QWidget {
 }
 
 #navButton[active="true"] #navIcon {
-
+    color: #2B6FD8;
 }
 
 #navText {
-    
-
-
+    color: #4D607A;
+    font-size: @px(12);
+    font-weight: 600;
 }
 
 #navButton[active="true"] #navText {
-
-    
+    color: #2B6FD8;
+    font-weight: 700;
 }
 
 #workspaceStatus {
-
-
-
+    padding: @px(6) @px(8);
+    border-radius: @px(8);
 }
 
 #workspaceStatusTitle {
-
-
+    color: #8A98AB;
+    font-size: @px(10);
     font-weight: 700;
     letter-spacing: @px(1);
 }
 
 #workspaceStatusValue {
-
-
+    color: #344158;
+    font-size: @px(12);
     font-weight: 600;
 }
 
@@ -143,8 +130,8 @@ QWidget {
    ============================================================ */
 
 #topbar {
-
-
+    background: #FFFFFF;
+    border-bottom: @px(1) solid #EBF1FA;
 }
 
 #topbarTitle {
@@ -335,8 +322,8 @@ QSplitter#nodeEditorWorkspaceSplitter::handle:hover {
 }
 
 #sectionDescription {
-
-
+    color: #8A98AB;
+    font-size: @px(11);
 }
 
 /* ============================================================
@@ -505,30 +492,24 @@ QSplitter#nodeEditorWorkspaceSplitter::handle:hover {
    ============================================================ */
 
 #heroCard {
-
-
     border-radius: @px(18);
 }
 
 #heroEyebrow {
-
+    color: #8899AF;
     font-size: @px(11);
-
-
+    font-weight: 600;
 }
 
 #heroTitle {
-
-
-
-
+    color: #172033;
+    font-weight: 750;
     letter-spacing: -0.03em;
 }
 
 #heroDescription {
-
-
-
+    color: #66768C;
+    line-height: 1.45;
 }
 
 #heroButton {
@@ -551,25 +532,25 @@ QSplitter#nodeEditorWorkspaceSplitter::handle:hover {
 }
 
 #heroVisual {
-
+    background: #EEF5FF;
     border-color: #dce7f6;
 }
 
 #heroVisualTitle {
-
+    color: #2A4E7D;
     font-size: @px(11);
-
+    font-weight: 700;
     letter-spacing: @px(1);
 }
 
 #heroWorkflowNumber {
-
+    color: #4F8CFF;
     font-size: @px(11);
     font-weight: 800;
 }
 
 #heroWorkflowTitle {
-
+    color: #52657D;
     font-size: @px(11);
     font-weight: 600;
 }
@@ -583,28 +564,26 @@ QSplitter#nodeEditorWorkspaceSplitter::handle:hover {
 }
 
 #quickActionCard:hover {
-
+    background: #F7FBFF;
+    border-color: #C8DCF7;
 }
 
 #quickActionIcon {
-
-
-
-    
+    color: #4F8CFF;
     font-size: @px(16);
     font-weight: 700;
 }
 
 #quickActionTitle {
-
-
-    
+    color: #1B2A41;
+    font-size: @px(13);
+    font-weight: 700;
 }
 
 #quickActionDescription {
-
-
-
+    color: #6F7C90;
+    font-size: @px(12);
+    line-height: 1.35;
 }
 
 #quickActionButton {
@@ -618,7 +597,7 @@ QSplitter#nodeEditorWorkspaceSplitter::handle:hover {
 }
 
 #quickActionButton:hover {
-
+    color: #2B6FD8;
 }
 
 /* ============================================================
@@ -626,31 +605,29 @@ QSplitter#nodeEditorWorkspaceSplitter::handle:hover {
    ============================================================ */
 
 #datasetName {
-
-
+    color: #172033;
+    font-size: @px(14);
     font-weight: 700;
 }
 
 #datasetDescription {
-
-
+    color: #7A899C;
+    font-size: @px(12);
 }
 
 #datasetStatusBadge,
 #scoreBadge {
-
-
-
-
+    border: @px(1) solid #D3EFDF;
+    border-radius: @px(10);
     font-size: @px(11);
-
-
+    font-weight: 700;
+    padding: @px(3) @px(8);
 }
 
 #datasetStatusBadge[state="success"] {
-
-
-
+    background: #EAF7F0;
+    border-color: #D3EFDF;
+    color: #2C9B68;
 }
 
 #datasetStatusBadge[state="active"] {
@@ -660,15 +637,11 @@ QSplitter#nodeEditorWorkspaceSplitter::handle:hover {
 }
 
 #pipelineCard {
-
-
-
+    padding: @px(8) @px(14);
 }
 
 #pipelineStageCard {
-
-
-
+    padding: @px(10) @px(14);
 }
 
 #pipelineStageCard[state="success"] {
@@ -687,30 +660,28 @@ QSplitter#nodeEditorWorkspaceSplitter::handle:hover {
 }
 
 #pipelineNumber {
-
+    color: #4F8CFF;
     font-size: @px(11);
     font-weight: 800;
 }
 
 #pipelineTitle {
-
-    
-    
+    color: #344158;
+    font-size: @px(12);
+    font-weight: 700;
 }
 
 #pipelineStatus {
-
+    color: #8A98AB;
     font-size: @px(11);
-
-
 }
 
 #pipelineStatus[state="success"] {
-
+    color: #35A86F;
 }
 
 #pipelineStatus[state="active"] {
-
+    color: #3577E5;
 }
 
 #pipelineStatus[state="future"] {
@@ -773,8 +744,7 @@ QPushButton:focus:!disabled {
    ============================================================ */
 
 #uploadCard {
-
-
+    padding: @px(24);
 }
 
 #uploadIcon {
@@ -805,12 +775,13 @@ QPushButton:focus:!disabled {
 }
 
 #statusLabel {
-
-
+    color: #64748B;
+    font-size: @px(12);
 }
 
 #researchStatus {
-
+    background: #F7FBFF;
+    border-color: #DCEAF8;
 }
 
 #metricCard {
@@ -842,13 +813,13 @@ QTableWidget {
 }
 
 QHeaderView::section {
-
+    background: #F3F7FC;
     border: none;
-
-
+    border-bottom: @px(1) solid #E0EAF5;
+    color: #58697C;
     font-size: @px(11);
-    
-
+    font-weight: 700;
+    padding: @px(6) @px(10);
 }
 
 QListWidget::item {
@@ -874,9 +845,7 @@ QTextEdit {
    ============================================================ */
 
 QTabWidget::pane {
-    
-
-
+    border: none;
     top: @px(-1);
 }
 
@@ -890,13 +859,13 @@ QTabBar::tab {
 }
 
 QTabBar::tab:hover {
-
+    color: #2B5FD4;
 }
 
 QTabBar::tab:selected {
-
-    
-
+    color: #2455C5;
+    border-bottom: @px(2) solid #4F8CFF;
+    font-weight: 700;
 }
 
 /* ============================================================
@@ -968,13 +937,13 @@ QScrollBar:vertical {
 }
 
 QScrollBar::handle:vertical {
-
-    
-
+    background: #C5D5E8;
+    border-radius: @px(4);
+    min-height: @px(32);
 }
 
 QScrollBar::handle:vertical:hover {
-
+    background: #A8BEDE;
 }
 
 QScrollBar::add-line:vertical,
@@ -992,7 +961,7 @@ QScrollBar:horizontal {
 }
 
 QScrollBar::handle:horizontal {
-
+    background: #C5D5E8;
     border-radius: @px(4);
     min-width: @px(32);
 }
@@ -1047,43 +1016,40 @@ QWidget {
 
 #brandTitle { color: #172033; }
 #brandAccent { color: #4F8CFF; }
-#brandSubtitle { }
-#sectionLabel { }
+/* #brandSubtitle and #sectionLabel already defined above */
 
 #navButton {
-
-
+    border-radius: @px(8);
     padding-left: @px(4);
 }
 
 #navButton:hover {
-
+    background: #F0F6FF;
     border-color: #E0EDFB;
 }
 
 #navButton[active="true"] {
-
-
+    background: #E8F2FF;
 }
 
 #navText { font-weight: 600; }
-#navButton[active="true"] #navText { }
+#navButton[active="true"] #navText { color: #2B6FD8; font-weight: 700; }
 #navIcon { color: #4F8CFF; }
 #navButton[active="true"] #navIcon { color: #4F8CFF; }
 
 #workspaceStatus {
-
     border: @px(1) solid #DFEBF8;
-
+    border-radius: @px(8);
+    padding: @px(6) @px(8);
 }
 
-#workspaceStatusTitle { }
-#workspaceStatusValue { }
-#sidebarFooter { }
+#workspaceStatusTitle { color: #8A98AB; font-size: @px(10); font-weight: 700; letter-spacing: @px(1); }
+#workspaceStatusValue { color: #344158; font-size: @px(12); font-weight: 600; }
+#sidebarFooter { color: #8A98AB; font-size: @px(10); }
 
 #topbar {
-
-
+    background: #FFFFFF;
+    border-bottom: @px(1) solid #EBF1FA;
 }
 
 #topbarTitle { color: #172033; font-size: @px(16); font-weight: 700; }
@@ -1125,7 +1091,7 @@ QWidget {
 
 #heroTitle { color: #172033; font-weight: 750; }
 #heroDescription { color: #66768C; }
-#heroEyebrow { }
+
 #heroVisualTitle { color: #2A4E7D; font-weight: 700; }
 #heroWorkflowNumber { color: #4F8CFF; font-weight: 800; }
 #heroWorkflowTitle { color: #52657D; font-weight: 600; }
@@ -1191,9 +1157,9 @@ QWidget {
     padding: @px(4) 0;
 }
 #quickActionButton:hover { color: #286CD7; }
-#quickActionIcon { }
-#quickActionTitle { }
-#quickActionDescription { }
+#quickActionIcon { color: #4F8CFF; }
+#quickActionTitle { color: #1B2A41; font-weight: 700; }
+#quickActionDescription { color: #6F7C90; font-size: @px(12); }
 
 #statTitle, #cardLabel, #metricTitle { color: #8492A5; font-size: @px(11); font-weight: 700; }
 #statValue, #cardValue, #metricValue { color: #172033; font-size: @px(22); font-weight: 750; }
@@ -1211,12 +1177,12 @@ QWidget {
     font-weight: 700;
 }
 
-#pipelineCard { }
-#pipelineTitle { }
+#pipelineCard { padding: @px(8); }
+#pipelineTitle { color: #344158; font-weight: 700; }
 #pipelineNumber { color: #4F8CFF; font-weight: 800; }
 #pipelineStatus { font-size: @px(11); }
 #pipelineStatus[state="completed"] { color: #35A86F; }
-#pipelineStatus[state="active"] { }
+#pipelineStatus[state="active"] { color: #3577E5; }
 #pipelineStatus[state="error"] { color: #E46666; }
 #pipelineConnector { background: #D8E7F8; max-height: @px(4); }
 
@@ -1258,9 +1224,7 @@ QHeaderView::section {
 }
 
 QTabWidget::pane {
-
-
-
+    border: none;
     top: @px(-1);
 }
 QTabBar::tab {
@@ -1271,18 +1235,18 @@ QTabBar::tab {
     border: none;
     border-bottom: @px(2) solid transparent;
 }
-QTabBar::tab:hover { }
+QTabBar::tab:hover { color: #2B5FD4; }
 QTabBar::tab:selected {
-
-
-
+    color: #2455C5;
+    border-bottom: @px(2) solid #4F8CFF;
+    font-weight: 700;
 }
 
 QScrollArea { border: none; }
 QScrollBar:vertical { background: transparent; }
-QScrollBar::handle:vertical { }
+QScrollBar::handle:vertical { background: #C5D5E8; border-radius: @px(4); min-height: @px(32); }
 QScrollBar::handle:vertical:hover { background: #AFC7E2; }
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 QScrollBar:horizontal { background: transparent; height: @px(8); }
 QScrollBar::handle:horizontal { background: #C9D9EB; border-radius: @px(4); }
 
@@ -1319,9 +1283,6 @@ QProgressBar::chunk {
 /* ============================================================
    DASHBOARD POLISH — HERO / TEXT SPACING
    ============================================================ */
-#heroCard {
-
-}
 
 #heroTitle {
     font-size: @px(24);
@@ -1351,15 +1312,18 @@ QProgressBar::chunk {
 }
 
 #quickActionCard {
-
+    padding: @px(4);
 }
 
 #quickActionTitle {
-
+    color: #1B2A41;
+    font-size: @px(13);
+    font-weight: 700;
 }
 
 #quickActionDescription {
-
+    color: #6F7C90;
+    font-size: @px(12);
     line-height: 1.35;
 }
 
@@ -1389,15 +1353,14 @@ QProgressBar::chunk {
 #sectionTitle {
     font-size: @px(15);
 }
-#quickActionCard {
-
-}
 #quickActionCard #quickActionDescription {
 
     line-height: 1.4;
 }
 #quickActionCard #quickActionTitle {
-
+    color: #1B2A41;
+    font-size: @px(13);
+    font-weight: 700;
 }
 #quickActionCard #quickActionButton {
     font-size: @px(11);
@@ -1412,10 +1375,12 @@ QProgressBar::chunk {
     min-height: @px(84);
 }
 #pipelineStageCard {
-
+    padding: @px(10) @px(14);
 }
 #pipelineTitle {
-
+    color: #344158;
+    font-size: @px(13);
+    font-weight: 700;
 }
 #pipelineStatus {
     font-size: @px(11);
@@ -1449,8 +1414,8 @@ QProgressBar::chunk {
 /* Dashboard research snapshot charts. */
 #dashboardChartCard {
     background: #FFFFFF;
-
-
+    border: @px(1) solid #DCE8F7;
+    border-radius: @px(14);
 }
 #dashboardChartCard:hover {
     border-color: #C7DCF6;
@@ -1513,6 +1478,14 @@ QProgressBar::chunk {
     font-size: @px(11);
     font-weight: 700;
     letter-spacing: @px(0.7);
+}
+
+#researchGapEvidence {
+    background: #F5F8FD;
+    border: @px(1) solid #E3EAF4;
+    border-radius: @px(8);
+    color: #4B5D77;
+    padding: @px(9) @px(11);
 }
 
 QFrame#contentCard[researchGapExplanation="true"] {
@@ -1682,7 +1655,7 @@ QFrame#contentCard[researchGapExplanation="true"] {
     border: @px(1) solid #DCE8F7;
     border-radius: @px(13);
 }
-#readinessTitle { }
+#readinessTitle { color: #26364B; font-size: @px(14); font-weight: 700; }
 #readinessStatus {
     background: #EEF4FC;
     border: @px(1) solid #DDE8F5;
@@ -1713,19 +1686,18 @@ QFrame#contentCard[researchGapExplanation="true"] {
     color: #3267C8;
 }
 #readinessMetric {
-
-
-
+    padding: @px(6) @px(10);
+    border-radius: @px(8);
 }
-#readinessMetricValue { }
+#readinessMetricValue { color: #172033; font-size: @px(16); font-weight: 750; }
 #readinessMetricLabel { color: #8190A4; font-size: @px(11); }
 #readinessRecommendation { color: #64748B; font-size: @px(11); }
 
 /* Full, read-only spreadsheet view for the active local dataset. */
 #datasetPreviewHeader {
-
-
-
+    padding: @px(4) @px(12);
+    background: #F3F7FC;
+    border-bottom: @px(1) solid #DCE8F7;
 }
 #datasetPreviewTable {
     background: #FFFFFF;
@@ -1847,4 +1819,214 @@ QFrame#contentCard[researchGapExplanation="true"] {
     color: #52647C;
     font-size: @px(11);
     padding: @px(4) @px(8);
+}
+
+/* ============================================================
+   DATASET SEARCH PAGE
+   ============================================================ */
+
+#datasetSearchContainer {
+    background: transparent;
+}
+
+#datasetSearchTitle {
+    color: #172033;
+    font-size: @px(22);
+    font-weight: 750;
+}
+
+#datasetSearchSubtitle {
+    color: #66768C;
+    font-size: @px(12);
+    line-height: 1.5;
+}
+
+#datasetSearchCard {
+    background: #FFFFFF;
+    border: @px(1) solid #DCE8F7;
+    border-radius: @px(14);
+}
+
+#datasetSearchInput {
+    background: #F7FBFF;
+    border: @px(1) solid #D8E5F3;
+    border-radius: @px(9);
+    color: #25364D;
+    font-size: @px(13);
+    padding: 0 @px(12);
+}
+
+#datasetSearchInput:focus {
+    background: #FFFFFF;
+    border-color: #8CB9F0;
+}
+
+#datasetProviderCombo {
+    background: #F7FBFF;
+    border: @px(1) solid #D8E5F3;
+    border-radius: @px(9);
+    color: #344158;
+    font-size: @px(13);
+    min-width: @px(180);
+    padding: 0 @px(10);
+}
+
+#datasetProviderCombo:focus {
+    border-color: #8CB9F0;
+}
+
+#datasetSupportedSourcesLabel {
+    color: #8190A4;
+    font-size: @px(11);
+}
+
+#datasetSourceBadge {
+    background: #EEF5FF;
+    border: @px(1) solid #D2E3FA;
+    border-radius: @px(10);
+    color: #3070C8;
+    font-size: @px(11);
+    font-weight: 700;
+    padding: @px(2) @px(10);
+}
+
+#datasetSearchStatus {
+    color: #64748B;
+    font-size: @px(12);
+}
+
+#datasetSearchSort {
+    background: #FFFFFF;
+    border: @px(1) solid #DCE8F7;
+    border-radius: @px(8);
+    color: #344158;
+    font-size: @px(12);
+    padding: 0 @px(8);
+}
+
+#datasetSearchResults {
+    background: transparent;
+}
+
+#datasetSearchEmpty {
+    background: #F7FBFF;
+    border: @px(1) solid #E3EDF8;
+    border-radius: @px(10);
+    color: #7A899C;
+    font-size: @px(12);
+    line-height: 1.5;
+    padding: @px(20) @px(24);
+}
+
+#datasetSearchResultsToolbar {
+    background: transparent;
+}
+
+/* Dataset result card */
+#datasetResultCard {
+    background: #FFFFFF;
+    border: @px(1) solid #DCE8F7;
+    border-radius: @px(12);
+}
+
+#datasetResultCard:hover {
+    border-color: #C2D8F5;
+}
+
+#datasetResultName {
+    color: #172033;
+    font-size: @px(14);
+    font-weight: 700;
+}
+
+#datasetResultMeta {
+    color: #8190A4;
+    font-size: @px(11);
+}
+
+#datasetResultDescription {
+    color: #5A6A7E;
+    font-size: @px(12);
+    line-height: 1.45;
+}
+
+#datasetSourceTag {
+    background: #EEF5FF;
+    border: @px(1) solid #D2E3FA;
+    border-radius: @px(10);
+    color: #3277C5;
+    font-size: @px(10);
+    font-weight: 700;
+    padding: @px(2) @px(8);
+}
+
+#datasetSourceTag[source="kaggle"] {
+    background: #E8F7F0;
+    border-color: #C8EDDA;
+    color: #1E7A55;
+}
+
+#downloadButton {
+    background: #4F8CFF;
+    border: @px(1) solid #4F8CFF;
+    border-radius: @px(8);
+    color: #FFFFFF;
+    font-size: @px(11);
+    font-weight: 700;
+    padding: 0 @px(14);
+}
+
+#downloadButton:hover {
+    background: #3E7EF0;
+    border-color: #3E7EF0;
+}
+
+#downloadButton:disabled {
+    background: #EEF2F7;
+    border-color: #C9D3E0;
+    color: #8A98AB;
+}
+
+#analyzeAfterDownloadButton {
+    background: transparent;
+    border: @px(1) solid #D2E3FA;
+    border-radius: @px(8);
+    color: #3277C5;
+    font-size: @px(11);
+    font-weight: 700;
+    padding: 0 @px(14);
+}
+
+#analyzeAfterDownloadButton:hover {
+    background: #EEF5FF;
+    border-color: #A8CBF0;
+}
+
+#analyzeAfterDownloadButton:disabled {
+    color: #A0B0C5;
+    border-color: #E0EAF5;
+}
+
+#datasetFileList {
+    background: #F7FBFF;
+    border: @px(1) solid #E2EDF7;
+    border-radius: @px(8);
+}
+
+#datasetFileItem {
+    color: #3D5270;
+    font-size: @px(12);
+    padding: @px(4) @px(8);
+}
+
+#datasetDownloadProgress {
+    background: #E8F0FC;
+    border: none;
+    border-radius: @px(3);
+    max-height: @px(6);
+}
+
+#datasetDownloadProgress::chunk {
+    background: #4F8CFF;
+    border-radius: @px(3);
 }

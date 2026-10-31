@@ -5,11 +5,7 @@
   "team": "Metriks Studio",
   "sections": [
     {
-      "role": "Academic Supervisor",
-      "names": ["Rohmad Abidin, M.Kom"]
-    },
-    {
-      "role": "Software Engineering",
+      "role": "Team Lead",
       "names": ["Abdul Muhis"]
     },
     {
@@ -17,16 +13,16 @@
       "names": ["Lyra Anindita Ferani", "Muchammad Soufwan Fauzi"]
     },
     {
-      "role": "Graphic Design & Web Developer",
+      "role": "Design & Web Development",
       "names": ["Ahmad Turmudi"]
     },
     {
-      "role": "Scientific Paper Writing",
+      "role": "Design Analysis",
       "names": ["Muhammad Zaki Musyaffa"]
     },
     {
-      "role": "Special Thanks",
-      "names": ["UIN K.H. Abdurrahman Wahid Pekalongan"]
+      "role": "Academic Supervisor",
+      "names": ["Rohmad Abidin, M.Kom"]
     }
   ],
   "closing": "Thank you for using DORA",
