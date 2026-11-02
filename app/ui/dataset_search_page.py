@@ -302,6 +302,7 @@ class DatasetSearchPage(QWidget):
         location_actions = QHBoxLayout()
         location_actions.setContentsMargins(0, 0, 0, 0)
         location_actions.setSpacing(8)
+        location_actions.setAlignment(Qt.AlignRight)
         self.choose_download_directory_button = QPushButton()
         self.choose_download_directory_button.setObjectName(
             "datasetSearchLocationAction"
