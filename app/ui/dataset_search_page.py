@@ -3,14 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable, Optional
 
-import pandas as pd
 from app.ui.scale import logical_width
 
-from PySide6.QtCore import QObject, QThread, Qt, Signal, QUrl, QTimer, QStandardPaths, QSize
+from PySide6.QtCore import QObject, QThread, Qt, Signal, QUrl, QStandardPaths, QSettings, QSize
 from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QComboBox,
     QBoxLayout,
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QInputDialog,
@@ -131,6 +131,8 @@ class DatasetDownloadWorker(QObject):
 class DatasetSearchPage(QWidget):
     """Real-time online dataset discovery powered by Hugging Face Hub & Kaggle."""
 
+    DOWNLOAD_DIRECTORY_SETTING = "dataset_search/download_directory"
+
     def __init__(self, main_window):
         super().__init__()
         self.main_window = main_window
@@ -143,6 +145,7 @@ class DatasetSearchPage(QWidget):
         self._download_thread: Optional[QThread] = None
         self._download_worker: Optional[DatasetDownloadWorker] = None
         self._pending_analyze = False
+        self._settings = QSettings()
         self._build_ui()
 
     def _build_ui(self):
@@ -271,6 +274,87 @@ class DatasetSearchPage(QWidget):
         body.addWidget(toolbar)
         body.addSpacing(8)
 
+        self.download_location_panel = QFrame()
+        self.download_location_panel.setObjectName("datasetSearchDownloadLocation")
+        self.download_location_layout = QBoxLayout(
+            QBoxLayout.LeftToRight, self.download_location_panel
+        )
+        self.download_location_layout.setContentsMargins(14, 10, 14, 10)
+        self.download_location_layout.setSpacing(12)
+
+        location_text_layout = QVBoxLayout()
+        location_text_layout.setContentsMargins(0, 0, 0, 0)
+        location_text_layout.setSpacing(3)
+        location_title = QLabel("Lokasi unduhan dataset")
+        location_title.setObjectName("datasetSearchDownloadLocationTitle")
+        self.download_directory_label = QLabel()
+        self.download_directory_label.setObjectName("datasetSearchDownloadLocationPath")
+        self.download_directory_label.setWordWrap(True)
+        self.download_directory_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.download_directory_label.setMinimumWidth(0)
+        self.download_directory_label.setSizePolicy(
+            QSizePolicy.Ignored, QSizePolicy.Preferred
+        )
+        location_text_layout.addWidget(location_title)
+        location_text_layout.addWidget(self.download_directory_label)
+        self.download_location_layout.addLayout(location_text_layout, 1)
+
+        location_actions = QHBoxLayout()
+        location_actions.setContentsMargins(0, 0, 0, 0)
+        location_actions.setSpacing(8)
+        self.choose_download_directory_button = QPushButton()
+        self.choose_download_directory_button.setObjectName(
+            "datasetSearchLocationAction"
+        )
+        self.choose_download_directory_button.setAccessibleName(
+            "Pilih folder unduhan dataset"
+        )
+        self.choose_download_directory_button.setToolTip(
+            "Ubah lokasi unduhan dataset"
+        )
+        self.choose_download_directory_button.setFixedSize(36, 36)
+        choose_location_icon = (
+            Path(__file__).resolve().parent
+            / "assets"
+            / "icons"
+            / "folder-location.svg"
+        )
+        self.choose_download_directory_button.setIcon(
+            QIcon(str(choose_location_icon))
+        )
+        self.choose_download_directory_button.setIconSize(QSize(18, 18))
+        self.choose_download_directory_button.clicked.connect(
+            lambda _checked=False: self._choose_download_directory()
+        )
+        self.open_download_directory_button = QPushButton()
+        self.open_download_directory_button.setObjectName(
+            "datasetSearchLocationAction"
+        )
+        self.open_download_directory_button.setAccessibleName(
+            "Buka folder unduhan dataset"
+        )
+        self.open_download_directory_button.setToolTip(
+            "Buka lokasi unduhan dataset"
+        )
+        self.open_download_directory_button.setFixedSize(36, 36)
+        open_location_icon = (
+            Path(__file__).resolve().parent
+            / "assets"
+            / "icons"
+            / "folder-open-location.svg"
+        )
+        self.open_download_directory_button.setIcon(QIcon(str(open_location_icon)))
+        self.open_download_directory_button.setIconSize(QSize(18, 18))
+        self.open_download_directory_button.clicked.connect(
+            lambda _checked=False: self._open_download_directory()
+        )
+        location_actions.addWidget(self.choose_download_directory_button)
+        location_actions.addWidget(self.open_download_directory_button)
+        self.download_location_layout.addLayout(location_actions)
+        body.addWidget(self.download_location_panel)
+        body.addSpacing(8)
+        self._refresh_download_directory_label()
+
         self.results_container = QWidget()
         self.results_container.setObjectName("datasetSearchResults")
         self.results_container.setAttribute(Qt.WA_StyledBackground, True)
@@ -305,6 +389,9 @@ class DatasetSearchPage(QWidget):
             QBoxLayout.TopToBottom if stacked_controls else QBoxLayout.LeftToRight
         )
         self.sources_row_layout.setDirection(
+            QBoxLayout.TopToBottom if stacked_controls else QBoxLayout.LeftToRight
+        )
+        self.download_location_layout.setDirection(
             QBoxLayout.TopToBottom if stacked_controls else QBoxLayout.LeftToRight
         )
         if stacked_controls:
@@ -620,16 +707,25 @@ class DatasetSearchPage(QWidget):
             )
             return
 
+        try:
+            destination = self._download_directory()
+        except OSError as exc:
+            QMessageBox.warning(
+                self,
+                "Lokasi unduhan tidak dapat digunakan",
+                f"Pilih folder unduhan lain lalu coba kembali.\n\n{exc}",
+            )
+            return
+
         self._pending_analyze = bool(analyze)
         self.search_button.setEnabled(False)
+        self.choose_download_directory_button.setEnabled(False)
         self.progress.setVisible(True)
 
         clean_name = filename or result.dataset_id.split("/")[-1]
         self.status_label.setText(
             f"Mengunduh {clean_name} dari {result.source_label}..."
         )
-
-        destination = self._download_directory()
 
         self._download_thread = QThread(self)
         self._download_worker = DatasetDownloadWorker(
@@ -649,6 +745,7 @@ class DatasetSearchPage(QWidget):
 
     def _on_download_finished(self, download_result):
         self.search_button.setEnabled(True)
+        self.choose_download_directory_button.setEnabled(True)
         self.progress.setVisible(False)
         raw_paths = (
             download_result
@@ -668,7 +765,7 @@ class DatasetSearchPage(QWidget):
             QMessageBox.information(
                 self,
                 "Unduhan berhasil",
-                "File dataset disimpan di folder Downloads:\n\n"
+                "File dataset disimpan di folder unduhan yang dipilih:\n\n"
                 f"{file_list}",
             )
             return
@@ -697,25 +794,46 @@ class DatasetSearchPage(QWidget):
 
         try:
             dataframe = self._load_downloaded_dataset(selected_path)
-            self.main_window.current_dataset = dataframe
-            self.main_window.current_file_path = str(selected_path)
-            self.main_window.update_dataset_state()
-            self.status_label.setText(
-                "Dataset tersimpan di Downloads dan dimuat untuk analisis:\n"
-                f"{selected_path}"
-            )
-            self.main_window.open_analysis_page()
-            QTimer.singleShot(150, self.main_window.analysis_page.run_analysis)
         except Exception as exc:
             QMessageBox.warning(
                 self,
                 "Dataset Berhasil Diunduh",
-                "File berhasil diunduh, tetapi belum bisa dimuat otomatis.\n\n"
+                "File berhasil diunduh, tetapi tidak dapat dibaca sebagai dataset.\n\n"
+                f"{exc}",
+            )
+            return
+
+        try:
+            self.main_window.current_dataset = dataframe
+            self.main_window.current_file_path = str(selected_path)
+            self.main_window.update_dataset_state()
+            self.status_label.setText(
+                "Dataset tersimpan di folder unduhan dan dimuat untuk analisis:\n"
+                f"{selected_path}"
+            )
+            self.main_window.open_analysis_page(on_ready=self._run_imported_analysis)
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "Dataset Berhasil Diunduh",
+                "Dataset sudah dimuat, tetapi analisis belum dapat dimulai.\n\n"
+                f"{exc}",
+            )
+
+    def _run_imported_analysis(self, page):
+        try:
+            page.run_analysis()
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "Analisis Belum Dimulai",
+                "Dataset sudah dimuat, tetapi analisis belum dapat dimulai.\n\n"
                 f"{exc}",
             )
 
     def _on_download_failed(self, error: str):
         self.search_button.setEnabled(True)
+        self.choose_download_directory_button.setEnabled(True)
         self.progress.setVisible(False)
         self.status_label.setText(
             "Unduhan gagal. Coba file lain atau buka sumber dataset."
@@ -734,28 +852,9 @@ class DatasetSearchPage(QWidget):
         self._download_thread = None
 
     def _load_downloaded_dataset(self, path: Path):
-        suffix = path.suffix.lower()
+        return self.main_window.loader.load(str(path))
 
-        if suffix in {".csv", ".tsv"}:
-            return self.main_window.loader.load(str(path))
-
-        if suffix == ".json":
-            return pd.read_json(path)
-
-        if suffix == ".jsonl":
-            return pd.read_json(path, lines=True)
-
-        if suffix == ".parquet":
-            return pd.read_parquet(path)
-
-        if suffix in {".xlsx", ".xls"}:
-            return pd.read_excel(path)
-
-        raise ValueError(
-            f"Format {suffix} belum didukung untuk analisis otomatis."
-        )
-
-    def _download_directory(self) -> Path:
+    def _default_download_directory(self) -> Path:
         downloads_location = QStandardPaths.writableLocation(
             QStandardPaths.DownloadLocation
         )
@@ -764,12 +863,67 @@ class DatasetSearchPage(QWidget):
             if downloads_location
             else Path.home() / "Downloads"
         )
-        destination = destination / "Dataset Research"
+        return destination / "Dataset Research"
+
+    def _current_download_directory(self) -> Path:
+        configured = str(
+            self._settings.value(self.DOWNLOAD_DIRECTORY_SETTING, "") or ""
+        ).strip()
+        if configured:
+            return Path(configured).expanduser()
+        return self._default_download_directory()
+
+    def _refresh_download_directory_label(self):
+        destination = self._current_download_directory()
+        self.download_directory_label.setText(str(destination))
+        self.download_directory_label.setToolTip(str(destination))
+
+    def _choose_download_directory(self):
+        current = self._current_download_directory()
+        if not current.is_dir():
+            current = current.parent if current.parent.is_dir() else Path.home()
+        selected = QFileDialog.getExistingDirectory(
+            self,
+            "Pilih folder unduhan dataset",
+            str(current),
+            QFileDialog.Option.ShowDirsOnly,
+        )
+        if not selected:
+            return
+
+        destination = Path(selected).expanduser()
+        if not destination.is_dir():
+            QMessageBox.warning(
+                self,
+                "Folder tidak ditemukan",
+                "Pilih folder yang masih tersedia.",
+            )
+            return
+
+        self._settings.setValue(
+            self.DOWNLOAD_DIRECTORY_SETTING, str(destination)
+        )
+        self._settings.sync()
+        self._refresh_download_directory_label()
+        self.status_label.setText(
+            f"Unduhan dataset akan disimpan di: {destination}"
+        )
+
+    def _download_directory(self) -> Path:
+        destination = self._current_download_directory()
         destination.mkdir(parents=True, exist_ok=True)
         return destination
 
     def _open_download_directory(self):
-        destination = self._download_directory()
+        try:
+            destination = self._download_directory()
+        except OSError as exc:
+            QMessageBox.warning(
+                self,
+                "Lokasi unduhan tidak dapat digunakan",
+                f"Pilih folder unduhan lain lalu coba kembali.\n\n{exc}",
+            )
+            return
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(destination)))
 
     def _clear_results(self):

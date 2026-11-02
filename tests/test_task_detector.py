@@ -9,10 +9,12 @@ from app.ml.graph.task_detector import (
     delete_custom_template,
     detect_task,
     generate_template_graphs,
+    guess_target_column,
     list_custom_templates,
     profile_dataset,
     save_custom_template,
 )
+from app.ml.target_detector import MLTargetDetector
 
 
 def test_profile_dataset():
@@ -40,6 +42,17 @@ def test_detect_task_binary_classification():
     assert res["confidence"] > 0.9
 
 
+def test_target_detector_accepts_categorical_dtype():
+    dataframe = pd.DataFrame({
+        "feature": range(12),
+        "outcome": pd.Categorical(["yes", "no"] * 6),
+    })
+
+    candidates = MLTargetDetector().detect(dataframe=dataframe)
+
+    assert any(candidate["name"] == "outcome" for candidate in candidates)
+
+
 def test_detect_task_multiclass():
     df = pd.DataFrame({
         "feature": range(30),
@@ -63,6 +76,13 @@ def test_detect_task_clustering_no_target():
     df = pd.DataFrame({"x": range(20), "y": range(20)})
     res = detect_task(df)
     assert res["task_type"] == "clustering"
+
+
+def test_auto_target_does_not_assume_last_numeric_column_is_label():
+    df = pd.DataFrame({"x": range(20), "y": range(20)})
+
+    assert guess_target_column(df) is None
+    assert detect_task(df, auto_guess_target=True)["task_type"] == "clustering"
 
 
 def test_detect_task_time_series():

@@ -1,4 +1,5 @@
 from app.analyzer.correlations import CorrelationAnalyzer
+from app.analyzer.relationships import RelationshipAnalyzer
 from app.analyzer.data_quality import DataQualityDiagnoser, QualityDiagnosisItem
 from app.analyzer.duplicates import DuplicateAnalyzer
 from app.analyzer.fingerprint import DatasetFingerprint

@@ -247,6 +247,49 @@ class ProjectRepository:
             (project_id,),
         )
 
+    def record_ml_experiment(
+        self, project_id: int, fingerprint: dict[str, Any],
+        options: dict[str, Any], result: dict[str, Any],
+    ) -> int:
+        """Append an immutable ML run; the latest workflow remains a separate snapshot."""
+        if not self.project_exists(project_id):
+            raise ValueError(f"Project dengan ID {project_id} tidak ditemukan.")
+        primary = result.get("primary_task") or {}
+        best = result.get("best_method") or {}
+        return self.database.execute(
+            """
+            INSERT INTO ml_experiments (
+                project_id, dataset_fingerprint_json, options_json, result_json,
+                task, target, selected_method
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                project_id, self._json(fingerprint), self._json(options), self._json(result),
+                primary.get("task"), primary.get("target"), best.get("method_id"),
+            ),
+        )
+
+    def list_ml_experiments(self, project_id: int, limit: int = 20) -> list[dict[str, Any]]:
+        """Return recent runs with both selection and final-test metrics for comparison."""
+        rows = self.database.fetch_all(
+            """
+            SELECT id, project_id, dataset_fingerprint_json, options_json,
+                   result_json, task, target, selected_method, created_at
+            FROM ml_experiments WHERE project_id = ?
+            ORDER BY id DESC LIMIT ?
+            """,
+            (project_id, max(1, min(int(limit), 500))),
+        )
+        return [
+            {
+                **dict(row),
+                "fingerprint": self._from_json(row["dataset_fingerprint_json"], {}),
+                "options": self._from_json(row["options_json"], {}),
+                "result": self._from_json(row["result_json"], {}),
+            }
+            for row in rows
+        ]
+
     def save_workflow_sections(
         self,
         project_id: int,

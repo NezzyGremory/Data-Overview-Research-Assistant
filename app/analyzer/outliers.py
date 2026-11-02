@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 
 
@@ -17,6 +18,10 @@ class OutlierAnalyzer:
 
         for column in numeric_columns:
             series = dataframe[column].dropna()
+            try:
+                series = series[np.isfinite(series.to_numpy(dtype=float))]
+            except (TypeError, ValueError, OverflowError):
+                continue
 
             if series.empty:
                 continue

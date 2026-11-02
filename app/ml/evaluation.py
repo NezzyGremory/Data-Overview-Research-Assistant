@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 from sklearn.compose import ColumnTransformer
+from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import (
     accuracy_score,
@@ -30,6 +31,60 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, OrdinalEncoder, StandardScaler
 
 from app.ml.registry import ModelRegistry, CandidateModelSelector
+
+
+def _numeric_feature_columns(frame: pd.DataFrame) -> list:
+    return frame.select_dtypes(include=["number"]).columns.tolist()
+
+
+def _categorical_feature_columns(frame: pd.DataFrame) -> list:
+    return [
+        column for column in frame.columns
+        if pd.api.types.is_object_dtype(frame[column])
+        or pd.api.types.is_string_dtype(frame[column])
+        or isinstance(frame[column].dtype, pd.CategoricalDtype)
+        or pd.api.types.is_bool_dtype(frame[column])
+    ]
+
+
+class _FoldFeaturePreparation(BaseEstimator, TransformerMixin):
+    """Learn feature inclusion and date expansion only from a training fold."""
+
+    def fit(self, X: pd.DataFrame, y=None):
+        if not isinstance(X, pd.DataFrame):
+            raise TypeError("Feature preparation membutuhkan DataFrame.")
+        self.date_columns_ = []
+        for column in X.columns:
+            if MLEvaluator._looks_datetime(X[column]):
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    parsed = pd.to_datetime(X[column], errors="coerce")
+                if parsed.notna().mean() >= 0.8:
+                    self.date_columns_.append(column)
+        prepared = MLEvaluator._prepare_features(X)
+        self.feature_columns_ = prepared.columns.tolist()
+        if not self.feature_columns_:
+            raise ValueError("Tidak ada fitur yang dapat digunakan pada training fold.")
+        return self
+
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        if not isinstance(X, pd.DataFrame):
+            raise TypeError("Feature preparation membutuhkan DataFrame.")
+        transformed = X.copy()
+        for column in self.date_columns_:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                parsed = pd.to_datetime(transformed[column], errors="coerce")
+            transformed[f"{column}_year"] = parsed.dt.year
+            transformed[f"{column}_month"] = parsed.dt.month
+            transformed[f"{column}_day"] = parsed.dt.day
+            transformed = transformed.drop(columns=[column])
+        numeric_columns = transformed.select_dtypes(include=["number"]).columns
+        if len(numeric_columns):
+            transformed.loc[:, numeric_columns] = transformed.loc[:, numeric_columns].replace(
+                [np.inf, -np.inf], np.nan
+            )
+        return transformed.loc[:, self.feature_columns_]
 
 
 class MLEvaluator:
@@ -174,20 +229,32 @@ class MLEvaluator:
             return self._error(f"Target '{target}' tidak ditemukan dalam dataset.")
 
         data = dataframe.copy()
-        data = data.dropna(subset=[target])
+        data = data.dropna(subset=[target]).reset_index(drop=True)
 
         if len(data) < 10:
             return self._error("Dataset terlalu kecil untuk evaluation yang stabil.")
 
-        X = self._prepare_features(data.drop(columns=[target]))
+        X = data.drop(columns=[target])
         y = data[target]
 
         if X.shape[1] == 0:
-            return self._error("Tidak terdapat feature yang dapat digunakan setelah preprocessing.")
+            return self._error("Tidak terdapat feature yang dapat digunakan.")
+
+        target_copies = [column for column in X.columns if X[column].equals(y)]
+        if target_copies:
+            X = X.drop(columns=target_copies)
+        if X.shape[1] == 0:
+            return self._error("Semua fitur identik dengan target; training dihentikan untuk mencegah kebocoran target.")
 
         if task == "regression":
             if not pd.api.types.is_numeric_dtype(y):
                 return self._error("Target regression harus berupa nilai numerik.")
+            finite_target = np.isfinite(y.to_numpy(dtype=float))
+            if not finite_target.all():
+                X = X.iloc[finite_target].reset_index(drop=True)
+                y = y.iloc[finite_target].reset_index(drop=True)
+            if len(X) < 10:
+                return self._error("Target regression memiliki kurang dari 10 nilai numerik finite.")
 
             requested = CandidateModelSelector.select_candidates(
                 task="regression",
@@ -198,7 +265,11 @@ class MLEvaluator:
             if methods and not requested:
                 return self._error("Algoritma regresi yang dipilih tidak tersedia.")
             requested = requested or self.REGRESSION_METHODS
-            return self._evaluate_regression(X, y, requested)
+            result = self._evaluate_supervised(X, y, task, requested)
+            result["excluded_target_copies"] = [str(column) for column in target_copies]
+            if target_copies:
+                result["message"] += " Fitur yang identik dengan target dikeluarkan: " + ", ".join(map(str, target_copies)) + "."
+            return result
 
         class_count = int(y.nunique(dropna=True))
         if class_count < 2:
@@ -219,7 +290,99 @@ class MLEvaluator:
         if methods and not requested:
             return self._error("Algoritma klasifikasi yang dipilih tidak tersedia.")
         requested = requested or self.CLASSIFICATION_METHODS
-        return self._evaluate_classification(X, y, task, requested)
+        result = self._evaluate_supervised(X, y, task, requested)
+        result["excluded_target_copies"] = [str(column) for column in target_copies]
+        if target_copies:
+            result["message"] += " Fitur yang identik dengan target dikeluarkan: " + ", ".join(map(str, target_copies)) + "."
+        return result
+
+    def _evaluate_supervised(
+        self, X: pd.DataFrame, y: pd.Series, task: str, methods: List[str]
+    ) -> Dict[str, Any]:
+        """Rank on development data, then evaluate the winner on an untouched test set."""
+        source_rows = len(X)
+        if len(X) > self.max_cv_rows:
+            if task == "regression":
+                positions = np.random.RandomState(self.random_state).choice(
+                    len(X), size=self.max_cv_rows, replace=False
+                )
+                X = X.iloc[positions].reset_index(drop=True)
+                y = y.iloc[positions].reset_index(drop=True)
+            else:
+                X, y = self._stratified_sample(X, y, self.max_cv_rows)
+                X = X.reset_index(drop=True)
+                y = y.reset_index(drop=True)
+
+        is_classification = task != "regression"
+        holdout_reason = None
+        if len(X) < 50:
+            holdout_reason = "Minimal 50 baris diperlukan untuk uji akhir terpisah."
+        elif is_classification and int(y.value_counts(dropna=False).min()) < 5:
+            holdout_reason = "Setiap kelas memerlukan minimal 5 baris untuk uji akhir terpisah."
+
+        X_train, y_train = X, y
+        X_test = y_test = None
+        if holdout_reason is None:
+            try:
+                X_train, X_test, y_train, y_test = train_test_split(
+                    X, y, test_size=self.test_size, random_state=self.random_state,
+                    stratify=y if is_classification else None,
+                )
+            except ValueError as exc:
+                holdout_reason = f"Pemisahan uji akhir tidak memenuhi syarat: {exc}"
+
+        if is_classification:
+            result = self._evaluate_classification(X_train, y_train, task, methods)
+        else:
+            result = self._evaluate_regression(X_train, y_train, methods)
+
+        result["dataset"] = {
+            "rows": source_rows, "evaluated_rows": len(X),
+            "selection_rows": len(X_train), "test_rows": len(X_test) if X_test is not None else 0,
+            "features": X.shape[1],
+        }
+        result["selection_basis"] = result.get("validation")
+        result["final_test"] = {
+            "status": "NOT_AVAILABLE", "reason": holdout_reason or "Tidak ada model yang berhasil dievaluasi."
+        }
+        if source_rows > len(X):
+            result["message"] += f" Sampel acak {len(X):,} dari {source_rows:,} baris digunakan."
+        if X_test is None or not result.get("results"):
+            result["message"] += f" Uji akhir belum tersedia: {result['final_test']['reason']}"
+            return result
+
+        best = result["results"][0]
+        method_id = best["method_id"]
+        try:
+            model = self._get_model_instance(method_id)
+            pipe = self._pipeline(X_train, model, method_id)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                pipe.fit(X_train, y_train)
+                predictions = pipe.predict(X_test)
+            if is_classification:
+                metrics = self._classification_metrics(y_test, predictions)
+            else:
+                metrics = {
+                    "mae": round(float(mean_absolute_error(y_test, predictions)), 4),
+                    "rmse": round(float(np.sqrt(mean_squared_error(y_test, predictions))), 4),
+                    "r2_score": round(float(r2_score(y_test, predictions)), 4),
+                }
+            result["final_test"] = {
+                "status": "EVALUATED", "method_id": method_id, "method": best["method"],
+                "metrics": metrics, "validation": "independent_holdout",
+                "train_rows": len(X_train), "test_rows": len(X_test),
+                "test_size": self.test_size, "random_state": self.random_state,
+                "selection_basis": result["selection_basis"],
+            }
+            result["message"] += " Model teratas diuji sekali pada data akhir yang tidak dipakai memilih model."
+        except Exception as exc:
+            result["final_test"] = {
+                "status": "FAILED", "method_id": method_id,
+                "reason": f"Uji akhir gagal: {exc}",
+            }
+            result["message"] += f" {result['final_test']['reason']}"
+        return result
 
     # =========================================================
     # TIME-SERIES FORECASTING
@@ -651,26 +814,36 @@ class MLEvaluator:
                 if labels is None:
                     continue
 
-                valid_mask = labels >= 0
-                unique_labels = np.unique(labels[valid_mask]) if np.any(valid_mask) else np.unique(labels)
-                n_clusters = len(unique_labels)
+                labels = np.asarray(labels)
+                if len(labels) != len(X_trans):
+                    raise ValueError("Jumlah label cluster tidak sama dengan jumlah baris data.")
+                # DBSCAN uses -1 for noise. Noise is not a cluster and must not
+                # be passed as one to internal validation metrics.
+                valid_mask = labels != -1
+                clustered_labels = labels[valid_mask]
+                clustered_rows = X_trans[valid_mask]
+                n_clusters = len(np.unique(clustered_labels))
+                noise_count = int((~valid_mask).sum())
 
-                sil = 0.0
-                ch = 0.0
-                db = 999.0
+                if not (2 <= n_clusters < len(clustered_rows)):
+                    results.append({
+                        "method_id": method_id,
+                        "method": method_name,
+                        "status": "NOT_EVALUABLE",
+                        "metrics": {
+                            "n_clusters": n_clusters,
+                            "noise_count": noise_count,
+                            "evaluated_rows": len(clustered_rows),
+                        },
+                        "error": "Metrik internal membutuhkan sedikitnya 2 cluster dan lebih banyak baris daripada cluster setelah noise dikeluarkan.",
+                    })
+                    continue
 
-                if 2 <= n_clusters < len(X_trans):
-                    try:
-                        sil = round(float(silhouette_score(X_trans, labels)), 4)
-                        ch = round(float(calinski_harabasz_score(X_trans, labels)), 2)
-                        db = round(float(davies_bouldin_score(X_trans, labels)), 4)
-                    except Exception:
-                        pass
-
-                # Normalized composite score (0-100)
-                norm_sil = max(0.0, min(100.0, (sil + 1.0) * 50.0))
-                norm_db = max(0.0, min(100.0, max(0.0, (3.0 - min(db, 3.0)) / 3.0) * 100.0))
-                cluster_score = round(float(0.7 * norm_sil + 0.3 * norm_db), 2)
+                sil = float(silhouette_score(clustered_rows, clustered_labels))
+                ch = float(calinski_harabasz_score(clustered_rows, clustered_labels))
+                db = float(davies_bouldin_score(clustered_rows, clustered_labels))
+                if not np.isfinite([sil, ch, db]).all():
+                    raise ValueError("Metrik clustering menghasilkan nilai non-finite.")
 
                 results.append({
                     "method_id": method_id,
@@ -678,16 +851,17 @@ class MLEvaluator:
                     "status": "EVALUATED",
                     "metrics": {
                         "n_clusters": n_clusters,
-                        "silhouette_score": sil,
-                        "calinski_harabasz": ch,
-                        "davies_bouldin": db,
-                        "cluster_score": cluster_score,
+                        "noise_count": noise_count,
+                        "evaluated_rows": len(clustered_rows),
+                        "silhouette_score": round(sil, 4),
+                        "calinski_harabasz": round(ch, 2),
+                        "davies_bouldin": round(db, 4),
                     },
                     "validation": "internal_cluster_validation",
                     "folds": 1,
-                    "stability": 0.0,
-                    "cv_mean": sil,
-                    "cv_std": 0.0,
+                    "stability": None,
+                    "cv_mean": None,
+                    "cv_std": None,
                 })
 
             except Exception as exc:
@@ -701,14 +875,14 @@ class MLEvaluator:
 
         evaluated = [r for r in results if r.get("status") == "EVALUATED"]
         evaluated.sort(
-            key=lambda r: (r["metrics"]["cluster_score"], r["metrics"]["silhouette_score"]),
+            key=lambda r: r["metrics"]["silhouette_score"],
             reverse=True,
         )
 
         failed = [
             {"method_id": r.get("method_id"), "error": r.get("error", "Unknown error")}
             for r in results
-            if r.get("status") == "FAILED"
+            if r.get("status") != "EVALUATED"
         ]
 
         return {
@@ -718,12 +892,12 @@ class MLEvaluator:
             "dataset": {"rows": len(X), "features": X.shape[1]},
             "validation": "internal_cluster_validation",
             "folds": 1,
-            "metrics_used": ["silhouette_score", "calinski_harabasz", "davies_bouldin", "cluster_score"],
+            "metrics_used": ["silhouette_score", "calinski_harabasz", "davies_bouldin"],
             "ranking_metric": "silhouette_score",
             "results": evaluated,
             "failed_methods": failed,
             "result_count": len(evaluated),
-            "message": "Model clustering dilatih dan dievaluasi menggunakan metrik kohesi dan separasi data aktual.",
+            "message": "Metrik clustering dihitung pada baris yang memiliki label cluster; noise dikeluarkan. Metode tanpa sedikitnya dua cluster tidak dirangking.",
         }
 
     # =========================================================
@@ -842,9 +1016,12 @@ class MLEvaluator:
     def _pipeline(self, X: pd.DataFrame, model, method_id: str) -> Pipeline:
         spec = ModelRegistry.get_spec(method_id)
         requires_scaling = spec.requires_scaling if spec else False
-        preprocessor = self._build_preprocessor(X, requires_scaling=requires_scaling, method_id=method_id)
+        preprocessor = self._build_preprocessor(
+            X, requires_scaling=requires_scaling, method_id=method_id, dynamic_columns=True
+        )
 
         return Pipeline([
+            ("feature_preparation", _FoldFeaturePreparation()),
             ("preprocessor", preprocessor),
             ("model", model),
         ])
@@ -854,19 +1031,20 @@ class MLEvaluator:
         X: pd.DataFrame,
         requires_scaling: bool = False,
         method_id: str = "",
+        dynamic_columns: bool = False,
     ) -> ColumnTransformer:
-        numeric = X.select_dtypes(include=["number"]).columns.tolist()
-        categorical = X.select_dtypes(include=["object", "category", "bool"]).columns.tolist()
+        numeric = _numeric_feature_columns if dynamic_columns else _numeric_feature_columns(X)
+        categorical = _categorical_feature_columns if dynamic_columns else _categorical_feature_columns(X)
 
         transformers = []
 
-        if numeric:
+        if dynamic_columns or numeric:
             num_steps = [("imputer", SimpleImputer(strategy="median"))]
             if requires_scaling or not method_id.startswith(("random_forest", "extra_trees", "decision_tree")):
                 num_steps.append(("scaler", StandardScaler()))
             transformers.append(("numeric", Pipeline(num_steps), numeric))
 
-        if categorical:
+        if dynamic_columns or categorical:
             if str(method_id).startswith("gradient_boosting") or str(method_id).startswith("hist_gradient"):
                 encoder = OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1)
             else:
@@ -880,12 +1058,13 @@ class MLEvaluator:
 
         return ColumnTransformer(transformers=transformers, remainder="drop")
 
-    def _prepare_features(self, X: pd.DataFrame) -> pd.DataFrame:
+    @staticmethod
+    def _prepare_features(X: pd.DataFrame) -> pd.DataFrame:
         X = X.copy()
 
         # Date parsing
         for col in list(X.columns):
-            if self._looks_datetime(X[col]):
+            if MLEvaluator._looks_datetime(X[col]):
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")
                     parsed = pd.to_datetime(X[col], errors="coerce")

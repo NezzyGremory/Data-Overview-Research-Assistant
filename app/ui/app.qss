@@ -1922,6 +1922,49 @@ QFrame#contentCard[researchGapExplanation="true"] {
     background: transparent;
 }
 
+#datasetSearchDownloadLocation {
+    background: #F7FBFF;
+    border: @px(1) solid #DCE8F7;
+    border-radius: @px(10);
+}
+
+#datasetSearchDownloadLocationTitle {
+    color: #344158;
+    font-size: @px(12);
+    font-weight: 700;
+}
+
+#datasetSearchDownloadLocationPath {
+    color: #64748B;
+    font-size: @px(11);
+}
+
+#datasetSearchLocationAction {
+    background: #FFFFFF;
+    border: @px(1) solid #CFE3FF;
+    border-radius: @px(9);
+    padding: 0;
+}
+
+#datasetSearchLocationAction:hover {
+    background: #F1F7FF;
+    border-color: #AFCFFF;
+}
+
+#datasetSearchLocationAction:pressed {
+    background: #E5F1FF;
+    border-color: #8DB8F0;
+}
+
+#datasetSearchLocationAction:focus {
+    border: @px(2) solid #4D91F2;
+}
+
+#datasetSearchLocationAction:disabled {
+    background: #EEF2F7;
+    border-color: #C9D3E0;
+}
+
 /* Dataset result card */
 #datasetResultCard {
     background: #FFFFFF;

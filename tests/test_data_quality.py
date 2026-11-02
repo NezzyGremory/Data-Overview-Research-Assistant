@@ -1,6 +1,8 @@
 import unittest
+import numpy as np
 import pandas as pd
 from app.analyzer.data_quality import DataQualityDiagnoser, QualityDiagnosisItem
+from app.reports.generator import ReportGenerator
 
 
 class TestDataQualityDiagnoser(unittest.TestCase):
@@ -61,6 +63,33 @@ class TestDataQualityDiagnoser(unittest.TestCase):
         const_issue = next((i for i in issues if i.category == "constant_columns"), None)
         self.assertIsNotNone(const_issue)
         self.assertIn("constant_col", const_issue.affected_columns)
+
+    def test_non_finite_values_are_distinct_from_missing(self):
+        df = pd.DataFrame({
+            "measurement": [1.0, np.inf, -np.inf, np.nan, 5.0],
+            "group": ["a", "b", "c", "d", "e"],
+        })
+
+        issues = self.diagnoser.diagnose(df)
+        invalid = next(item for item in issues if item.category == "invalid_values")
+        missing = next(item for item in issues if item.category == "missing_values")
+
+        self.assertEqual(invalid.metrics["non_finite_count"], 2)
+        self.assertEqual(invalid.severity, "critical")
+        self.assertEqual(invalid.affected_columns, ["measurement"])
+        self.assertEqual(missing.metrics["total_missing"], 1)
+
+    def test_non_finite_diagnosis_appears_in_report(self):
+        df = pd.DataFrame({"measurement": [1.0, np.inf, 2.0]})
+        diagnoses = self.diagnoser.diagnose(df)
+
+        html = ReportGenerator().generate(
+            dataset_name="Non-finite data",
+            analysis_data={"data_quality": diagnoses},
+        )
+
+        self.assertIn("Nilai Numerik Tidak Terhingga", html)
+        self.assertIn("nilai +Inf/-Inf", html)
 
 
 if __name__ == "__main__":

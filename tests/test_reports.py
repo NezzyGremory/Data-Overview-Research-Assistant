@@ -140,6 +140,22 @@ class TestReportGenerator(unittest.TestCase):
         self.assertIn("0.8750", html)  # accuracy metric
         self.assertIn("Best Empirical Performer", html)
 
+    def test_report_explains_manual_task_selection(self):
+        ml_data = _make_ml_data()
+        ml_data["task_detection"]["selection_mode"] = "manual"
+        ml_data["primary_task"]["selection_mode"] = "manual"
+        ml_data["primary_task"]["reasons"] = ["Target dikonfirmasi pengguna."]
+
+        html = self.generator.generate(
+            dataset_name="Manual Classification",
+            analysis_data=_make_analysis_data(),
+            ml_data=ml_data,
+        )
+
+        self.assertIn("Dikonfirmasi pengguna", html)
+        self.assertIn("Target dikonfirmasi pengguna", html)
+        self.assertIn("Klasifikasi Biner", html)
+
     def test_generate_with_research_data(self):
         """Generator should include research and gap sections."""
         html = self.generator.generate(
@@ -241,6 +257,64 @@ class TestReportGenerator(unittest.TestCase):
         self.assertEqual(len(models), 2)
         self.assertEqual(models[0]["method"], "Random Forest")
         self.assertEqual(models[1]["method"], "Logistic Regression")
+
+    def test_inferential_results_are_normalized_and_included_in_report(self):
+        result = {
+            "status": "COMPLETED",
+            "test_id": "welch_t",
+            "test_name": "Welch independent t-test",
+            "variables": ["measurement", "group"],
+            "sample_size": 24,
+            "statistic": 2.5,
+            "degrees_of_freedom": 20.4,
+            "p_value": 0.02,
+            "decision": "TOLAK_H0",
+            "hypotheses": {"null": "Rata-rata sama.", "alternative": "Rata-rata berbeda."},
+            "confidence_interval": [0.2, 1.8],
+            "effect_size": {"name": "Hedges g", "value": 0.7},
+            "interpretation": "P-value tidak dikoreksi untuk pengujian hipotesis lain.",
+            "assumptions": [{"name": "Independensi", "status": "USER_ASSUMED", "detail": "Unit dianggap independen."}],
+        }
+        analysis = {"inferential_statistics": [result]}
+        context = self.generator._build_context(
+            dataset_name="Inference",
+            analysis_data=analysis,
+            ml_data={},
+            research_data={},
+            ai_synthesis="",
+            metadata={},
+        )
+
+        self.assertEqual(len(context["inferential_results"]), 1)
+        self.assertEqual(context["inferential_results"][0]["variables"], "measurement, group")
+        self.assertEqual(context["inferential_results"][0]["confidence_interval"], "[0.2, 1.8]")
+        report = self.generator.generate(dataset_name="Inference", analysis_data=analysis)
+        self.assertIn("Statistik Inferensial", report)
+        self.assertIn("Welch independent t-test", report)
+        self.assertIn("Unit dianggap independen.", report)
+
+    def test_fallback_report_includes_inferential_assumptions(self):
+        context = self.generator._build_context(
+            dataset_name="Inference fallback",
+            analysis_data={
+                "inferential_statistics": [{
+                    "test_name": "Pearson correlation",
+                    "variables": ["x", "y"],
+                    "sample_size": 10,
+                    "statistic": 0.9,
+                    "p_value": 0.01,
+                    "decision": "TOLAK_H0",
+                    "assumptions": [{"name": "Independensi", "detail": "Periksa rancangan sampling."}],
+                }],
+            },
+            ml_data={},
+            research_data={},
+            ai_synthesis="",
+            metadata={},
+        )
+        report = self.generator._generate_fallback_html(context)
+        self.assertIn("Statistik Inferensial", report)
+        self.assertIn("Periksa rancangan sampling.", report)
 
 
 if __name__ == "__main__":

@@ -53,11 +53,13 @@ class MLTaskDetector:
         if not isinstance(representation, dict):
             representation = fingerprint
 
-        columns = self._normalize_columns(representation.get("column_signature"))
+        # The loaded frame is authoritative. A persisted fingerprint may have
+        # been generated before dtype normalization or from another version.
+        columns = self._columns_from_dataframe(dataframe) if dataframe is not None else []
+        if not columns:
+            columns = self._normalize_columns(representation.get("column_signature"))
         if not columns:
             columns = self._normalize_columns(representation.get("columns"))
-        if not columns and dataframe is not None:
-            columns = self._columns_from_dataframe(dataframe)
 
         characteristics = representation.get("characteristics")
         if not isinstance(characteristics, dict):
@@ -132,16 +134,24 @@ class MLTaskDetector:
         tasks.sort(key=lambda item: self._safe_score(item), reverse=True)
         primary_task = self._select_primary_task(tasks)
 
+        if primary_task and primary_task.get("task") in {"clustering", "anomaly_detection"}:
+            message = (
+                "Tidak ada target yang cukup pasti untuk tugas supervised. "
+                "Pilih task dan kolom target sesuai tujuan analisis sebelum melatih model."
+            )
+        else:
+            message = (
+                "Jenis machine learning merupakan estimasi berdasarkan "
+                "struktur dataset, tipe fitur, cardinality, dan kandidat target."
+            )
+
         return {
             "status": self.STATUS,
             "primary_task": primary_task,
             "tasks": tasks,
             "task_count": len(tasks),
             "target_candidates": target_candidates[:10],
-            "message": (
-                "Jenis machine learning merupakan estimasi berdasarkan "
-                "struktur dataset, tipe fitur, cardinality, dan kandidat target."
-            ),
+            "message": message,
         }
 
     # ------------------------------------------------------------------
@@ -501,43 +511,40 @@ class MLTaskDetector:
             return False
 
     def _get_numeric_count(self, columns, characteristics, dataframe=None):
-        value = characteristics.get("numeric_columns")
-        if isinstance(value, int):
-            return max(value, 0)
-        if isinstance(value, list):
-            return len(value)
         if dataframe is not None:
             try:
                 return int(dataframe.select_dtypes(include="number").shape[1])
             except Exception:
                 pass
+        value = characteristics.get("numeric_columns")
+        if isinstance(value, int):
+            return max(value, 0)
+        if isinstance(value, list):
+            return len(value)
         return sum(1 for c in columns if self._is_numeric_column(c))
 
     def _feature_count(self, columns, characteristics, dataframe=None):
-        value = characteristics.get("feature_count")
-        if isinstance(value, int) and value >= 0:
-            return value
         if dataframe is not None:
             try:
                 return int(dataframe.shape[1])
             except Exception:
                 pass
+        value = characteristics.get("feature_count")
+        if isinstance(value, int) and value >= 0:
+            return value
         return len(columns)
 
     def _get_datetime_count(self, columns, characteristics, dataframe=None):
+        if dataframe is not None:
+            try:
+                return int(sum(self._is_datetime_series(dataframe[c]) for c in dataframe.columns))
+            except Exception:
+                pass
         value = characteristics.get("datetime_columns")
         if isinstance(value, int):
             return max(value, 0)
         if isinstance(value, list):
             return len(value)
-        if dataframe is not None:
-            try:
-                import pandas as pd
-                count = int(sum(pd.api.types.is_datetime64_any_dtype(dataframe[c]) for c in dataframe.columns))
-                if count:
-                    return count
-            except Exception:
-                pass
         return sum(1 for c in columns if str(c.get("semantic_type", "")).lower() in {"datetime", "date", "timestamp"})
 
     @staticmethod

@@ -24,13 +24,13 @@ def test_report_renders_new_ml_readiness_sections():
     )
 
     for title in (
-        "Data Quality Summary",
-        "Class Balance",
-        "Preprocessing Recommendation",
-        "Feature Selection Hints",
-        "ML Pipeline Checklist",
+        "Ringkasan Kualitas Data",
+        "Keseimbangan Kelas",
+        "Rekomendasi Prapemrosesan",
+        "Petunjuk Seleksi Fitur",
+        "Daftar Periksa Alur Machine Learning",
     ):
-        assert f"<h2>{title}</h2>" in html
+        assert f"<h3>{title}</h3>" in html
     assert "Fit preprocessing on the training set only to avoid data leakage." in html
     assert "Problem Definition" in html
     assert "Model Saving and Deployment" in html
@@ -39,5 +39,5 @@ def test_report_renders_new_ml_readiness_sections():
 def test_report_skips_new_sections_without_readiness_data_or_dataframe():
     html = ReportGenerator().generate(dataset_name="Empty")
 
-    assert "Data Quality Summary" not in html
-    assert "ML Pipeline Checklist" not in html
+    assert "<h3>Ringkasan Kualitas Data</h3>" not in html
+    assert "<h3>Daftar Periksa Alur Machine Learning</h3>" not in html

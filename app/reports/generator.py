@@ -110,6 +110,73 @@ class ReportGenerator:
         duplicates = analysis_data.get("duplicates") or {}
         raw_quality = analysis_data.get("data_quality") or []
 
+        def format_statistic(value):
+            if value is None:
+                return "Tidak tersedia"
+            if isinstance(value, (int, float)):
+                if not math.isfinite(value):
+                    return "Tidak tersedia"
+                return f"{value:.6g}"
+            return str(value)
+
+        inferential_results = []
+        for raw_result in analysis_data.get("inferential_statistics") or []:
+            if not isinstance(raw_result, dict):
+                continue
+            degrees = raw_result.get("degrees_of_freedom")
+            if isinstance(degrees, dict):
+                degrees_display = ", ".join(
+                    f"{key}={format_statistic(value)}" for key, value in degrees.items()
+                )
+            else:
+                degrees_display = format_statistic(degrees)
+            interval = raw_result.get("confidence_interval")
+            effect = raw_result.get("effect_size") or {}
+            effect = effect if isinstance(effect, dict) else {}
+            hypotheses = raw_result.get("hypotheses") or {}
+            hypotheses = hypotheses if isinstance(hypotheses, dict) else {}
+            critical_values = raw_result.get("critical_values") or {}
+            critical_values = critical_values if isinstance(critical_values, dict) else {}
+            decision_labels = {
+                "TOLAK_H0": "Tolak H0 pada taraf 5%",
+                "GAGAL_MENOLAK_H0": "Belum cukup bukti untuk menolak H0 pada taraf 5%",
+            }
+            assumptions = [
+                {
+                    "name": str(item.get("name") or "Asumsi"),
+                    "status": str(item.get("status") or "USER_ASSUMED"),
+                    "detail": str(item.get("detail") or ""),
+                }
+                for item in raw_result.get("assumptions") or []
+                if isinstance(item, dict)
+            ]
+            inferential_results.append({
+                "test_name": str(raw_result.get("test_name") or raw_result.get("test_id") or "Uji statistik"),
+                "status": str(raw_result.get("status") or "UNKNOWN"),
+                "variables": ", ".join(map(str, raw_result.get("variables") or [])) or "Tidak tersedia",
+                "sample_size": int(raw_result.get("sample_size") or 0),
+                "statistic": format_statistic(raw_result.get("statistic")),
+                "degrees_of_freedom": degrees_display,
+                "p_value": format_statistic(raw_result.get("p_value")),
+                "decision": decision_labels.get(raw_result.get("decision"), str(raw_result.get("decision") or "Tidak tersedia")),
+                "hypothesis_null": str(hypotheses.get("null") or ""),
+                "hypothesis_alternative": str(hypotheses.get("alternative") or ""),
+                "confidence_interval": (
+                    f"[{format_statistic(interval[0])}, {format_statistic(interval[1])}]"
+                    if isinstance(interval, (list, tuple)) and len(interval) == 2 else "Tidak dihitung untuk uji ini"
+                ),
+                "effect_size": (
+                    f"{effect.get('name', 'Ukuran efek')}: {format_statistic(effect.get('value'))}"
+                    if effect else "Tidak dihitung untuk uji ini"
+                ),
+                "interpretation": str(raw_result.get("interpretation") or raw_result.get("message") or ""),
+                "critical_values": ", ".join(
+                    f"{level}: {format_statistic(value)}"
+                    for level, value in critical_values.items()
+                ),
+                "assumptions": assumptions,
+            })
+
         total_rows = int(profile.get("total_rows") or profile.get("row_count") or profile.get("rows") or 0)
         total_cols = int(profile.get("total_columns") or profile.get("column_count") or profile.get("columns") or 0)
         memory_usage = profile.get("memory_usage_str") or profile.get("memory_usage") or "N/A"
@@ -216,6 +283,17 @@ class ReportGenerator:
         primary_task = ml_data.get("primary_task", {}) or task_detection.get("primary_task", {})
         task_name = primary_task.get("task") or "Belum Ditentukan"
         target_col = primary_task.get("target")
+        selection_mode = (
+            task_detection.get("selection_mode")
+            or primary_task.get("selection_mode")
+        )
+        task_selection_label = (
+            "Dikonfirmasi pengguna" if selection_mode == "manual"
+            else "Estimasi otomatis dari struktur dataset"
+        )
+        task_selection_reason = "; ".join(
+            str(reason) for reason in (primary_task.get("reasons") or [])[:2]
+        )
 
         task_display_map = {
             "binary_classification": "Klasifikasi Biner (Supervised)",
@@ -303,6 +381,36 @@ class ReportGenerator:
         eval_results = evaluation.get("results") or []
         ml_evaluated = bool(eval_results)
 
+        validation = evaluation.get("validation") or (eval_results[0].get("validation") if eval_results else None)
+        folds = evaluation.get("folds") or (eval_results[0].get("folds") if eval_results else None)
+        validation_names = {
+            "stratified_k_fold": "Stratified K-Fold Cross Validation",
+            "stratified_kfold": "Stratified K-Fold Cross Validation",
+            "k_fold": "K-Fold Cross Validation",
+            "holdout": "Holdout",
+            "chronological_holdout": "Holdout kronologis",
+            "internal_cluster_validation": "Validasi internal clustering",
+            "score_distribution": "Distribusi skor anomali",
+        }
+        validation_protocol = validation_names.get(validation, validation or "Belum Dievaluasi")
+        if folds and validation in {"stratified_k_fold", "stratified_kfold", "k_fold"}:
+            validation_protocol = (
+                f"{folds}-Fold Cross Validation (stratified)"
+                if validation in {"stratified_k_fold", "stratified_kfold"}
+                else f"{folds}-Fold Cross Validation"
+            )
+        final_test = evaluation.get("final_test") or {}
+        ml_config = evaluation.get("config") or {}
+        metric_names = {
+            "f1_score": "F1 tertimbang", "accuracy": "Akurasi", "r2_score": "R2",
+            "mae": "MAE", "rmse": "RMSE", "silhouette_score": "Silhouette",
+        }
+        final_test_display = ", ".join(
+            f"{metric_names.get(key, key)}: {value:.4f}"
+            for key, value in (final_test.get("metrics") or {}).items()
+            if isinstance(value, (int, float))
+        )
+
         candidate_models = []
         winner_model = None
         best_model_status_label = None
@@ -333,6 +441,11 @@ class ReportGenerator:
                 pri_metric_name = str(k).title()
                 pri_metric_val = v
 
+            ranking_metric = evaluation.get("ranking_metric")
+            if ranking_metric in winner_metrics:
+                pri_metric_name = metric_names.get(ranking_metric, ranking_metric)
+                pri_metric_val = winner_metrics[ranking_metric]
+
             sec_display = ""
             if "f1_macro" in winner_metrics and pri_metric_name != "F1 Macro":
                 sec_display = f"F1-Macro: {winner_metrics['f1_macro']:.4f}"
@@ -343,8 +456,8 @@ class ReportGenerator:
                 "method": winner_method_name,
                 "primary_metric_display": f"{pri_metric_name}: {pri_metric_val:.4f}" if isinstance(pri_metric_val, (int, float)) else str(pri_metric_val),
                 "secondary_metric_display": sec_display,
-                "folds": best_info.get("folds", 5),
-                "rationale": "Model dengan performa rata-rata tertinggi dan variansi terkecil pada validasi k-fold cross validation.",
+                "folds": best_info.get("folds", folds),
+                "rationale": f"Model dipilih berdasarkan metrik {pri_metric_name} pada {validation_protocol}.",
             }
             # The benchmark winner is the best performer supported by the
             # measured results, so the report labels it as such.
@@ -364,7 +477,7 @@ class ReportGenerator:
                 
                 # Format primary metric
                 val_str = "-"
-                for m_key in ["accuracy", "r2", "f1_macro", "silhouette"]:
+                for m_key in [evaluation.get("ranking_metric"), "accuracy", "r2", "r2_score", "f1_macro", "silhouette", "silhouette_score"]:
                     if m_key in metrics and isinstance(metrics[m_key], (int, float)):
                         val_str = f"{m_key.title()}: {metrics[m_key]:.4f}"
                         break
@@ -376,8 +489,8 @@ class ReportGenerator:
                 std_str = f"± {std_val:.4f}" if isinstance(std_val, (int, float)) else "-"
 
                 rec_k = knowledge_map.get(m_id, {})
-                strengths = rec_k.get("strengths") or ["Efisien", "Robust"]
-                limitations = rec_k.get("limitations") or ["Sensitif terhadap hiperparameter"]
+                strengths = rec_k.get("strengths") or ["Tidak dinilai"]
+                limitations = rec_k.get("limitations") or ["Tidak dinilai"]
 
                 candidate_models.append({
                     "method": m_name,
@@ -484,6 +597,8 @@ class ReportGenerator:
             "generated_at": datetime.now().strftime("%d %B %Y, %H:%M:%S"),
             "primary_task_display": primary_task_display,
             "target_column": target_col,
+            "task_selection_label": task_selection_label,
+            "task_selection_reason": task_selection_reason,
             "readiness_score": readiness_score,
             "total_rows_fmt": f"{total_rows:,}",
             "total_columns_fmt": f"{total_cols:,}",
@@ -499,9 +614,14 @@ class ReportGenerator:
             "duplicate_count_fmt": f"{duplicate_count:,}",
             "column_summary": col_summary,
             "quality_diagnoses": quality_diagnoses,
+            "inferential_results": inferential_results,
             "quality_issues_count": len(quality_diagnoses),
             "critical_issues_count": critical_count,
-            "validation_protocol": "5-Fold Cross Validation" if ml_evaluated else "Belum Dievaluasi",
+            "validation_protocol": validation_protocol,
+            "final_test": final_test,
+            "final_test_display": final_test_display,
+            "ml_config": ml_config,
+            "excluded_target_copies": evaluation.get("excluded_target_copies") or [],
             "ml_evaluated": ml_evaluated,
             "winner_model": winner_model,
             "candidate_models": candidate_models,
@@ -712,6 +832,50 @@ class ReportGenerator:
         generated_at = html.escape(str(ctx.get("generated_at", "")))
         total_rows = ctx.get("total_rows_fmt", "0")
         total_cols = ctx.get("total_columns_fmt", "0")
+        inferential_blocks = []
+        for item in ctx.get("inferential_results", []):
+            assumptions_html = "".join(
+                "<li>[{status}] {name}: {detail}</li>".format(
+                    status=html.escape(str(assumption.get("status", ""))),
+                    name=html.escape(str(assumption.get("name", ""))),
+                    detail=html.escape(str(assumption.get("detail", ""))),
+                )
+                for assumption in item.get("assumptions", [])
+            )
+            hypotheses_html = ""
+            if item.get("hypothesis_null"):
+                hypotheses_html = (
+                    f"<p><b>H0:</b> {html.escape(item['hypothesis_null'])}<br>"
+                    f"<b>H1:</b> {html.escape(item['hypothesis_alternative'])}</p>"
+                )
+            inferential_blocks.append(
+                "<div><h3>{name} — {status}</h3><p>Variabel: {variables}; N = {n}; "
+                "statistik = {statistic}; df = {df}; p-value = {p}</p>{hypotheses}"
+                "<p>Keputusan: {decision}; interval kepercayaan 95%: {interval}; "
+                "ukuran efek: {effect}</p><p>{interpretation}</p>"
+                "<ul>{assumptions}</ul></div>".format(
+                    name=html.escape(item["test_name"]),
+                    status=html.escape(item["status"]),
+                    variables=html.escape(item["variables"]),
+                    n=item["sample_size"],
+                    statistic=html.escape(item["statistic"]),
+                    df=html.escape(item["degrees_of_freedom"]),
+                    p=html.escape(item["p_value"]),
+                    hypotheses=hypotheses_html,
+                    decision=html.escape(item["decision"]),
+                    interval=html.escape(item["confidence_interval"]),
+                    effect=html.escape(item["effect_size"]),
+                    interpretation=html.escape(item["interpretation"]),
+                    assumptions=assumptions_html,
+                )
+            )
+        inferential_html = (
+            "<h2>Statistik Inferensial</h2>"
+            + "<p>Uji dipilih secara eksplisit; periksa asumsi sebelum menafsirkan hasil.</p>"
+            + "".join(inferential_blocks)
+            if inferential_blocks
+            else ""
+        )
 
         return f"""<!DOCTYPE html>
 <html>
@@ -743,5 +907,6 @@ h2 {{ font-size: 14pt; text-align: center; margin: 20pt 0 9pt; }}
 <tr><td>Jumlah observasi</td><td>{total_rows} baris</td></tr>
 <tr><td>Jumlah variabel</td><td>{total_cols} kolom</td></tr>
 </tbody></table>
+{inferential_html}
 </body>
 </html>"""

@@ -9,18 +9,18 @@ Pastikan versi berikut sama-sama `7.0.0`:
 - `APP_VERSION` pada `build_windows_installer.bat`
 - `AppVersion` pada `installer/DatasetResearch.iss`
 
-Build harus menghasilkan `hasil_compile/DORA-v7.0.0-Setup.exe`.
+Build harus menghasilkan `hasil_compile/Data-Overview-Research-Assistant-v7.0.0-Setup.exe`.
 
 ## Langkah membuat release
 
 1. Jalankan tes yang relevan dan build ulang installer dengan `build_windows_installer.bat`.
-2. Uji installer dan pastikan nama/version asset adalah `DORA-v7.0.0-Setup.exe`.
+2. Uji installer dan pastikan nama/version asset adalah `Data-Overview-Research-Assistant-v7.0.0-Setup.exe`.
 3. Commit perubahan source, konfigurasi build, dan dokumentasi yang memang akan dirilis. Jangan commit `.env`, `data/config.json`, database/data pengguna, `.venv`, atau folder payload hasil build.
 4. Push commit rilis ke branch `main` di GitHub.
 5. Buka repository **Dataset-Research** di GitHub, pilih **Releases**, lalu **Draft a new release**.
 6. Pada **Choose a tag**, masukkan `v7.0.0` dan buat tag dari branch `main` yang sudah berisi commit rilis.
 7. Isi judul `DORA v7.0.0`, lalu tempel deskripsi siap-pakai di bawah.
-8. Unggah hanya `hasil_compile/DORA-v7.0.0-Setup.exe` sebagai asset.
+8. Unggah hanya `hasil_compile/Data-Overview-Research-Assistant-v7.0.0-Setup.exe` sebagai asset.
 9. Periksa tag, judul, deskripsi, dan asset, lalu pilih **Publish release**.
 
 Jika tag `v7.0.0` sudah ada, pastikan tag tersebut menunjuk commit yang benar. Jangan force-push atau memindahkan tag release yang sudah dipublikasikan.
@@ -45,7 +45,7 @@ DORA adalah aplikasi desktop untuk membantu peneliti meninjau dataset, menjalank
 
 ### Instalasi Windows
 
-1. Unduh `DORA-v7.0.0-Setup.exe` dari bagian **Assets**.
+1. Unduh `Data-Overview-Research-Assistant-v7.0.0-Setup.exe` dari bagian **Assets**.
 2. Jalankan installer. Instalasi berlaku untuk pengguna Windows saat ini dan tidak memerlukan hak administrator.
 3. Buka DORA dari shortcut Desktop atau Start Menu.
 

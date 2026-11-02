@@ -534,7 +534,7 @@ QLabel#overviewEmptyLoadedStatus { color: #344778; font-family: "Inter"; font-si
 /* Guided analysis editor */
 #editorAnalysisScroll, #editorAnalysisContent { background: var(--canvas); border: none; }
 QScrollArea#editorAnalysisScroll QScrollBar:vertical { width: 0; margin: 0; }
-#editorAnalysisStepsCard, #editorAnalysisCodeCard { background: #ffffff; border: 1px solid #d8e6fa; border-radius: 12px; }
+#editorAnalysisStepsCard, #editorAnalysisCodeCard, #editorAnalysisOutputCard { background: #ffffff; border: 1px solid #d8e6fa; border-radius: 12px; }
 #editorAnalysisPageTitle { color: #172033; font-family: "Inter"; font-size: 24px; font-weight: 700; }
 #editorAnalysisPageSubtitle { color: #596b94; font-family: "Inter"; font-size: 13px; }
 #editorAnalysisSectionTitle { color: #172033; font-family: "Inter"; font-size: 19px; font-weight: 700; }
@@ -549,7 +549,7 @@ QPushButton#editorAnalysisNotebookButton:hover { background: #f3f8ff; }
 #editorAnalysisStepList::item { border-radius: 6px; color: #0c1648; min-height: 36px; padding: 8px 12px; font-family: "Inter"; font-size: 13px; }
 #editorAnalysisStepList::item:hover { background: var(--canvas); }
 #editorAnalysisStepList::item:selected { background: #e8f3ff; color: #0063ff; font-weight: 600; }
-QPushButton#editorAnalysisStepActions { background: transparent; border: none; color: #596b94; font-family: "Inter"; font-size: 20px; min-width: 28px; min-height: 28px; padding: 0; }
+QPushButton#editorAnalysisStepActions { background: transparent; border: none; color: #596b94; font-family: "Inter"; font-size: 13px; font-weight: 600; min-width: 56px; min-height: 28px; padding: 0; }
 QPushButton#editorAnalysisStepActions:hover { background: #f3f8ff; border-radius: 6px; }
 QPushButton#editorAnalysisStepActions::menu-indicator { image: none; width: 0; }
 #editorAnalysisTemplateCombo, #editorAnalysisCategoryCombo, #editorAnalysisTargetCombo { background: var(--surface); border: 1px solid var(--border); border-radius: var(--button-radius); color: var(--ink); min-height: 40px; padding: 0 12px; }
@@ -566,6 +566,7 @@ QPlainTextEdit#editorAnalysisCodeEditor { background: #172338; border: 1px solid
 #editorAnalysisStatusText { color: #9aa9bc; font-family: "Intel One Mono", Consolas; font-size: 11px; }
 #editorAnalysisStatusLanguage { color: #c3e88d; font-family: "Intel One Mono", Consolas; font-size: 11px; font-weight: 600; }
 #editorAnalysisExecutionNote { background: var(--canvas); border-radius: var(--small-radius); color: var(--muted); font-size: 13px; padding: 8px 12px; }
+#editorAnalysisExecutionNote[running="true"] { color: #174F99; font-weight: 600; }
 #editorAnalysisOutputTabs { background: var(--surface); border: 1px solid var(--border); border-radius: var(--small-radius); }
 #editorAnalysisOutputTabs::pane { background: #ffffff; border: none; }
 QTabWidget#editorAnalysisOutputTabs QTabBar::tab { color: #718096; font-family: "Inter"; font-size: 13px; padding: 12px 20px; }

@@ -3,13 +3,13 @@ setlocal
 cd /d "%~dp0"
 
 set "PYTHON=.venv\Scripts\python.exe"
-set "APP_NAME=DORA-v7.0.0"
+set "APP_NAME=Data-Overview-Research-Assistant-v2.0.0-runtimefix"
 set "APP_EXE_NAME=DORA.exe"
-set "APP_VERSION=7.0.0"
-set "BUILD_DIR=build\installer-dora-v7.0.0"
+set "APP_VERSION=2.0.0"
+set "BUILD_DIR=build\installer-dora-v2.0.0-runtimefix"
 set "PAYLOAD_ROOT=hasil_compile\%APP_NAME%\payload"
 set "PAYLOAD_DIR=%PAYLOAD_ROOT%\DORA"
-set "INSTALLER=hasil_compile\DORA-v7.0.0-Setup.exe"
+set "INSTALLER=hasil_compile\Data-Overview-Research-Assistant-v2.0.0-Setup.exe"
 set "ISCC="
 
 if not exist "%PYTHON%" (
@@ -24,7 +24,13 @@ if not exist "installer\DatasetResearch.iss" (
 )
 
 echo [0/3] Preparing an incremental build for v%APP_VERSION%...
-if exist "%PAYLOAD_DIR%" rmdir /s /q "%PAYLOAD_DIR%"
+if exist "%PAYLOAD_DIR%" (
+    rmdir /s /q "%PAYLOAD_DIR%"
+    if exist "%PAYLOAD_DIR%" (
+        echo [ERROR] The application payload is locked. Close DORA and retry the build.
+        exit /b 1
+    )
+)
 if exist "%INSTALLER%" del /q "%INSTALLER%"
 if not exist "%BUILD_DIR%" mkdir "%BUILD_DIR%"
 if not exist "%PAYLOAD_ROOT%" mkdir "%PAYLOAD_ROOT%"

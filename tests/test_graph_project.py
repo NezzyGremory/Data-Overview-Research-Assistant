@@ -3,10 +3,12 @@
 import pandas as pd
 import pytest
 
+from app.core.exceptions import DatasetLoadError
 from app.ml.graph.project import (
     GraphHistoryStack,
     ProjectManager,
     compute_dataframe_hash,
+    compute_file_hash,
 )
 
 
@@ -46,6 +48,41 @@ def test_dataset_registration_and_hash(pm):
     # Hash should be deterministic
     h2 = compute_dataframe_hash(df)
     assert reg["file_hash"] == h2
+
+
+@pytest.mark.parametrize("suffix", ["csv", "jsonl", "parquet"])
+def test_file_registration_uses_shared_loader_for_tabular_formats(pm, tmp_path, suffix):
+    project = pm.create_project("Imported dataset")
+    frame = pd.DataFrame({"feature": [1, 2, 3], "target": ["a", "b", "a"]})
+    path = tmp_path / f"example.{suffix}"
+    if suffix == "csv":
+        frame.to_csv(path, index=False)
+    elif suffix == "jsonl":
+        frame.to_json(path, orient="records", lines=True)
+    else:
+        frame.to_parquet(path, index=False)
+
+    registration = pm.register_dataset(project["id"], path)
+
+    assert registration["row_count"] == 3
+    assert registration["column_count"] == 2
+    assert registration["columns"] == ["feature", "target"]
+    assert registration["file_hash"] == compute_file_hash(path)
+
+
+def test_file_registration_rejects_unreadable_dataset(pm, tmp_path):
+    project = pm.create_project("Invalid dataset")
+    path = tmp_path / "invalid.parquet"
+    path.write_text("not parquet", encoding="utf-8")
+
+    with pytest.raises(DatasetLoadError, match="Gagal membaca dataset"):
+        pm.register_dataset(project["id"], path)
+
+    with pm._get_connection() as connection:
+        count = connection.execute(
+            "SELECT COUNT(*) FROM datasets WHERE project_id = ?", (project["id"],)
+        ).fetchone()[0]
+    assert count == 0
 
 
 def test_graph_versioning_and_branching(pm):

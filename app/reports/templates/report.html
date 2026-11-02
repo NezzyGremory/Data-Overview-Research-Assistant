@@ -92,9 +92,13 @@ tr, .chart { page-break-inside: avoid; break-inside: avoid; }
 {% endfor %}{% else %}<p>Tidak ada temuan diagnostik kualitas data yang tercatat.</p>{% endif %}
 
 <h2>4. Evaluasi dan Kesiapan Machine Learning</h2>
-<p><b>Jenis tugas:</b> {{ primary_task_display }}{% if target_column %}<br><b>Variabel target:</b> {{ target_column }}{% endif %}</p>
+<p><b>Jenis tugas:</b> {{ primary_task_display }}{% if target_column %}<br><b>Variabel target:</b> {{ target_column }}{% endif %}<br><b>Dasar pemilihan:</b> {{ task_selection_label }}{% if task_selection_reason %}<br><b>Alasan:</b> {{ task_selection_reason }}{% endif %}</p>
 {% if ml_evaluated %}
 <p><b>Model dengan hasil terbaik:</b> {{ best_model_name }}{% if best_model_status_label %} <span class="meta">({{ best_model_status_label }})</span>{% endif %}<br><b>Metrik utama:</b> {{ best_model_score }}<br><b>Validasi:</b> {{ validation_protocol }}</p>
+{% if ml_config %}<p><b>Konfigurasi eksperimen:</b> {% if ml_config.selected_features %}{{ ml_config.selected_features|length }} fitur dipakai ({{ ml_config.selected_features[:20]|join(', ') }}{% if ml_config.selected_features|length > 20 %}, dan lainnya{% endif %}). {% endif %}{% if ml_config.test_size %}Porsi uji {{ '%.0f'|format(ml_config.test_size * 100) }}%. {% endif %}{% if ml_config.random_state is not none %}Seed {{ ml_config.random_state }}.{% endif %}</p>{% endif %}
+{% if excluded_target_copies %}<p><b>Pencegahan kebocoran target:</b> fitur yang identik dengan target dikeluarkan: {{ excluded_target_copies|join(', ') }}.</p>{% endif %}
+{% if final_test.status == 'EVALUATED' %}<p><b>Uji akhir pada data terpisah:</b> {{ final_test.method }}; {{ final_test_display }}.<br><b>Pemisahan:</b> {{ final_test.train_rows }} baris pengembangan, {{ final_test.test_rows }} baris uji. Data uji tidak dipakai untuk memilih model.</p>
+{% elif final_test.status %}<p><b>Uji akhir:</b> {{ final_test.status }}{% if final_test.reason %} — {{ final_test.reason }}{% endif %}</p>{% endif %}
 {% if candidate_models %}<h3>Hasil per model</h3>{% for model in candidate_models %}<div class="finding"><p><b>{{ loop.index }}. {{ model.method }}</b></p><p><b>Metrik:</b> {{ model.primary_metric_str }}{% if model.std_str != '-' %}; variasi: {{ model.std_str }}{% endif %}</p><p><b>Kekuatan:</b> {{ model.strengths }}</p><p><b>Keterbatasan:</b> {{ model.limitations }}</p></div>{% endfor %}{% endif %}
 {% else %}<p>Evaluasi model belum tersedia.</p>{% endif %}
 
@@ -132,7 +136,21 @@ tr, .chart { page-break-inside: avoid; break-inside: avoid; }
 {% if readiness_summary_note %}<p>{{ readiness_summary_note }}</p>{% endif %}
 {% endif %}
 
-<h2>5. Tinjauan Literatur dan Peta Penelitian</h2>
+<h2>5. Statistik Inferensial</h2>
+{% if inferential_results %}
+<p>Uji di bawah dijalankan setelah pengguna memilih metode dan variabel. Asumsi yang tercantum perlu diperiksa terhadap rancangan pengumpulan data; hasil ini sendiri tidak menunjukkan hubungan sebab-akibat.</p>
+{% for item in inferential_results %}<div class="finding">
+<h3>{{ loop.index }}. {{ item.test_name }} — {{ item.status }}</h3>
+<p><b>Variabel:</b> {{ item.variables }}<br><b>Jumlah observasi:</b> {{ item.sample_size }}<br><b>Statistik uji:</b> {{ item.statistic }}<br><b>Derajat bebas:</b> {{ item.degrees_of_freedom }}<br><b>P-value:</b> {{ item.p_value }}<br><b>Keputusan:</b> {{ item.decision }}</p>
+{% if item.hypothesis_null %}<p><b>H0:</b> {{ item.hypothesis_null }}<br><b>H1:</b> {{ item.hypothesis_alternative }}</p>{% endif %}
+<p><b>Interval kepercayaan 95%:</b> {{ item.confidence_interval }}<br><b>Ukuran efek:</b> {{ item.effect_size }}</p>
+{% if item.critical_values %}<p><b>Nilai kritis Anderson-Darling:</b> {{ item.critical_values }}</p>{% endif %}
+{% if item.interpretation %}<p><b>Interpretasi terbatas:</b> {{ item.interpretation }}</p>{% endif %}
+{% if item.assumptions %}<p><b>Asumsi dan pemeriksaan:</b></p><ul>{% for assumption in item.assumptions %}<li>[{{ assumption.status }}] {{ assumption.name }}: {{ assumption.detail }}</li>{% endfor %}</ul>{% endif %}
+</div>{% endfor %}
+{% else %}<p>Belum ada uji inferensial yang dijalankan secara eksplisit.</p>{% endif %}
+
+<h2>6. Tinjauan Literatur dan Peta Penelitian</h2>
 {% if research_executed %}
 <p><b>Bidang penelitian:</b> {{ research_domain }}{% if keywords_list %}<br><b>Kata kunci:</b> {{ keywords_list|join(', ') }}{% endif %}<br><b>Paper yang ditemukan:</b> {{ papers_count }}</p>
 {% if method_distribution %}<h3>Metode yang sering muncul</h3><ol>{% for method in method_distribution %}<li>{{ method.name or method.method or method.label or 'Metode' }} — {{ method.percentage or method.count or method.value or method.share or '-' }}{% if method.percentage is defined %}%{% endif %}</li>{% endfor %}</ol>{% endif %}
@@ -140,7 +158,7 @@ tr, .chart { page-break-inside: avoid; break-inside: avoid; }
 {% if papers_list %}<h3>Paper terkait</h3>{% for paper in papers_list %}<div class="paper"><p><b>{{ loop.index }}. {% if paper.url %}<a href="{{ paper.url }}">{{ paper.title }}</a>{% else %}{{ paper.title }}{% endif %}</b></p><p>{{ paper.authors_display }}{% if paper.year %} ({{ paper.year }}){% endif %}; {{ paper.relevance_display }}{% if paper.citation_display != 'Sitasi: -' %}; {{ paper.citation_display }}{% endif %}.</p>{% if paper.url %}<p><b>Sumber:</b> <a href="{{ paper.url }}">{{ paper.url }}</a></p>{% endif %}{% if paper.abstract %}<p>{{ paper.abstract }}</p>{% endif %}</div>{% endfor %}{% else %}<p>Penelusuran telah dijalankan, tetapi tidak ada paper yang ditemukan untuk ditampilkan.</p>{% endif %}
 {% else %}<p>Academic Research belum dijalankan.</p>{% endif %}
 
-<h2>6. Potensi Research Gap dan Saran Penelitian</h2>
+<h2>7. Potensi Research Gap dan Saran Penelitian</h2>
 <p>Bagian ini menunjukkan pola atau topik yang relatif kurang terwakili pada paper yang ditemukan. Indikasi ini bukan bukti bahwa topik belum pernah diteliti; verifikasi melalui penelusuran literatur yang lebih luas tetap diperlukan.</p>
 {% if research_gaps %}<ol>{% for gap in research_gaps %}<li>{{ gap }}</li>{% endfor %}</ol>{% else %}<p>Tidak ada kandidat research gap yang terdeteksi dari hasil pencarian ini.</p>{% endif %}
 {% if gap_explanation_lines %}<h3>Penjelasan dan rekomendasi</h3>{% for line in gap_explanation_lines %}<p>{{ line }}</p>{% endfor %}{% endif %}

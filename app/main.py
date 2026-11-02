@@ -90,6 +90,7 @@ def _run_packaged_editor_command() -> int | None:
 
     mode = sys.argv[1]
     if mode == "--dora-editor-kernel":
+        _ensure_subprocess_standard_streams()
         from app.ui.editor_notebook_kernel import main as kernel_main
 
         sys.argv = [sys.argv[0], *sys.argv[2:]]
@@ -97,11 +98,49 @@ def _run_packaged_editor_command() -> int | None:
         return 0
 
     if mode == "--dora-editor-pip":
+        _ensure_subprocess_standard_streams()
         from pip._internal.cli.main import main as pip_main
 
         return int(pip_main(sys.argv[2:]) or 0)
 
     return None
+
+
+def _ensure_subprocess_standard_streams() -> None:
+    """Restore stdio for windowed PyInstaller child commands.
+
+    A ``console=False`` executable starts with ``sys.stdout`` and
+    ``sys.stderr`` set to ``None`` when the OS did not attach a console.
+    Notebook Editor launches the same executable with inherited pipes, so
+    these descriptors should be used when available and safely discarded
+    otherwise.
+    """
+    stream_specs = (
+        ("stdin", 0, "r"),
+        ("stdout", 1, "w"),
+        ("stderr", 2, "w"),
+    )
+    for stream_name, file_descriptor, mode in stream_specs:
+        if getattr(sys, stream_name, None) is not None:
+            continue
+
+        stream_options = {"encoding": "utf-8", "errors": "replace"}
+        if mode == "w":
+            stream_options["buffering"] = 1
+
+        duplicated_descriptor = None
+        try:
+            os.fstat(file_descriptor)
+            duplicated_descriptor = os.dup(file_descriptor)
+            stream = os.fdopen(duplicated_descriptor, mode, **stream_options)
+        except (OSError, ValueError):
+            if duplicated_descriptor is not None:
+                try:
+                    os.close(duplicated_descriptor)
+                except OSError:
+                    pass
+            stream = open(os.devnull, mode, **stream_options)
+        setattr(sys, stream_name, stream)
 
 
 def main():
@@ -116,6 +155,9 @@ def main():
 
     QCoreApplication.setOrganizationName("DORA")
     QCoreApplication.setApplicationName("Dataset Research")
+    from app.core.runtime_packages import load_runtime_packages
+
+    load_runtime_packages()
     app = QApplication(sys.argv)
     from app.ui.startup_splash import StartupSplash
 

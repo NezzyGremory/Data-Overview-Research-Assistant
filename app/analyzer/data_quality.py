@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+import numpy as np
 import pandas as pd
 
 
@@ -14,7 +15,7 @@ class QualityDiagnosisItem:
     3. APA DAMPAKNYA?
     4. APA OPSI PENANGANANNYA?
     """
-    category: str                   # 'missing_values' | 'duplicates' | 'outliers' | 'identifiers' | 'constant_columns' | 'class_imbalance'
+    category: str                   # 'missing_values' | 'duplicates' | 'invalid_values' | 'outliers' | 'identifiers' | 'constant_columns' | 'class_imbalance'
     title: str                      # Judul ringkas diagnosis
     severity: str                   # 'critical' | 'warning' | 'info'
     problem: str                    # APA MASALAHNYA?
@@ -141,7 +142,52 @@ class DataQualityDiagnoser:
             )
 
         # =========================================================
-        # 3. OUTLIERS (IQR METHOD)
+        # 3. NON-FINITE NUMERIC VALUES (distinct from missing values)
+        # =========================================================
+        non_finite_columns = []
+        for column in dataframe.select_dtypes(include=["number"]).columns:
+            try:
+                values = dataframe[column].to_numpy(dtype=float, na_value=np.nan)
+                count = int(np.isinf(values).sum())
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if count:
+                non_finite_columns.append((str(column), count))
+
+        if non_finite_columns:
+            total_invalid = sum(count for _, count in non_finite_columns)
+            percentage = total_invalid / max(1, total_rows * total_cols) * 100
+            names = [name for name, _ in non_finite_columns]
+            diagnoses.append(
+                QualityDiagnosisItem(
+                    category="invalid_values",
+                    title="Nilai Numerik Tidak Terhingga",
+                    severity="critical",
+                    problem=(
+                        f"Ditemukan {total_invalid:,} nilai +Inf/-Inf pada kolom "
+                        + ", ".join(names)
+                        + "."
+                    ),
+                    magnitude=f"{total_invalid:,} sel ({percentage:.2f}% dari seluruh sel).",
+                    impact=(
+                        "Nilai tak terhingga bukan nilai kosong biasa dan dapat membuat "
+                        "statistik, scaling, atau training model gagal maupun menghasilkan metrik tidak valid."
+                    ),
+                    options=[
+                        "Periksa sumber dan satuan nilai; tentukan apakah nilai tersebut kesalahan perhitungan.",
+                        "Jika memang invalid, ubah menjadi missing lalu pilih strategi imputasi pada pipeline training.",
+                    ],
+                    affected_columns=names,
+                    metrics={
+                        "non_finite_count": total_invalid,
+                        "count_by_column": dict(non_finite_columns),
+                        "percentage_of_cells": percentage,
+                    },
+                )
+            )
+
+        # =========================================================
+        # 4. OUTLIERS (IQR METHOD)
         # =========================================================
         outlier_cols = []
         if outliers:
@@ -158,6 +204,10 @@ class DataQualityDiagnoser:
             ]
             for col in num_cols:
                 series = dataframe[col].dropna()
+                try:
+                    series = series[np.isfinite(series.to_numpy(dtype=float))]
+                except (TypeError, ValueError, OverflowError):
+                    continue
                 if len(series) > 0:
                     q1 = series.quantile(0.25)
                     q3 = series.quantile(0.75)

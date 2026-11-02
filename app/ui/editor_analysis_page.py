@@ -236,6 +236,11 @@ class EditorAnalysisPage(QWidget):
         "seaborn": "seaborn",
         "statsmodels": "statsmodels",
         "optuna": "optuna",
+        "torch": "torch",
+        "tensorflow": "tensorflow",
+        "transformers": "transformers",
+        "sentence_transformers": "sentence-transformers",
+        "shap": "shap",
         "yaml": "PyYAML",
         "pil": "Pillow",
         "cv2": "opencv-python-headless",
@@ -727,6 +732,7 @@ print(f"Rata-rata: {scores.mean():.3f} ± {scores.std():.3f}")
         self._run_timeout.setSingleShot(True)
         self._run_timeout.timeout.connect(self._on_run_timeout)
         self._graphics: list[QPixmap] = []
+        self._graph_labels: list[QLabel] = []
         self.template_groups = self._build_template_groups()
         application = QApplication.instance()
         if application is not None:
@@ -799,7 +805,7 @@ print(f"Rata-rata: {scores.mean():.3f} ± {scores.std():.3f}")
             )
         )
         dataset_menu.addSeparator()
-        choose_dataset_action = dataset_menu.addAction("Pilih file dataset…")
+        choose_dataset_action = dataset_menu.addAction("Pilih file dataset")
         choose_dataset_action.triggered.connect(self._choose_notebook_dataset)
         self.dataset_menu_button.setMenu(dataset_menu)
         self.dataset_menu_button.setToolTip(
@@ -826,11 +832,13 @@ print(f"Rata-rata: {scores.mean():.3f} ± {scores.std():.3f}")
         self.workspace.setSpacing(15)
         self.steps_card = self._build_steps_card()
         self.editor_card = self._build_editor_card()
-        self.editor_card.setFixedHeight(ui_px(766))
+        self.editor_card.setFixedHeight(ui_px(560))
         self.workspace.addWidget(self.steps_card, 12, Qt.AlignTop)
         self.workspace.addWidget(self.editor_card, 34, Qt.AlignTop)
-        self.root_layout.addLayout(self.workspace, 1)
+        self.root_layout.addLayout(self.workspace)
         self.root_layout.setAlignment(self.workspace, Qt.AlignTop)
+        self.output_card = self._build_output_card()
+        self.root_layout.addWidget(self.output_card)
 
         self.page_scroll.setWidget(container)
         outer.addWidget(self.page_scroll)
@@ -1115,9 +1123,9 @@ plt.tight_layout()
         heading = QLabel("Tahapan Analisis")
         heading.setObjectName("editorAnalysisSectionTitle")
         heading_row.addWidget(heading, 1)
-        self.step_actions_button = QPushButton("...")
+        self.step_actions_button = QPushButton("Aksi")
         self.step_actions_button.setObjectName("editorAnalysisStepActions")
-        self.step_actions_button.setFixedSize(28, 28)
+        self.step_actions_button.setFixedSize(56, 28)
         self.step_actions_button.setToolTip("Kelola langkah analisis dan sel notebook.")
         self.step_actions_menu = QMenu(self.step_actions_button)
         self._step_menu_actions = {}
@@ -1230,19 +1238,20 @@ plt.tight_layout()
         self.cell_type_combo.setFixedSize(112, 34)
         self.cell_type_combo.setToolTip("Jenis sel notebook yang sedang dipilih.")
 
-        self.execution_note = QLabel(
-            "Ctrl+Enter menjalankan sel. Shift+Enter menjalankan lalu berpindah ke sel berikutnya."
-        )
+        self.execution_note = QLabel("Skrip siap dijalankan")
         self.execution_note.setObjectName("editorAnalysisExecutionNote")
         self.execution_note.setWordWrap(True)
         self.execution_note.setParent(card)
-        self.execution_note.hide()
+        self.execution_note.setMinimumWidth(0)
+        self.execution_note.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.execution_note.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.execution_note.setAccessibleName("Status eksekusi skrip")
         self._run_opacity_effect = QGraphicsOpacityEffect(self.execution_note)
         self._run_opacity_effect.setOpacity(1.0)
         self.execution_note.setGraphicsEffect(self._run_opacity_effect)
         self._run_animation = QPropertyAnimation(self._run_opacity_effect, b"opacity", self)
-        self._run_animation.setDuration(850)
-        self._run_animation.setStartValue(0.45)
+        self._run_animation.setDuration(1000)
+        self._run_animation.setStartValue(0.82)
         self._run_animation.setEndValue(1.0)
         self._run_animation.setEasingCurve(QEasingCurve.InOutSine)
         self._run_animation.setLoopCount(-1)
@@ -1314,19 +1323,24 @@ plt.tight_layout()
         self.library_status.setWordWrap(True)
         layout.addWidget(self.library_status)
 
-        editor_heading = QHBoxLayout()
+        self.editor_heading = QBoxLayout(QBoxLayout.LeftToRight)
         self.editor_code_label = QLabel("Kode Python")
         self.editor_code_label.setObjectName("editorAnalysisFieldLabel")
-        editor_heading.addWidget(self.editor_code_label)
-        editor_heading.addStretch(1)
+        self.editor_heading.addWidget(self.editor_code_label, 1)
+        self.editor_heading_actions = QWidget()
+        self.editor_heading_actions_layout = QBoxLayout(
+            QBoxLayout.LeftToRight, self.editor_heading_actions
+        )
+        self.editor_heading_actions_layout.setContentsMargins(0, 0, 0, 0)
+        self.editor_heading_actions_layout.setSpacing(8)
         self.copy_button = QPushButton("Salin kode")
         self.copy_button.setObjectName("secondaryButton")
         self.copy_button.clicked.connect(self._copy_code)
-        editor_heading.addWidget(self.copy_button)
+        self.editor_heading_actions_layout.addWidget(self.copy_button)
         self.reset_button = QPushButton("Pulihkan template")
         self.reset_button.setObjectName("secondaryButton")
         self.reset_button.clicked.connect(self._reset_code)
-        editor_heading.addWidget(self.reset_button)
+        self.editor_heading_actions_layout.addWidget(self.reset_button)
         self.more_actions_menu = QMenu(self)
         for action_button in (self.run_all_button, self.cancel_button):
             action = QWidgetAction(self.more_actions_menu)
@@ -1348,9 +1362,10 @@ plt.tight_layout()
                 )
             )
         self.more_actions_menu.addSeparator()
-        editor_heading.addWidget(self.more_actions_button)
-        editor_heading.addWidget(self.run_button)
-        layout.addLayout(editor_heading)
+        self.editor_heading_actions_layout.addWidget(self.more_actions_button)
+        self.editor_heading_actions_layout.addWidget(self.run_button)
+        self.editor_heading.addWidget(self.editor_heading_actions)
+        layout.addLayout(self.editor_heading)
 
         self.target_row = QHBoxLayout()
         self.target_label = QLabel("Kolom target")
@@ -1424,10 +1439,25 @@ plt.tight_layout()
         status_layout.addWidget(self.code_language_label)
         layout.addWidget(self.code_statusbar)
         self.code_statusbar.setFixedHeight(20)
+        layout.addWidget(self.execution_note)
 
+        apply_card_shadow(card)
+        return card
+
+    def _build_output_card(self):
+        card = QFrame()
+        card.setObjectName("editorAnalysisOutputCard")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(8)
+
+        output_heading = QHBoxLayout()
         output_title = QLabel("Hasil eksekusi")
         output_title.setObjectName("editorAnalysisFieldLabel")
-        layout.addWidget(output_title)
+        output_heading.addWidget(output_title)
+        output_heading.addStretch(1)
+        layout.addLayout(output_heading)
+
         self.output_tabs = QTabWidget()
         self.output_tabs.setObjectName("editorAnalysisOutputTabs")
         self.output_text = QTextBrowser()
@@ -1452,7 +1482,8 @@ plt.tight_layout()
         self.graphics_layout.addWidget(self.graphics_empty)
         self.graphics_layout.addStretch(1)
         self.graphics_scroll.setWidget(self.graphics_content)
-        self.graphics_scroll.setMinimumHeight(140)
+        self.graphics_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.graphics_scroll.setMinimumHeight(440)
         self.output_tabs.addTab(self.graphics_scroll, "Grafik")
 
         self.library_output = QPlainTextEdit()
@@ -1460,7 +1491,7 @@ plt.tight_layout()
         self.library_output.setReadOnly(True)
         self.library_output.setPlaceholderText("Log pemasangan library akan tampil di sini.")
         self.output_tabs.addTab(self.library_output, "Library")
-        self.output_tabs.setMinimumHeight(210)
+        self.output_tabs.setMinimumHeight(500)
         layout.addWidget(self.output_tabs)
 
         apply_card_shadow(card)
@@ -2089,8 +2120,21 @@ plt.tight_layout()
         self.cancel_button.setEnabled(True)
         self.install_library_button.setEnabled(False)
         self.execution_note.setText("Menyiapkan sesi Python...")
-        self._run_animation.start()
+        self._set_execution_animation(True)
         self._ensure_environment(self._start_kernel)
+
+    def _set_execution_animation(self, active: bool):
+        active = bool(active)
+        self.execution_note.setProperty("running", active)
+        style = self.execution_note.style()
+        style.unpolish(self.execution_note)
+        style.polish(self.execution_note)
+        if active:
+            self._run_animation.start()
+        else:
+            self._run_animation.stop()
+            self._run_opacity_effect.setOpacity(1.0)
+        self.execution_note.update()
 
     @Slot()
     def _execute_code(self):
@@ -2144,11 +2188,14 @@ plt.tight_layout()
         self._kernel_ready = False
         process.setProgram(str(self._execution_interpreter()))
         if getattr(sys, "frozen", False):
+            from app.core.runtime_packages import runtime_package_directory
+
             process.setArguments([
                 "--dora-editor-kernel",
                 str(site_packages),
                 str(dataset_path),
                 str(self._project_workspace),
+                str(runtime_package_directory()),
             ])
         else:
             process.setArguments([
@@ -2362,7 +2409,7 @@ plt.tight_layout()
             f"Pemasangan {context['package']} otomatis gagal. Lihat log di tab Library."
         )
         if self._execution_queue:
-            self._run_animation.start()
+            self._set_execution_animation(True)
             self._send_next_cell()
         else:
             self._finish_execution(False)
@@ -2541,8 +2588,7 @@ plt.tight_layout()
 
     def _finish_execution(self, success: bool):
         self._run_timeout.stop()
-        self._run_animation.stop()
-        self._run_opacity_effect.setOpacity(1.0)
+        self._set_execution_animation(False)
         active_is_code = (
             0 <= self._selected_step < len(self._steps)
             and self._steps[self._selected_step].get("cell_type", "code") == "code"
@@ -2628,7 +2674,7 @@ plt.tight_layout()
         self.run_button.setEnabled(False)
         self.run_all_button.setEnabled(False)
         self.execution_note.setText("Pemasangan library sedang berjalan...")
-        self._run_animation.start()
+        self._set_execution_animation(True)
         self._ensure_environment(lambda: self._start_package_install(packages))
 
     def _start_package_install(self, packages: list[str]):
@@ -2688,8 +2734,7 @@ plt.tight_layout()
         self._read_package_output()
         self._package_process = None
         process.deleteLater()
-        self._run_animation.stop()
-        self._run_opacity_effect.setOpacity(1.0)
+        self._set_execution_animation(False)
         mode = self._package_install_mode
         self._package_install_mode = ""
         if mode == "auto":
@@ -2704,7 +2749,7 @@ plt.tight_layout()
                     f"{context['package']} terpasang. Menjalankan ulang sel notebook..."
                 )
                 self.execution_note.setText("Library siap; mengulangi sel yang tadi gagal...")
-                self._run_animation.start()
+                self._set_execution_animation(True)
                 self._send_next_cell()
             else:
                 self._append_library_log(
@@ -2763,9 +2808,18 @@ plt.tight_layout()
             label = QLabel()
             label.setObjectName("editorAnalysisOutputGraph")
             label.setAlignment(Qt.AlignCenter)
-            max_width = max(320, min(900, self.graphics_scroll.viewport().width() - 32))
-            label.setPixmap(pixmap.scaledToWidth(max_width, Qt.SmoothTransformation))
+            label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            label.setAccessibleName("Grafik analisis Klik kanan untuk ekspor gambar")
+            label.setToolTip("Klik kanan untuk ekspor gambar")
+            label.setContextMenuPolicy(Qt.CustomContextMenu)
+            label.customContextMenuRequested.connect(
+                lambda position, graph=pixmap, source=label: self._show_graph_context_menu(
+                    source, graph, position
+                )
+            )
+            self._graph_labels.append(label)
             self.graphics_layout.addWidget(label)
+        self._fit_graphs_to_viewport()
         if not self._graphics:
             self.graphics_empty = QLabel("Bagian ini belum menghasilkan grafik.")
             self.graphics_empty.setObjectName("editorAnalysisGraphicsEmpty")
@@ -2787,6 +2841,39 @@ plt.tight_layout()
                 widget.setParent(None)
                 widget.deleteLater()
         self._graphics = []
+        self._graph_labels = []
+
+    def _fit_graphs_to_viewport(self):
+        if not hasattr(self, "graphics_scroll"):
+            return
+        viewport_width = max(1, self.graphics_scroll.viewport().width() - 40)
+        display_width = min(viewport_width, 1600)
+        for label, pixmap in zip(self._graph_labels, self._graphics):
+            label.setPixmap(pixmap.scaledToWidth(display_width, Qt.SmoothTransformation))
+
+    def _show_graph_context_menu(self, label: QLabel, pixmap: QPixmap, position):
+        menu = QMenu(self)
+        export_action = menu.addAction("Ekspor gambar")
+        if menu.exec(label.mapToGlobal(position)) == export_action:
+            self._export_graph_image(pixmap)
+
+    def _export_graph_image(self, pixmap: QPixmap):
+        default_path = Path.home() / "grafik_analisis.png"
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Simpan grafik",
+            str(default_path),
+            "PNG (*.png)",
+        )
+        if not filename:
+            return
+        path = Path(filename)
+        if path.suffix.lower() != ".png":
+            path = path.with_suffix(".png")
+        if pixmap.save(str(path), "PNG"):
+            QMessageBox.information(self, "Ekspor grafik", "Grafik berhasil diekspor")
+        else:
+            QMessageBox.warning(self, "Ekspor grafik", "Grafik gagal disimpan")
 
     def _notebook_document(self) -> dict:
         cells = []
@@ -3219,8 +3306,7 @@ plt.tight_layout()
             self.run_all_button.setEnabled(False)
             self.install_library_button.setEnabled(False)
             self.cancel_button.setEnabled(False)
-            self._run_animation.stop()
-            self._run_opacity_effect.setOpacity(1.0)
+            self._set_execution_animation(False)
             return
 
         project_id = getattr(self._main_window, "current_project_id", None)
@@ -3313,8 +3399,7 @@ plt.tight_layout()
 
     def _cancel_environment_jobs(self):
         self._environment_callback = None
-        self._run_animation.stop()
-        self._run_opacity_effect.setOpacity(1.0)
+        self._set_execution_animation(False)
         for name in ("_environment_process", "_package_process"):
             process = getattr(self, name)
             setattr(self, name, None)
@@ -3368,15 +3453,26 @@ plt.tight_layout()
             self.editor_card.setMinimumHeight(0)
             self.editor_card.setMaximumHeight(16777215)
         else:
-            self.editor_card.setFixedHeight(ui_px(766))
+            self.editor_card.setFixedHeight(ui_px(560))
         self.template_toolbar.setDirection(
-            QBoxLayout.TopToBottom if logical_width(width) < 650 else QBoxLayout.LeftToRight
+            QBoxLayout.TopToBottom if logical_width(width) < 760 else QBoxLayout.LeftToRight
         )
         self.notebook_toolbar.setDirection(
-            QBoxLayout.TopToBottom if logical_width(width) < 650 else QBoxLayout.LeftToRight
+            QBoxLayout.TopToBottom if logical_width(width) < 760 else QBoxLayout.LeftToRight
         )
         self.library_row.setDirection(
             QBoxLayout.TopToBottom if logical_width(width) < 650 else QBoxLayout.LeftToRight
+        )
+        self.editor_heading.setDirection(
+            QBoxLayout.TopToBottom if logical_width(width) < 760 else QBoxLayout.LeftToRight
+        )
+        self.editor_heading_actions_layout.setDirection(
+            QBoxLayout.TopToBottom if logical_width(width) < 760 else QBoxLayout.LeftToRight
+        )
+        self.execution_note.setAlignment(
+            Qt.AlignLeft | Qt.AlignVCenter
+            if logical_width(width) < 650
+            else Qt.AlignRight | Qt.AlignVCenter
         )
         if compact:
             self.steps_card.setMinimumWidth(0)
@@ -3390,3 +3486,4 @@ plt.tight_layout()
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._apply_responsive_layout(event.size().width())
+        QTimer.singleShot(0, self._fit_graphs_to_viewport)

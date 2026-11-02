@@ -221,18 +221,14 @@ class ProjectManager:
             p = Path(data)
             file_path = str(p)
             file_hash = compute_file_hash(p)
-            # Try reading first few rows to get columns
-            try:
-                sample = pd.read_csv(p, nrows=2)
-                columns = list(sample.columns)
-                col_count = len(columns)
-                # Count total rows
-                with open(p, "rb") as f:
-                    row_count = max(0, sum(1 for _ in f) - 1)
-            except Exception:
-                columns = []
-                row_count = 0
-                col_count = 0
+            # The same loader used by the desktop workflow defines supported
+            # formats and normalized columns. A CSV-only probe silently stored
+            # zero rows/columns for valid Parquet, JSON, and Excel datasets.
+            from app.analyzer.loader import DatasetLoader
+
+            loaded = DatasetLoader().load(file_path)
+            columns = list(loaded.columns)
+            row_count, col_count = loaded.shape
 
         dataset_id = str(uuid.uuid4())[:8]
         now = _current_timestamp()

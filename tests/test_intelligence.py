@@ -192,6 +192,20 @@ def test_evaluation_can_be_disabled():
     print("Evaluation disabled: PASSED")
 
 
+def test_dataset_info_counts_string_categorical_dtypes_explicitly():
+    dataframe = pd.DataFrame({
+        "object_text": pd.Series(["a", "b"], dtype=object),
+        "string_text": pd.Series(["x", "y"], dtype="string"),
+        "category": pd.Series(pd.Categorical(["low", "high"])),
+        "flag": [True, False],
+        "value": [1, 2],
+    })
+
+    info = MLIntelligenceEngine._extract_dataset_info(dataframe, {})
+
+    assert info["categorical_features"] == 4
+
+
 if __name__ == "__main__":
 
     print("=== ML INTELLIGENCE ENGINE ===")

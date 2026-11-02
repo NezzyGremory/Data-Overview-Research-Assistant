@@ -138,7 +138,7 @@ class MLTargetDetector:
             )
             is_numeric = bool(pd.api.types.is_numeric_dtype(series))
             is_categorical = bool(
-                pd.api.types.is_categorical_dtype(series)
+                isinstance(series.dtype, pd.CategoricalDtype)
                 or pd.api.types.is_object_dtype(series)
                 or pd.api.types.is_string_dtype(series)
             )

@@ -123,6 +123,22 @@ class Database:
                         ON DELETE CASCADE
                 );
 
+                CREATE TABLE IF NOT EXISTS ml_experiments (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id INTEGER NOT NULL,
+                    dataset_fingerprint_json TEXT NOT NULL,
+                    options_json TEXT NOT NULL,
+                    result_json TEXT NOT NULL,
+                    task TEXT,
+                    target TEXT,
+                    selected_method TEXT,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_ml_experiments_project
+                ON ml_experiments(project_id, id DESC);
+
                 CREATE TABLE IF NOT EXISTS papers (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
 

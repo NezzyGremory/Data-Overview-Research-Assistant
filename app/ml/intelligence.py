@@ -44,6 +44,9 @@ class MLIntelligenceEngine:
         target_override: Optional[str] = None,
         time_column: Optional[str] = None,
         requested_methods: Optional[list[str]] = None,
+        selected_features: Optional[list[str]] = None,
+        test_size: Optional[float] = None,
+        cv_folds: Optional[int] = None,
     ) -> Dict[str, Any]:
         if dataframe is None or dataframe.empty:
             return self._error("Dataset kosong.")
@@ -82,12 +85,20 @@ class MLIntelligenceEngine:
                 "task": task,
                 "label": MLTaskDetector.TASK_LABELS.get(task, task.replace("_", " ").title()),
                 "target": target,
-                "score": 100,
-                "reasons": ["Task dipilih manual oleh pengguna."],
+                "score": None,
+                "confidence": None,
+                "selection_mode": "manual",
+                "status": "DIPILIH PENGGUNA",
+                "reasons": ["Task dan target dikonfirmasi oleh pengguna sebelum training."],
             }
             task_result = dict(task_result)
             task_result["primary_task"] = primary_task
             task_result["selection_mode"] = "manual"
+            task_result["status"] = "DIPILIH PENGGUNA"
+            task_result["message"] = (
+                "Task dan target mengikuti pilihan pengguna. "
+                "Metrik model dihitung dari dataset dan metode yang dijalankan."
+            )
         elif task == "time_series_forecasting":
             target = target or next(
                 (column for column in dataframe.select_dtypes(include=["number"]).columns),
@@ -110,6 +121,35 @@ class MLIntelligenceEngine:
             dataframe,
             fingerprint,
         )
+
+        if test_size is not None and not 0.0 < test_size < 0.5:
+            return self._error("Porsi data uji harus lebih dari 0% dan kurang dari 50%.")
+        if cv_folds is not None and not 2 <= cv_folds <= 10:
+            return self._error("Jumlah fold validasi harus berada antara 2 dan 10.")
+
+        evaluator = self.evaluator
+        if isinstance(self.evaluator, MLEvaluator) and (test_size is not None or cv_folds is not None):
+            evaluator = MLEvaluator(
+                test_size=test_size if test_size is not None else self.evaluator.test_size,
+                cv=cv_folds if cv_folds is not None else self.evaluator.cv,
+                random_state=self.evaluator.random_state,
+                max_cv_rows=self.evaluator.max_cv_rows,
+                n_jobs=self.evaluator.n_jobs,
+            )
+
+        evaluation_frame = dataframe
+        if selected_features is not None and task != "time_series_forecasting":
+            invalid = [column for column in selected_features if column not in dataframe.columns]
+            if invalid:
+                return self._error(f"Fitur tidak ditemukan: {invalid[0]}")
+            if not selected_features:
+                return self._error("Pilih minimal satu fitur untuk evaluasi ML.")
+            if target in selected_features and task not in {"clustering", "anomaly_detection"}:
+                return self._error("Kolom target tidak boleh dipakai sebagai fitur.")
+            columns = list(dict.fromkeys(selected_features))
+            if target is not None and target not in columns and task not in {"clustering", "anomaly_detection"}:
+                columns.append(target)
+            evaluation_frame = dataframe.loc[:, columns]
 
         # ---------------------------------------------------------
         # Knowledge base is NOT the ranking mechanism.
@@ -157,7 +197,7 @@ class MLIntelligenceEngine:
             if can_evaluate:
                 try:
                     eval_kwargs: Dict[str, Any] = {
-                        "dataframe": dataframe,
+                        "dataframe": evaluation_frame,
                         "task": str(task),
                         "methods": requested_methods,
                     }
@@ -166,7 +206,7 @@ class MLIntelligenceEngine:
                     if task == "time_series_forecasting":
                         eval_kwargs["time_column"] = time_column
 
-                    evaluation = self.evaluator.evaluate(**eval_kwargs)
+                    evaluation = evaluator.evaluate(**eval_kwargs)
                 except Exception as exc:
                     evaluation = {
                         "status": "ERROR",
@@ -174,6 +214,19 @@ class MLIntelligenceEngine:
                         "result_count": 0,
                         "message": f"Evaluation gagal: {exc}",
                     }
+
+        evaluation["config"] = {
+            "selected_features": (
+                [str(time_column)] if time_column else []
+            ) if task == "time_series_forecasting" else [
+                str(column) for column in evaluation_frame.columns if column != target
+            ],
+            "time_column": time_column if task == "time_series_forecasting" else None,
+            "test_size": getattr(evaluator, "test_size", None),
+            "cv_folds": getattr(evaluator, "cv", None),
+            "random_state": getattr(evaluator, "random_state", None),
+            "max_cv_rows": getattr(evaluator, "max_cv_rows", None),
+        }
 
         # The recommendation list is created FROM empirical evaluation.
         empirical_recommendations = self._build_empirical_recommendation(
@@ -289,12 +342,14 @@ class MLIntelligenceEngine:
             elif "r2_score" in metrics:
                 score_type = "r2_score"
                 score = float(metrics.get("r2_score", 0.0))
-            elif "cluster_score" in metrics:
-                score_type = "cluster_score"
-                score = float(metrics.get("cluster_score", 0.0))
             elif "silhouette_score" in metrics:
                 score_type = "silhouette_score"
                 score = float(metrics.get("silhouette_score", 0.0))
+            elif "cluster_score" in metrics:
+                # Compatibility with results saved before silhouette became
+                # the primary clustering metric.
+                score_type = "cluster_score"
+                score = float(metrics.get("cluster_score", 0.0))
             elif "score_spread" in metrics:
                 score_type = "score_spread"
                 score = float(metrics.get("score_spread", 0.0))
@@ -414,17 +469,20 @@ class MLIntelligenceEngine:
         dataframe: pd.DataFrame,
         fingerprint: Dict[str, Any],
     ) -> Dict[str, Any]:
+        categorical_feature_count = sum(
+            pd.api.types.is_object_dtype(dtype)
+            or pd.api.types.is_string_dtype(dtype)
+            or isinstance(dtype, pd.CategoricalDtype)
+            or pd.api.types.is_bool_dtype(dtype)
+            for dtype in dataframe.dtypes
+        )
         return {
             "rows": int(len(dataframe)),
             "columns": int(len(dataframe.columns)),
             "numeric_features": int(
                 dataframe.select_dtypes(include=["number"]).shape[1]
             ),
-            "categorical_features": int(
-                dataframe.select_dtypes(
-                    include=["object", "category", "bool"]
-                ).shape[1]
-            ),
+            "categorical_features": int(categorical_feature_count),
             "datetime_features": int(
                 dataframe.select_dtypes(include=["datetime"]).shape[1]
             ),

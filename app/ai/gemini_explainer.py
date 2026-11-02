@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import tempfile
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -11,52 +12,80 @@ import httpx
 
 from app.ai.local_explainer import LocalAcademicExplainer
 
-# In-memory explanation cache: {fingerprint: (narrative, source)}
-_EXPLANATION_CACHE: Dict[str, Tuple[str, str]] = {}
+# In-memory explanation cache: {fingerprint: (narrative, source, key fingerprint)}
+_EXPLANATION_CACHE: Dict[str, Tuple[str, ...]] = {}
 _QUOTA_BACKOFF: Dict[str, Tuple[str, float]] = {}
 
 
 def get_saved_api_key() -> str | None:
     """
-    Mengambil API key dari environment variable atau file konfigurasi lokal.
-    Memudahkan aplikasi saat di-compile menjadi .exe tanpa harus setup .env manual.
+    Ambil key pilihan pengguna dari config lokal, lalu fallback ke environment.
+
+    Key dari UI mengalahkan environment. Jika tidak ada key UI, gunakan key
+    environment bila tersedia.
     """
     from app.core.config import get_data_dir, init_environment
     init_environment()
 
-    # 1. Cek environment variable
-    env_key = os.getenv("GEMINI_API_KEY")
-    if env_key and env_key.strip():
-        return env_key.strip()
-
-    # 2. Cek file config lokal data/config.json
+    # Pengaturan dari UI harus dapat mengganti key environment dan menghapusnya.
     config_path = get_data_dir() / "config.json"
     if config_path.exists():
         try:
             data = json.loads(config_path.read_text(encoding="utf-8"))
-            saved = data.get("gemini_api_key")
-            if saved and str(saved).strip():
-                return str(saved).strip()
+            if isinstance(data, dict) and "gemini_api_key" in data:
+                saved = data.get("gemini_api_key")
+                normalized = str(saved or "").strip()
+                if normalized:
+                    return normalized
         except Exception:
             pass
 
-    return None
+    env_key = os.getenv("GEMINI_API_KEY", "").strip()
+    return env_key or None
 
 
 def save_api_key(api_key: str) -> None:
-    """Menyimpan API key ke data/config.json agar persisten across session."""
+    """Save the optional user key atomically without discarding other settings."""
     from app.core.config import get_data_dir
 
     config_path = get_data_dir() / "config.json"
     config_path.parent.mkdir(parents=True, exist_ok=True)
-    data = {}
+    data: dict[str, Any] = {}
     if config_path.exists():
         try:
-            data = json.loads(config_path.read_text(encoding="utf-8"))
-        except Exception:
-            data = {}
-    data["gemini_api_key"] = api_key.strip()
-    config_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            existing = json.loads(config_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise ValueError("File konfigurasi tidak dapat dibaca; pengaturan tidak diubah.") from error
+        if not isinstance(existing, dict):
+            raise ValueError("Format file konfigurasi tidak valid; pengaturan tidak diubah.")
+        data = existing
+
+    normalized_key = str(api_key or "").strip()
+    if normalized_key:
+        data["gemini_api_key"] = normalized_key
+    else:
+        data.pop("gemini_api_key", None)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            newline="\n",
+            dir=config_path.parent,
+            prefix="config-",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+            json.dump(data, temporary_file, indent=2, ensure_ascii=False)
+            temporary_file.write("\n")
+        os.replace(temporary_path, config_path)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
+    _EXPLANATION_CACHE.clear()
+    _QUOTA_BACKOFF.clear()
 
 
 class GeminiDatasetExplainer:
@@ -84,7 +113,7 @@ class GeminiDatasetExplainer:
         api_key: str | None = None,
         model: str | None = None,
     ) -> None:
-        raw_key = api_key or get_saved_api_key()
+        raw_key = get_saved_api_key() if api_key is None else str(api_key)
         self.raw_api_key = raw_key
         # Parse multiple keys separated by comma or semicolon
         self.api_keys: List[str] = (
@@ -135,43 +164,52 @@ class GeminiDatasetExplainer:
         # 1. Cek Caching berdasarkan SHA-256 fingerprint
         fp = analysis.get("fingerprint") or {}
         fp_hash = fp.get("fingerprint") if isinstance(fp, dict) else None
+        if not isinstance(fp_hash, str) or not fp_hash.strip():
+            fp_hash = None
         key_fingerprint = hashlib.sha256("\0".join(self.api_keys).encode("utf-8")).hexdigest()
         if fp_hash and fp_hash in _EXPLANATION_CACHE:
-            cached_text, cached_source = _EXPLANATION_CACHE[fp_hash]
-            if cached_source == "local_rate_limited":
-                backoff = _QUOTA_BACKOFF.get(fp_hash)
-                if (
-                    backoff
-                    and backoff[0] == key_fingerprint
-                    and time.monotonic() < backoff[1]
-                ):
-                    self.last_source = "local"
-                    self.last_error = "Batas permintaan Gemini tercapai; hasil lokal dipakai untuk analisis ini."
-                    return cached_text, "local"
+            cached_entry = _EXPLANATION_CACHE[fp_hash]
+            cached_text, cached_source = cached_entry[:2]
+            cached_key_fingerprint = cached_entry[2] if len(cached_entry) > 2 else ""
+            if cached_key_fingerprint != key_fingerprint:
                 _EXPLANATION_CACHE.pop(fp_hash, None)
                 _QUOTA_BACKOFF.pop(fp_hash, None)
-                cached_source = ""
-            # Do not let an old local fallback hide a newly configured API key
-            # or prevent a retry after a temporary cloud outage.
-            if cached_source == "gemini" or not self.cloud_enabled:
-                self.last_source = cached_source
-                if cached_source == "local" and not self.cloud_enabled:
-                    self.last_error = "API key Gemini belum diatur."
-                return cached_text, cached_source
+            else:
+                if cached_source == "local_rate_limited":
+                    backoff = _QUOTA_BACKOFF.get(fp_hash)
+                    if backoff and backoff[0] == key_fingerprint and time.monotonic() < backoff[1]:
+                        self.last_source = "local"
+                        self.last_error = "Batas permintaan Gemini tercapai; hasil lokal dipakai untuk analisis ini."
+                        return cached_text, "local"
+                    _EXPLANATION_CACHE.pop(fp_hash, None)
+                    _QUOTA_BACKOFF.pop(fp_hash, None)
+                    cached_source = ""
+                # Do not let an old local fallback hide a newly configured API key
+                # or prevent a retry after a temporary cloud outage.
+                if cached_source == "gemini" or not self.cloud_enabled:
+                    self.last_source = cached_source
+                    self.last_error = "" if cached_source == "gemini" else "API key Gemini belum diatur."
+                    return cached_text, cached_source
 
         # 2. Jika tidak ada API key -> langsung gunakan LocalAcademicExplainer
         if not self.cloud_enabled:
-            local_text = self.local_explainer.explain(analysis)
+            local_text = self._local_explanation(analysis)
             if fp_hash:
-                _EXPLANATION_CACHE[fp_hash] = (local_text, "local")
+                _EXPLANATION_CACHE[fp_hash] = (local_text, "local", key_fingerprint)
             self.last_source = "local"
             self.last_error = "API key Gemini belum diatur."
             return local_text, "local"
 
         # 3. Ada API key -> coba panggil Gemini dengan multi-key dan model fallback
-        compact = self._compact_analysis(analysis)
-        prompt = self._build_prompt(compact)
-        models = self._models_to_try()
+        try:
+            compact = self._compact_analysis(analysis)
+            prompt = self._build_prompt(compact)
+            models = self._models_to_try()
+        except Exception:
+            local_text = self._local_explanation(analysis)
+            self.last_source = "local"
+            self.last_error = "Ringkasan analisis tidak dapat disiapkan untuk Gemini."
+            return local_text, "local"
 
         gemini_success = False
         gemini_text = ""
@@ -276,6 +314,7 @@ class GeminiDatasetExplainer:
                             continue
                         break
                     except Exception:
+                        failures.append(f"{model_name}: respons Gemini tidak dapat diproses")
                         break
 
                 if gemini_success or key_rejected or quota_limited:
@@ -287,21 +326,28 @@ class GeminiDatasetExplainer:
         # 4. Jika Gemini berhasil -> simpan cache dan kembalikan
         if gemini_success and gemini_text:
             if fp_hash:
-                _EXPLANATION_CACHE[fp_hash] = (gemini_text, "gemini")
+                _EXPLANATION_CACHE[fp_hash] = (gemini_text, "gemini", key_fingerprint)
             self.last_source = "gemini"
             self.last_error = ""
             return gemini_text, "gemini"
 
         # 5. Jika Gemini gagal (limit 429, timeout, offline) -> Auto-Fallback Lokal
-        local_text = self.local_explainer.explain(analysis)
+        local_text = self._local_explanation(analysis)
         self.last_source = "local"
         self.last_error = "; ".join(dict.fromkeys(failures)) or "Gemini tidak memberi respons."
         if quota_limited and fp_hash:
             # Avoid repeatedly spending requests on the same result after a
             # quota response. Retry after a short cooldown or a key change.
-            _EXPLANATION_CACHE[fp_hash] = (local_text, "local_rate_limited")
+            _EXPLANATION_CACHE[fp_hash] = (local_text, "local_rate_limited", key_fingerprint)
             _QUOTA_BACKOFF[fp_hash] = (key_fingerprint, time.monotonic() + 60.0)
         return local_text, "local"
+
+    def _local_explanation(self, analysis: Dict[str, Any]) -> str:
+        """Keep malformed local inputs from escaping into the UI worker."""
+        try:
+            return self.local_explainer.explain(analysis)
+        except Exception:
+            return "Penjelasan lokal belum dapat dibuat dari hasil analisis ini. Jalankan ulang analisis dataset."
 
     def _models_to_try(self) -> List[str]:
         """Daftar model resmi yang dicoba berurutan."""

@@ -1,6 +1,6 @@
 # Windows Installer
 
-The installer build creates a per-user Windows setup executable. It creates the install directory under `%LOCALAPPDATA%\Programs\DORA`, always creates Desktop and Start Menu shortcuts, and includes an uninstaller. Administrator permission is not required.
+The installer build creates a per-user Windows setup executable for **Data Overview & Research Assistant**. It installs under `%LOCALAPPDATA%\Programs\DORA`, creates Desktop and Start Menu shortcuts with the product name, and includes an uninstaller. Administrator permission is not required.
 
 ## Prerequisites
 
@@ -20,10 +20,10 @@ Open PowerShell in the repository folder and run:
 All compiled output is kept in the new `hasil_compile` directory. The installer is written to:
 
 ```text
-hasil_compile\DORA-v7.0.0-Setup.exe
+hasil_compile\Data-Overview-Research-Assistant-v2.0.0-Setup.exe
 ```
 
-The standalone application folder is also available at `hasil_compile\DORA-v7.0.0\payload\DORA\`. The build bundles the application with PyInstaller, then compiles the setup program with Inno Setup.
+The standalone application folder is also available at `hasil_compile\Data-Overview-Research-Assistant-v2.0.0-runtimefix\payload\DORA\`. The build bundles the application with PyInstaller, then compiles the setup program with Inno Setup.
 
 ## Existing Data
 

@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 
 
@@ -48,39 +49,59 @@ class DatasetStatistics:
                 )
 
             elif pd.api.types.is_numeric_dtype(series):
-                # Reuse the filtered series for every statistic. Repeated
-                # dropna() calls each allocate and scan a copy of this column.
                 non_missing = series.dropna()
+                # Infinity is not a valid observation for finite descriptive
+                # statistics. Keep its count separate from actual missing data.
+                if np.iscomplexobj(non_missing.to_numpy()):
+                    finite = non_missing.iloc[0:0]
+                    result["numeric_summary_status"] = "unsupported_complex"
+                else:
+                    try:
+                        values = non_missing.to_numpy(dtype=float, na_value=np.nan)
+                        finite = non_missing.iloc[np.flatnonzero(np.isfinite(values))]
+                    except (TypeError, ValueError, OverflowError):
+                        finite = non_missing.iloc[0:0]
+                        result["numeric_summary_status"] = "conversion_failed"
+                result["non_finite_count"] = int(len(non_missing) - len(finite)) if "numeric_summary_status" not in result else None
+                result["finite_count"] = int(len(finite))
                 result.update(
                     {
-                        "mean": float(non_missing.mean())
-                        if not non_missing.empty
+                        "mean": float(finite.mean())
+                        if not finite.empty
                         else None,
-                        "median": float(non_missing.median())
-                        if not non_missing.empty
+                        "median": float(finite.median())
+                        if not finite.empty
                         else None,
-                        "std": float(non_missing.std())
-                        if not non_missing.empty
+                        "std": float(finite.std())
+                        if not finite.empty
                         else None,
-                        "min": float(non_missing.min())
-                        if not non_missing.empty
+                        "min": float(finite.min())
+                        if not finite.empty
                         else None,
-                        "max": float(non_missing.max())
-                        if not non_missing.empty
+                        "max": float(finite.max())
+                        if not finite.empty
                         else None,
-                        "q1": float(non_missing.quantile(0.25))
-                        if not non_missing.empty
+                        "q1": float(finite.quantile(0.25))
+                        if not finite.empty
                         else None,
-                        "q3": float(non_missing.quantile(0.75))
-                        if not non_missing.empty
+                        "q3": float(finite.quantile(0.75))
+                        if not finite.empty
                         else None,
-                        "skewness": float(non_missing.skew())
-                        if not non_missing.empty
+                        "skewness": float(finite.skew())
+                        if not finite.empty
                         else None,
                     }
                 )
+                for metric in ("mean", "median", "std", "min", "max", "q1", "q3", "skewness"):
+                    value = result[metric]
+                    if value is not None and not np.isfinite(value):
+                        result[metric] = None
 
-            elif pd.api.types.is_object_dtype(series) or pd.api.types.is_categorical_dtype(series):
+            elif (
+                pd.api.types.is_object_dtype(series)
+                or pd.api.types.is_string_dtype(series)
+                or isinstance(series.dtype, pd.CategoricalDtype)
+            ):
                 value_counts = series.value_counts(dropna=True)
 
                 result.update(

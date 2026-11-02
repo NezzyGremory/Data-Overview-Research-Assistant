@@ -56,11 +56,13 @@ See [`docs/web_deployment.md`](docs/web_deployment.md) for API endpoints, access
 
 ### Dataset exploration
 
-- Load local CSV, TSV, Excel (`.xlsx` / `.xls`), JSON, or Parquet files.
+- Load local CSV, TSV, Excel (`.xlsx` / `.xls`), JSON/JSONL, or Parquet files.
 - Search and download tabular datasets from Kaggle and Hugging Face through the Dataset Search page.
 - Review dataset shape, column types, descriptive statistics, missing values, duplicates, outliers, correlations, and data-quality signals.
 - Create cleaned dataset versions and keep dataset revisions in the local workspace.
 - Review ML-readiness information such as target candidates, class balance, data leakage signals, and preprocessing guidance.
+
+The [desktop analysis guide](docs/dora_user_guide.md) explains task and target selection, validation results, and supported file formats. Current implementation coverage and scientific limits are tracked in [the audit](docs/dora_comprehensive_audit.md) and [implementation status](docs/dora_implementation_status.md).
 
 ### Machine-learning workflows
 

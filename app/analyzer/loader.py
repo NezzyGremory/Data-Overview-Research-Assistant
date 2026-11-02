@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 from collections import Counter
 from io import StringIO
 from pathlib import Path
@@ -26,9 +27,9 @@ class DatasetLoader:
     ENCODINGS = ["utf-8-sig", "utf-8", "cp1252", "latin1"]
     CSV_ENGINES = ("c", "python")
 
-    SUPPORTED_SUFFIXES = {".csv", ".tsv", ".xlsx", ".xls", ".json", ".parquet"}
+    SUPPORTED_SUFFIXES = {".csv", ".tsv", ".xlsx", ".xls", ".json", ".jsonl", ".parquet"}
 
-    def load(self, file_path: str, chunksize: int = 100_000) -> pd.DataFrame:
+    def load(self, file_path: str, chunksize: int | None = None) -> pd.DataFrame:
         """Baca CSV, Excel, JSON, atau Parquet dan normalkan placeholder."""
         path = Path(file_path)
         if not path.exists():
@@ -46,7 +47,7 @@ class DatasetLoader:
         suffix = path.suffix.lower()
         if suffix not in self.SUPPORTED_SUFFIXES:
             raise DatasetLoadError(
-                "Format tidak didukung. Gunakan CSV, TSV, XLSX, XLS, JSON, atau Parquet."
+                "Format tidak didukung. Gunakan CSV, TSV, XLSX, XLS, JSON, JSONL, atau Parquet."
             )
         try:
             if suffix in {".csv", ".tsv"}:
@@ -66,6 +67,8 @@ class DatasetLoader:
                 dataframe = pd.read_excel(path)
             elif suffix == ".json":
                 dataframe = pd.read_json(path)
+            elif suffix == ".jsonl":
+                dataframe = pd.read_json(path, lines=True)
             else:
                 dataframe = pd.read_parquet(path)
         except UnicodeDecodeError as error:
@@ -85,7 +88,7 @@ class DatasetLoader:
 
         return self._finalize_dataframe(dataframe)
 
-    def load_csv(self, file_path: str, chunksize: int = 100_000) -> pd.DataFrame:
+    def load_csv(self, file_path: str, chunksize: int | None = None) -> pd.DataFrame:
         """Wrapper kompatibel untuk pemanggil lama yang khusus membaca CSV."""
         if Path(file_path).suffix.lower() != ".csv":
             raise DatasetLoadError("Format dataset harus CSV.")
@@ -102,10 +105,33 @@ class DatasetLoader:
 
         # Clean up accidental whitespace/BOM in column names while preserving
         # the actual data values.
-        dataframe.columns = [
+        normalized_columns = [
             str(column).replace("\ufeff", "").strip()
             for column in dataframe.columns
         ]
+        if any(not name for name in normalized_columns):
+            raise DatasetLoadError("Dataset memiliki nama kolom kosong setelah normalisasi.")
+        duplicate_names = [name for name, count in Counter(normalized_columns).items() if count > 1]
+        if duplicate_names:
+            raise DatasetLoadError(
+                "Nama kolom menjadi duplikat setelah normalisasi: " + ", ".join(duplicate_names)
+            )
+        dataframe.columns = normalized_columns
+
+        # JSON/Parquet can store dictionaries and arrays inside cells. Convert
+        # those cells to stable text so profiling and missing-value checks can
+        # treat them as categorical values without crashing on unhashable data.
+        for column in dataframe.columns:
+            series = dataframe[column]
+            if not pd.api.types.is_object_dtype(series.dtype):
+                continue
+            if series.map(lambda value: isinstance(value, (dict, list, tuple, set))).any():
+                dataframe[column] = series.map(
+                    lambda value: json.dumps(
+                        sorted(value, key=str) if isinstance(value, set) else value,
+                        ensure_ascii=False, sort_keys=True, default=str,
+                    ) if isinstance(value, (dict, list, tuple, set)) else value
+                )
 
         return normalize_missing_values(dataframe)
 

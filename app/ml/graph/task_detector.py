@@ -100,32 +100,18 @@ def profile_dataset(df: pd.DataFrame, target_column: Optional[str] = None) -> Di
 
 
 def guess_target_column(df: pd.DataFrame) -> Optional[str]:
-    """Smart heuristic to identify candidate target column in a dataframe."""
+    """Reuse the workspace detector instead of assuming the last column is a target."""
     if df.empty or len(df.columns) == 0:
         return None
+    from app.ml.task_detector import MLTaskDetector
 
-    # 1. Look for obvious target names
-    target_keywords = (
-        "target", "label", "class", "survived", "y", "outcome",
-        "churn", "status", "price", "diagnosis", "response",
-        "default", "approved", "revenue", "salary"
-    )
-    for col in df.columns:
-        if str(col).lower().strip() in target_keywords:
-            return str(col)
-
-    for col in df.columns:
-        col_str = str(col).lower()
-        if any(kw in col_str for kw in ("target", "label", "class")):
-            return str(col)
-
-    # 2. Check the last column (standard convention), avoiding monotonic IDs
-    last_col = df.columns[-1]
-    if len(df) > 5 and df[last_col].nunique() == len(df) and pd.api.types.is_numeric_dtype(df[last_col]):
-        for col in reversed(df.columns[:-1]):
-            if df[col].nunique() < len(df):
-                return str(col)
-    return str(last_col)
+    primary = MLTaskDetector().detect({}, dataframe=df).get("primary_task") or {}
+    if primary.get("task") not in {
+        "binary_classification", "multiclass_classification", "regression"
+    }:
+        return None
+    target_name = primary.get("target")
+    return str(target_name) if target_name in df.columns else None
 
 
 def detect_task(
@@ -143,8 +129,8 @@ def detect_task(
         return {
             "task_type": "clustering",
             "target_column": None,
-            "confidence": 0.90,
-            "reason": "Tidak ada target yang ditentukan; task otomatis diarahkan ke Unsupervised Clustering.",
+            "confidence": 0.0,
+            "reason": "Target supervised belum dikonfirmasi. Clustering tersedia tanpa target; pilih kolom target bila tujuan Anda klasifikasi atau regresi.",
             "profile": profile,
         }
 

@@ -42,7 +42,16 @@ from app.ml.graph.project import GraphHistoryStack, compute_dataframe_hash
 PORT_COLORS = {"table": "#0071C2", "estimator": "#8B5CF6", "model": "#098E00", "metrics": "#E09A00"}
 RESULT_PREVIEW_ROWS = 200
 RESULT_PREVIEW_COLUMNS = 50
-PACKAGE_DISTRIBUTIONS = {"imblearn": "imbalanced-learn", "xgboost": "xgboost", "lightgbm": "lightgbm", "optuna": "optuna"}
+PACKAGE_DISTRIBUTIONS = {
+    "imblearn": "imbalanced-learn",
+    "xgboost": "xgboost",
+    "lightgbm": "lightgbm",
+    "catboost": "catboost",
+    "optuna": "optuna",
+    "torch": "torch",
+    "tensorflow": "tensorflow",
+    "sklearn": "scikit-learn",
+}
 TASKS = [("Semua", "all"), ("Klasifikasi", "classification"), ("Regresi", "regression"), ("Pengelompokan", "clustering"), ("Anomali", "anomaly"), ("Rangkaian Waktu", "time_series")]
 CATEGORY_TRANSLATIONS = {"Data": "Data", "Classification": "Klasifikasi", "Regression": "Regresi", "Clustering": "Clustering", "Anomaly Detection": "Deteksi Anomali", "Validation": "Validasi", "Preprocessing": "Pra-pemrosesan", "Model": "Model", "Ensemble": "Ensemble", "Evaluation": "Evaluasi", "Tuning": "Penyetelan", "Forecasting": "Peramalan", "Data Tidak Seimbang": "Data Tidak Seimbang", "Transformer": "Transformer"}
 WORKFLOW_FILTERS = [
@@ -1095,6 +1104,7 @@ class NodeEditorPage(QWidget):
         content.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
         scroll.setWidget(content)
         root = QVBoxLayout(content)
+        self._root_layout = root
         root.setContentsMargins(22, 18, 22, 16)
         title = QLabel("Node Editor")
         title.setObjectName("pageTitle")
@@ -1103,48 +1113,57 @@ class NodeEditorPage(QWidget):
         subtitle.setWordWrap(True)
         root.addWidget(title)
         root.addWidget(subtitle)
-        toolbar = QHBoxLayout()
+        toolbar = QGridLayout()
+        toolbar.setContentsMargins(0, 0, 0, 0)
+        toolbar.setHorizontalSpacing(8)
+        toolbar.setVerticalSpacing(6)
+        self._main_toolbar_layout = toolbar
         self.run_button = QPushButton("Jalankan")
         self.run_button.setObjectName("primaryButton")
         self.run_button.clicked.connect(self.run_graph)
-        toolbar.addWidget(self.run_button)
         self.run_to_button = QPushButton("Jalankan s.d. Node")
         self.run_to_button.setObjectName("secondaryButton")
         self.run_to_button.setToolTip("Jalankan hanya node terpilih beserta seluruh input di hulunya.")
         self.run_to_button.setEnabled(False)
         self.run_to_button.clicked.connect(self.run_to_selected_node)
-        toolbar.addWidget(self.run_to_button)
         self.stop_button = QPushButton("Stop")
         self.stop_button.setObjectName("secondaryButton")
         self.stop_button.setEnabled(False)
         self.stop_button.clicked.connect(self.cancel_run)
-        toolbar.addWidget(self.stop_button)
         self.validate_button = QPushButton("Validasi")
         self.validate_button.setObjectName("secondaryButton")
         self.validate_button.clicked.connect(lambda: self.validate_graph(show_tab=True))
-        toolbar.addWidget(self.validate_button)
         self.validation_status = QLabel("Belum divalidasi")
         self.validation_status.setObjectName("nodeEditorRunStatus")
-        toolbar.addWidget(self.validation_status)
         self.delete_button = QPushButton("Hapus Node")
         self.delete_button.setObjectName("secondaryButton")
         self.delete_button.setEnabled(False)
         self.delete_button.clicked.connect(self.delete_selected_nodes)
-        toolbar.addWidget(self.delete_button)
         self.duplicate_button = QPushButton("Duplikat")
         self.duplicate_button.setObjectName("secondaryButton")
         self.duplicate_button.setEnabled(False)
         self.duplicate_button.clicked.connect(self.duplicate_selected_nodes)
-        toolbar.addWidget(self.duplicate_button)
         self.fit_button = QPushButton("Sesuaikan Tampilan")
         self.fit_button.setObjectName("secondaryButton")
         self.fit_button.clicked.connect(self.fit_graph)
-        toolbar.addWidget(self.fit_button)
         self.dataset_status = QLabel("Dataset belum dimuat")
         self.dataset_status.setObjectName("nodeEditorDatasetStatus")
         self.dataset_status.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.dataset_status.setMinimumWidth(0)
         self.dataset_status.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self._main_toolbar_widgets = [
+            self.run_button,
+            self.run_to_button,
+            self.stop_button,
+            self.validate_button,
+            self.validation_status,
+            self.delete_button,
+            self.duplicate_button,
+            self.fit_button,
+        ]
+        self._populate_responsive_toolbar(
+            toolbar, self._main_toolbar_widgets, len(self._main_toolbar_widgets)
+        )
         root.addLayout(toolbar)
 
         dataset_context = QHBoxLayout()
@@ -1166,25 +1185,25 @@ class NodeEditorPage(QWidget):
         dataset_context.addWidget(self.dataset_task_status, 0)
         root.addLayout(dataset_context)
 
-        file_toolbar = QHBoxLayout()
+        file_toolbar = QGridLayout()
+        file_toolbar.setContentsMargins(0, 0, 0, 0)
+        file_toolbar.setHorizontalSpacing(8)
+        file_toolbar.setVerticalSpacing(6)
+        self._file_toolbar_layout = file_toolbar
         self.save_button = QPushButton("Simpan Graf")
         self.save_button.setObjectName("secondaryButton")
         self.save_button.clicked.connect(self.save_graph)
-        file_toolbar.addWidget(self.save_button)
         self.load_button = QPushButton("Muat Graf")
         self.load_button.setObjectName("secondaryButton")
         self.load_button.clicked.connect(self.load_graph)
-        file_toolbar.addWidget(self.load_button)
         self.undo_button = QPushButton("Undo")
         self.undo_button.setObjectName("secondaryButton")
         self.undo_button.setEnabled(False)
         self.undo_button.clicked.connect(self.undo_graph)
-        file_toolbar.addWidget(self.undo_button)
         self.redo_button = QPushButton("Redo")
         self.redo_button.setObjectName("secondaryButton")
         self.redo_button.setEnabled(False)
         self.redo_button.clicked.connect(self.redo_graph)
-        file_toolbar.addWidget(self.redo_button)
         self.template_combo = QComboBox()
         self.template_combo.addItems(["Pilih template alur kerja…", "Klasifikasi cepat", "Regresi cepat", "Ensemble klasifikasi", "Imbalanced klasifikasi", "Forecasting cepat"])
         self.template_combo.activated.connect(self.load_template)
@@ -1194,23 +1213,31 @@ class NodeEditorPage(QWidget):
         self.template_combo.setMinimumContentsLength(25)
         self.template_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.template_combo.setToolTip("Pilih alur siap pakai untuk task yang terdeteksi. Setiap template dapat disunting setelah dimuat.")
-        file_toolbar.addWidget(self.template_combo)
         self.export_python_button = QPushButton("Ekspor Python")
         self.export_python_button.setObjectName("secondaryButton")
         self.export_python_button.clicked.connect(self.export_python)
-        file_toolbar.addWidget(self.export_python_button)
         self.export_notebook_button = QPushButton("Notebook")
         self.export_notebook_button.setObjectName("secondaryButton")
         self.export_notebook_button.clicked.connect(self.export_notebook)
-        file_toolbar.addWidget(self.export_notebook_button)
         self.export_model_button = QPushButton("Model .pkl")
         self.export_model_button.setObjectName("secondaryButton")
         self.export_model_button.clicked.connect(self.export_model)
-        file_toolbar.addWidget(self.export_model_button)
-        file_toolbar.addStretch(1)
         self.graph_state_label = QLabel("Graf belum disimpan")
         self.graph_state_label.setObjectName("nodeEditorRunStatus")
-        file_toolbar.addWidget(self.graph_state_label)
+        self._file_toolbar_widgets = [
+            self.save_button,
+            self.load_button,
+            self.undo_button,
+            self.redo_button,
+            self.template_combo,
+            self.export_python_button,
+            self.export_notebook_button,
+            self.export_model_button,
+            self.graph_state_label,
+        ]
+        self._populate_responsive_toolbar(
+            file_toolbar, self._file_toolbar_widgets, len(self._file_toolbar_widgets)
+        )
         root.addLayout(file_toolbar)
 
         snippet_toolbar = QHBoxLayout()
@@ -1448,6 +1475,44 @@ class NodeEditorPage(QWidget):
         self._saved_graph_state = self._graph_document_key()
         self._update_history_buttons()
 
+    @staticmethod
+    def _populate_responsive_toolbar(layout, widgets, columns):
+        columns = max(1, int(columns))
+        for index, widget in enumerate(widgets):
+            layout.addWidget(widget, index // columns, index % columns)
+
+    def _apply_responsive_layout(self, width):
+        compact = width < 1100
+        for layout, widgets, name in (
+            (self._main_toolbar_layout, self._main_toolbar_widgets, "main"),
+            (self._file_toolbar_layout, self._file_toolbar_widgets, "file"),
+        ):
+            columns = min(4, len(widgets)) if compact else len(widgets)
+            property_name = f"_{name}_toolbar_columns"
+            if getattr(self, property_name, None) == columns:
+                continue
+            for widget in widgets:
+                layout.removeWidget(widget)
+            self._populate_responsive_toolbar(layout, widgets, columns)
+            for column in range(layout.columnCount()):
+                layout.setColumnStretch(column, 1 if column < columns else 0)
+            setattr(self, property_name, columns)
+        margin = 12 if compact else 22
+        self._root_layout.setContentsMargins(
+            margin,
+            12 if compact else 18,
+            margin,
+            12 if compact else 16,
+        )
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._apply_responsive_layout(event.size().width())
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._apply_responsive_layout(self.width())
+
     def _build_palette(self):
         panel = QFrame()
         panel.setObjectName("contentCard")
@@ -1472,6 +1537,7 @@ class NodeEditorPage(QWidget):
         self.workflow_filter.setToolTip("Filter tahap alur kerja: pemahaman data, preprocessing, model, validasi, atau evaluasi.")
         layout.addWidget(self.workflow_filter)
         self.node_palette = NodePalette()
+        self.node_palette.setObjectName("nodeEditorPalette")
         self.node_palette.setDragEnabled(True)
         self.node_palette.setDragDropMode(QListWidget.DragOnly)
         self.node_palette.itemDoubleClicked.connect(self.add_palette_item)
@@ -2345,6 +2411,21 @@ class NodeEditorPage(QWidget):
             return None
         if dataframe is not getattr(self.main_window, "current_dataset", None):
             return None
+        ml_page = getattr(self.main_window, "ml_page", None)
+        task_result = getattr(ml_page, "last_task_result", {}) if ml_page is not None else {}
+        primary_task = task_result.get("primary_task", {}) if isinstance(task_result, dict) else {}
+        if isinstance(primary_task, dict):
+            chosen_target = primary_task.get("target")
+            chosen_task = str(primary_task.get("task") or "").strip().casefold()
+            if chosen_task in {
+                "binary_classification", "multiclass_classification", "regression"
+            }:
+                chosen_column = next(
+                    (column for column in dataframe.columns if str(column) == str(chosen_target)),
+                    None,
+                )
+                if chosen_column is not None:
+                    return {"target_column": chosen_column, "task_type": chosen_task}
         analysis = getattr(self.main_window, "analysis_result", {})
         readiness = analysis.get("ml_readiness", {}) if isinstance(analysis, dict) else {}
         if not isinstance(readiness, dict):
@@ -3397,9 +3478,9 @@ class NodeEditorPage(QWidget):
     def _package_target_path(self):
         if not getattr(sys, "frozen", False):
             return None
-        app_data = QStandardPaths.writableLocation(QStandardPaths.AppLocalDataLocation)
-        app_data_root = Path(app_data) if app_data else Path.home() / ".dora"
-        return app_data_root / "node_editor" / "site-packages"
+        from app.core.runtime_packages import runtime_package_directory
+
+        return runtime_package_directory()
 
     def _missing_graph_packages(self, node_ids=None):
         package_target = self._package_target_path()

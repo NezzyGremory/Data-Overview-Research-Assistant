@@ -27,6 +27,11 @@ a = Analysis(
         "PySide6.QtSvg",
         *collect_submodules("pip"),
     ],
+    # distlib discovers bundled Windows launchers through its package loader.
+    # Keep it on disk so its resource finder sees a standard file-system loader.
+    module_collection_mode={
+        "pip._vendor.distlib": "py",
+    },
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
