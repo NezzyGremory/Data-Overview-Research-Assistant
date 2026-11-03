@@ -105,6 +105,7 @@ from app.ui.missing_values_dialogs import (
 )
 from app.ui.style_utils import apply_card_shadow, render_icon_pixmap
 from app.ui.scale import SCALE_PRESETS, ScaleManager, build_stylesheet, logical_width, scale_stylesheet, ui_px
+from app.ui.views.credits_page import CinematicCreditsPage
 from app.storage import Database, ProjectRepository, DatasetVersionManager
 from app.reports import ReportGenerator
 from app.core.config import get_data_dir
@@ -1928,6 +1929,11 @@ class UploadPage(QWidget):
         self.setObjectName("uploadPage")
 
         self.main_window = main_window
+        self._upload_step_columns = None
+        self._drop_description_compact = None
+        self._support_cards_stacked = None
+        self._header_state = None
+        self._root_layout_gutter = None
 
         self.build_ui()
 
@@ -1942,35 +1948,37 @@ class UploadPage(QWidget):
         self.scroll.setFrameShape(QFrame.NoFrame)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.scroll.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
         self.scroll.viewport().setObjectName("pageViewport")
         self.scroll.viewport().setAttribute(Qt.WA_StyledBackground, True)
 
         container = QWidget()
         container.setObjectName("uploadContainer")
+        container.setMaximumWidth(ui_px(1520))
         self.main_window._apply_canvas_background(container)
         layout = QVBoxLayout(container)
         self.upload_root_layout = layout
-        layout.setContentsMargins(36, 20, 25, 36)
-        layout.setSpacing(7)
+        layout.setContentsMargins(24, 18, 24, 24)
+        layout.setSpacing(12)
 
         header_container = QWidget()
         self.upload_header_container = header_container
-        header_container.setFixedHeight(81)
+        header_container.setFixedHeight(ui_px(72))
         header = QHBoxLayout(header_container)
         self.header_layout = header
         header.setContentsMargins(0, 0, 0, 0)
-        header.setSpacing(0)
+        header.setSpacing(ui_px(12))
         title_block = QVBoxLayout()
         self.upload_title_block = title_block
         title_block.setContentsMargins(0, 0, 0, 0)
-        title_block.setSpacing(4)
+        title_block.setSpacing(ui_px(2))
         title = QLabel("Dataset")
         title.setObjectName("pageTitle")
-        title.setFixedHeight(42)
+        title.setFixedHeight(ui_px(36))
         title.setContentsMargins(0, 1, 0, 0)
         subtitle = QLabel("Unggah, pratinjau, dan bersihkan dataset tabel sebelum analisis.")
         subtitle.setObjectName("pageSubtitle")
-        subtitle.setFixedHeight(35)
+        subtitle.setMinimumHeight(ui_px(22))
         subtitle.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         subtitle.setContentsMargins(0, 0, 0, 0)
         subtitle.setWordWrap(True)
@@ -1982,17 +1990,17 @@ class UploadPage(QWidget):
         self.upload_button.setText("")
         self.upload_button.setAccessibleName("Upload Dataset")
         self.upload_button.setObjectName("datasetPreviewUploadButton")
-        self.upload_button.setFixedSize(253, 61)
+        self.upload_button.setFixedSize(ui_px(194), ui_px(46))
         upload_button_layout = QHBoxLayout(self.upload_button)
-        upload_button_layout.setContentsMargins(19, 0, 14, 0)
-        upload_button_layout.setSpacing(16)
+        upload_button_layout.setContentsMargins(ui_px(12), 0, ui_px(10), 0)
+        upload_button_layout.setSpacing(ui_px(10))
         upload_icon = QLabel()
         upload_icon.setObjectName("datasetPreviewUploadIcon")
-        upload_icon.setFixedSize(32, 24)
+        upload_icon.setFixedSize(ui_px(24), ui_px(22))
         upload_icon.setPixmap(
             render_icon_pixmap(
                 _resource_path("assets/icons/upload.svg"),
-                QSize(32, 24),
+                QSize(ui_px(24), ui_px(22)),
                 upload_icon.devicePixelRatioF(),
             )
         )
@@ -2000,72 +2008,69 @@ class UploadPage(QWidget):
         upload_text = QLabel("Upload Dataset")
         upload_text.setObjectName("datasetPreviewUploadText")
         upload_button_layout.addWidget(upload_text)
-        upload_button_layout.addStretch(1)
         self.upload_button.clicked.connect(self.select_dataset)
-        upload_button_container = QWidget()
-        upload_button_container.setFixedSize(253, 71)
-        upload_button_layout_outer = QVBoxLayout(upload_button_container)
-        upload_button_layout_outer.setContentsMargins(0, 2, 0, 0)
-        upload_button_layout_outer.setSpacing(0)
-        upload_button_layout_outer.addWidget(self.upload_button, 0, Qt.AlignTop)
-        header.addWidget(upload_button_container, 0, Qt.AlignTop)
+        header.addWidget(
+            self.upload_button, 0, Qt.AlignRight | Qt.AlignVCenter
+        )
         layout.addWidget(header_container)
 
-        content_row = QHBoxLayout()
+        content_row = QVBoxLayout()
         self.content_row = content_row
-        content_row.setSpacing(22)
+        content_row.setSpacing(ui_px(12))
         upload_card = QFrame()
         self.upload_card = upload_card
         upload_card.setObjectName("uploadCard")
-        upload_card.setFixedHeight(781)
-        upload_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        upload_card.setMinimumHeight(ui_px(440))
+        upload_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         apply_card_shadow(upload_card)
         upload_layout = QVBoxLayout(upload_card)
-        upload_layout.setContentsMargins(17, 18, 24, 28)
-        upload_layout.setSpacing(40)
+        upload_layout.setContentsMargins(ui_px(18), ui_px(18), ui_px(18), ui_px(18))
+        upload_layout.setSpacing(ui_px(16))
 
         upload_title = QLabel("Unggah dataset")
         upload_title.setObjectName("sectionTitle")
         upload_title.setObjectName("uploadPageSectionTitle")
-        upload_title.setContentsMargins(18, 10, 0, 0)
-        upload_title.setFixedHeight(44)
+        upload_title.setContentsMargins(ui_px(8), 0, 0, 0)
+        upload_title.setFixedHeight(ui_px(32))
         upload_layout.addWidget(upload_title)
 
         dropzone = QFrame()
         self.upload_dropzone = dropzone
         dropzone.setObjectName("uploadDropzone")
         dropzone.setCursor(Qt.PointingHandCursor)
-        dropzone.setMaximumWidth(895)
-        dropzone.setFixedHeight(325)
+        dropzone.setMaximumWidth(ui_px(820))
+        dropzone.setFixedHeight(ui_px(240))
+        dropzone.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         drop_layout = QVBoxLayout(dropzone)
-        drop_layout.setContentsMargins(17, 19, 15, 17)
+        drop_layout.setContentsMargins(ui_px(18), ui_px(16), ui_px(18), ui_px(16))
         drop_layout.setSpacing(0)
         drop_layout.addStretch(1)
         icon_label = QLabel()
         icon_label.setObjectName("uploadDropIcon")
         icon_label.setAlignment(Qt.AlignCenter)
-        icon_label.setFixedSize(70, 70)
+        icon_label.setFixedSize(ui_px(56), ui_px(56))
         icon_label.setPixmap(
             render_icon_pixmap(
                 _resource_path("assets/icons/file-arrow-up.svg"),
-                70,
+                ui_px(56),
                 icon_label.devicePixelRatioF(),
             )
         )
         drop_layout.addWidget(icon_label, 0, Qt.AlignHCenter)
-        drop_layout.addSpacing(14)
+        drop_layout.addSpacing(ui_px(10))
 
         drop_title = QLabel("Seret dan lepas dataset tabel di sini")
         drop_title.setObjectName("uploadDropTitle")
         drop_title.setAlignment(Qt.AlignCenter)
         drop_title.setWordWrap(True)
+        drop_title.setMinimumWidth(0)
         drop_layout.addWidget(drop_title)
 
         description_row = QGridLayout()
         self.drop_description_layout = description_row
         description_row.setContentsMargins(0, 0, 0, 0)
         description_row.setAlignment(Qt.AlignHCenter)
-        description_row.setSpacing(2)
+        description_row.setSpacing(ui_px(4))
         prefix = QLabel("atau")
         prefix.setObjectName("uploadDropDescription")
         prefix.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -2085,15 +2090,14 @@ class UploadPage(QWidget):
         description_row.addWidget(suffix, 0, 2, Qt.AlignLeft | Qt.AlignVCenter)
         drop_layout.addLayout(description_row)
         drop_layout.addStretch(1)
-        drop_layout.setStretch(0, 5)
-        drop_layout.setStretch(drop_layout.count() - 1, 9)
+        drop_layout.setStretch(0, 1)
+        drop_layout.setStretch(drop_layout.count() - 1, 1)
         self._install_dropzone_interaction(dropzone)
         dropzone_wrap = QWidget()
         dropzone_wrap_layout = QHBoxLayout(dropzone_wrap)
-        dropzone_wrap_layout.setContentsMargins(5, 0, 0, 0)
+        dropzone_wrap_layout.setContentsMargins(0, 0, 0, 0)
         dropzone_wrap_layout.setSpacing(0)
-        dropzone_wrap_layout.addWidget(dropzone)
-        dropzone_wrap.setFixedHeight(326)
+        dropzone_wrap_layout.addWidget(dropzone, 1, Qt.AlignHCenter)
         upload_layout.addWidget(dropzone_wrap)
 
         steps_wrap = QWidget()
@@ -2101,11 +2105,8 @@ class UploadPage(QWidget):
         self.steps_layout = steps_row
         self.upload_steps = []
         steps_row.setContentsMargins(0, 0, 0, 0)
-        steps_row.setContentsMargins(0, 1, 0, 0)
-        steps_row.setHorizontalSpacing(4)
-        steps_row.setVerticalSpacing(5)
-        for column, stretch in enumerate((197, 230, 253, 234)):
-            steps_row.setColumnStretch(column, stretch)
+        steps_row.setHorizontalSpacing(ui_px(8))
+        steps_row.setVerticalSpacing(ui_px(8))
         for number, heading, detail in (
             ("1", "Unggah dataset", "Pilih file Anda"),
             ("2", "Pratinjau", "Periksa beberapa baris pertama"),
@@ -2114,20 +2115,23 @@ class UploadPage(QWidget):
         ):
             step = QFrame()
             step.setObjectName("uploadStep")
-            step.setMinimumHeight(65)
+            step.setMinimumHeight(ui_px(64))
             step.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
             step_layout = QHBoxLayout(step)
-            step_layout.setContentsMargins(9, 6, 3, 9)
-            step_layout.setSpacing(15)
+            step_layout.setContentsMargins(ui_px(8), ui_px(6), ui_px(8), ui_px(6))
+            step_layout.setSpacing(ui_px(10))
             badge = QLabel(number)
             badge.setObjectName("uploadStepBadge")
             badge.setAlignment(Qt.AlignCenter)
-            badge.setFixedSize(40, 38)
-            badge.setMask(QRegion(0, 0, 40, 38, QRegion.Ellipse))
+            badge.setFixedSize(ui_px(34), ui_px(34))
+            badge.setMask(
+                QRegion(0, 0, ui_px(34), ui_px(34), QRegion.Ellipse)
+            )
             text_layout = QVBoxLayout()
-            text_layout.setSpacing(2)
+            text_layout.setSpacing(ui_px(2))
             step_title = QLabel(heading)
             step_title.setObjectName("uploadStepTitle")
+            step_title.setWordWrap(True)
             step_detail = QLabel(detail)
             step_detail.setObjectName("uploadStepDetail")
             step_detail.setWordWrap(True)
@@ -2138,67 +2142,68 @@ class UploadPage(QWidget):
             self.upload_steps.append(step)
             steps_row.addWidget(step, 0, len(self.upload_steps) - 1)
         upload_layout.addWidget(steps_wrap)
-        upload_layout.addSpacing(2)
         upload_layout.addStretch(1)
-        content_row.addWidget(upload_card, 215)
+        content_row.addWidget(upload_card)
 
-        side_column = QVBoxLayout()
-        self.upload_side_column = side_column
-        side_column.setSpacing(21)
         search_card = QFrame()
         self.upload_search_card = search_card
         search_card.setObjectName("uploadSearchCard")
-        search_card.setFixedHeight(245)
+        search_card.setMinimumHeight(ui_px(184))
+        search_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         apply_card_shadow(search_card)
         search_layout = QVBoxLayout(search_card)
-        search_layout.setContentsMargins(22, 20, 22, 22)
+        search_layout.setContentsMargins(ui_px(18), ui_px(16), ui_px(18), ui_px(16))
         search_layout.setSpacing(0)
         search_icon = QLabel()
         search_icon.setObjectName("uploadSearchIcon")
         search_icon.setAlignment(Qt.AlignCenter)
-        search_icon.setFixedSize(42, 42)
+        search_icon.setFixedSize(ui_px(36), ui_px(36))
         search_icon.setPixmap(
             render_icon_pixmap(
                 _resource_path("assets/icons/search.svg"),
-                28,
+                ui_px(22),
                 search_icon.devicePixelRatioF(),
             )
         )
         search_layout.addWidget(search_icon, 0, Qt.AlignLeft)
-        search_layout.addSpacing(9)
+        search_layout.addSpacing(ui_px(8))
         search_title = QLabel("Belum ada data")
         search_title.setObjectName("cardTitle")
-        search_title.setFixedSize(152, 24)
+        search_title.setMinimumHeight(ui_px(22))
         search_layout.addWidget(search_title)
-        search_layout.addSpacing(7)
+        search_layout.addSpacing(ui_px(4))
         search_description = QLabel(
             "Cari dataset publik di Kaggle dan Hugging Face, lalu impor langsung ke DORA."
         )
         search_description.setObjectName("cardDescription")
         search_description.setWordWrap(True)
-        search_description.setFixedSize(392, 38)
+        search_description.setMaximumWidth(ui_px(360))
+        search_description.setMinimumWidth(0)
+        search_description.setSizePolicy(
+            QSizePolicy.Expanding, QSizePolicy.Preferred
+        )
         search_layout.addWidget(search_description)
-        search_layout.addSpacing(17)
+        search_layout.addSpacing(ui_px(10))
         search_button = QPushButton("Buka Dataset Search")
         search_button.setObjectName("uploadSearchButton")
-        search_button.setFixedSize(253, 63)
+        search_button.setFixedSize(ui_px(204), ui_px(44))
         search_button.clicked.connect(self.main_window.open_dataset_search_page)
         search_layout.addWidget(search_button, 0, Qt.AlignLeft)
-        side_column.addWidget(search_card)
 
         tips_card = QFrame()
         self.upload_tips_card = tips_card
         tips_card.setObjectName("uploadTipsCard")
-        tips_card.setFixedHeight(515)
+        tips_card.setMinimumHeight(ui_px(204))
+        tips_card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
         apply_card_shadow(tips_card)
         tips_layout = QVBoxLayout(tips_card)
-        tips_layout.setContentsMargins(22, 20, 22, 22)
+        tips_layout.setContentsMargins(ui_px(18), ui_px(16), ui_px(18), ui_px(16))
         tips_layout.setSpacing(0)
         tips_title = QLabel("Tips unggah dataset")
         tips_title.setObjectName("cardTitle")
-        tips_title.setFixedSize(217, 24)
+        tips_title.setMinimumHeight(ui_px(22))
         tips_layout.addWidget(tips_title)
-        tips_layout.addSpacing(24)
+        tips_layout.addSpacing(ui_px(12))
         tips = QLabel(
             "1. Baris pertama berisi nama kolom\n"
             "2. Gunakan satu tabel per file\n"
@@ -2207,12 +2212,18 @@ class UploadPage(QWidget):
         )
         tips.setObjectName("uploadTipsText")
         tips.setWordWrap(True)
-        tips.setFixedSize(355, 76)
+        tips.setMaximumWidth(ui_px(360))
+        tips.setMinimumWidth(0)
+        tips.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         tips_layout.addWidget(tips)
-        tips_layout.addStretch(1)
-        side_column.addWidget(tips_card, 1)
-        content_row.addLayout(side_column, 100)
-        layout.addLayout(content_row, 1)
+
+        support_row = QHBoxLayout()
+        self.support_row = support_row
+        support_row.setSpacing(ui_px(12))
+        support_row.addWidget(search_card, 1)
+        support_row.addWidget(tips_card, 1)
+        content_row.addLayout(support_row)
+        layout.addLayout(content_row)
 
         self.info_label = QLabel("Belum ada dataset yang dipilih.")
         self.info_label.setObjectName("cardDescription")
@@ -2231,34 +2242,70 @@ class UploadPage(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        width = event.size().width()
-        self.header_layout.setDirection(
-            QBoxLayout.TopToBottom if logical_width(width) < 700 else QBoxLayout.LeftToRight
-        )
-        self.upload_header_container.setFixedHeight(
-            ui_px(152 if logical_width(width) < 700 else 81)
-        )
-        self.content_row.setDirection(
-            QBoxLayout.TopToBottom if logical_width(width) < 1450 else QBoxLayout.LeftToRight
-        )
-
-        description_columns = 1 if logical_width(width) < 480 else 3
-        self.drop_description_layout.removeWidget(self.drop_size_label)
-        if description_columns == 1:
-            self.drop_description_layout.addWidget(
-                self.drop_size_label, 1, 0, 1, 2, Qt.AlignHCenter
+        width = logical_width(event.size().width())
+        compact_header = width < 700
+        narrow_header = width < 480
+        header_state = (compact_header, narrow_header)
+        if header_state != self._header_state:
+            self.header_layout.setDirection(
+                QBoxLayout.TopToBottom if compact_header else QBoxLayout.LeftToRight
             )
-        else:
-            self.drop_description_layout.addWidget(
-                self.drop_size_label, 0, 2, Qt.AlignLeft | Qt.AlignVCenter
+            self.upload_header_container.setFixedHeight(
+                ui_px(128 if narrow_header else 120 if compact_header else 72)
             )
+            self._header_state = header_state
+        support_cards_stacked = width < 900
+        if support_cards_stacked != self._support_cards_stacked:
+            self.support_row.setDirection(
+                QBoxLayout.TopToBottom
+                if support_cards_stacked
+                else QBoxLayout.LeftToRight
+            )
+            self._support_cards_stacked = support_cards_stacked
+        gutter = ui_px(16 if compact_header else 24)
+        if gutter != self._root_layout_gutter:
+            self.upload_root_layout.setContentsMargins(
+                gutter,
+                ui_px(16 if compact_header else 18),
+                gutter,
+                ui_px(20 if compact_header else 24),
+            )
+            self._root_layout_gutter = gutter
 
-        card_width = self.upload_card.width()
-        columns = 4 if logical_width(card_width) >= 900 else 2 if logical_width(card_width) >= 500 else 1
-        for step in self.upload_steps:
-            self.steps_layout.removeWidget(step)
-        for index, step in enumerate(self.upload_steps):
-            self.steps_layout.addWidget(step, index // columns, index % columns)
+        compact_description = width < 520
+        if compact_description != self._drop_description_compact:
+            self.drop_description_layout.removeWidget(self.drop_size_label)
+            if compact_description:
+                self.drop_description_layout.addWidget(
+                    self.drop_size_label, 1, 0, 1, 2, Qt.AlignHCenter
+                )
+            else:
+                self.drop_description_layout.addWidget(
+                    self.drop_size_label, 0, 2, Qt.AlignLeft | Qt.AlignVCenter
+                )
+            self._drop_description_compact = compact_description
+
+        content_width = min(
+            width - 2 * (16 if compact_header else 24),
+            1520 - 2 * (16 if compact_header else 24),
+        )
+        columns = (
+            4
+            if content_width >= 1000
+            else 2
+            if content_width >= 540
+            else 1
+        )
+        if columns != self._upload_step_columns:
+            for column in range(4):
+                self.steps_layout.setColumnStretch(column, 0)
+            for column in range(columns):
+                self.steps_layout.setColumnStretch(column, 1)
+            for step in self.upload_steps:
+                self.steps_layout.removeWidget(step)
+            for index, step in enumerate(self.upload_steps):
+                self.steps_layout.addWidget(step, index // columns, index % columns)
+            self._upload_step_columns = columns
 
     # =====================================================
     # SELECT DATASET
@@ -14195,80 +14242,8 @@ def _credits_manifest_html(manifest: dict[str, Any]) -> str:
     )
 
 
-class CopyrightPage(QWidget):
-    """Project credits and copyright information for DORA."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setObjectName("copyrightPage")
-        root = QVBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        container = QWidget()
-        content = QVBoxLayout(container)
-        content.setContentsMargins(28, 24, 28, 28)
-        content.setSpacing(16)
-        scroll.setWidget(container)
-        root.addWidget(scroll)
-
-        eyebrow = QLabel("PROJECT CONTRIBUTORS")
-        eyebrow.setObjectName("creditsEyebrow")
-        content.addWidget(eyebrow)
-
-        heading = QLabel("Credits")
-        heading.setObjectName("aboutPageTitle")
-        content.addWidget(heading)
-
-        subtitle = QLabel("Built with curiosity. Designed to make research easier.")
-        subtitle.setObjectName("aboutPageSubtitle")
-        subtitle.setWordWrap(True)
-        content.addWidget(subtitle)
-
-        manifest = _load_credits_manifest()
-        code_panel = QFrame()
-        code_panel.setObjectName("creditsCodePanel")
-        panel_layout = QVBoxLayout(code_panel)
-        panel_layout.setContentsMargins(0, 0, 0, 0)
-        panel_layout.setSpacing(0)
-
-        panel_header = QHBoxLayout()
-        panel_header.setContentsMargins(18, 13, 18, 13)
-        panel_header.setSpacing(8)
-        panel_title = QLabel("team-manifest.json")
-        panel_title.setObjectName("creditsPanelTitle")
-        panel_header.addWidget(panel_title)
-        panel_header.addStretch(1)
-        panel_language = QLabel("JSON")
-        panel_language.setObjectName("creditsLanguageBadge")
-        panel_header.addWidget(panel_language)
-        panel_layout.addLayout(panel_header)
-
-        code = QTextBrowser()
-        code.setObjectName("creditsManifestCode")
-        code.setReadOnly(True)
-        code.setOpenLinks(False)
-        code.setOpenExternalLinks(False)
-        code.setLineWrapMode(QTextEdit.WidgetWidth)
-        code.setFrameShape(QFrame.NoFrame)
-        code.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        code.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        code.setMinimumHeight(340)
-        code.setHtml(_credits_manifest_html(manifest))
-        panel_layout.addWidget(code, 1)
-        content.addWidget(code_panel, 1)
-
-        footer = QHBoxLayout()
-        footer.setSpacing(10)
-        copyright_mark = QLabel("\u00a9 2026 Metriks Studio. All rights reserved.")
-        copyright_mark.setObjectName("creditsCopyright")
-        copyright_mark.setWordWrap(True)
-        footer.addWidget(copyright_mark, 1)
-        content.addLayout(footer)
-        content.addStretch(1)
+class CopyrightPage(CinematicCreditsPage):
+    """Active Credits route, backed by the cinematic page presentation."""
 
 
 class HelpPage(QWidget):
@@ -14301,7 +14276,8 @@ class HelpPage(QWidget):
         self.content.addWidget(heading)
 
         subtitle = QLabel(
-            "Panduan singkat untuk memakai DORA dari memuat dataset sampai menyimpan laporan."
+            "Panduan fitur DORA: memuat dan memeriksa data, menjalankan analisis, melatih model, "
+            "menelusuri literatur, hingga menyimpan laporan."
         )
         subtitle.setObjectName("helpPageSubtitle")
         subtitle.setWordWrap(True)
@@ -14315,8 +14291,9 @@ class HelpPage(QWidget):
         hero_title = QLabel("Alur kerja yang disarankan")
         hero_title.setObjectName("helpHeroTitle")
         hero_body = QLabel(
-            "Mulai dari satu file CSV. Setelah dataset dimuat, lanjutkan ke Analysis, "
-            "lalu gunakan ML Intelligence dan Academic Research sesuai kebutuhan."
+            "Muat satu dataset, periksa kualitasnya, lalu jalankan Analysis. Untuk Machine Learning, "
+            "tentukan task dan target sesuai pertanyaan penelitian sebelum menjalankan model. "
+            "Deteksi otomatis adalah saran yang perlu Anda tinjau."
         )
         hero_body.setObjectName("helpHeroBody")
         hero_body.setWordWrap(True)
@@ -14332,68 +14309,120 @@ class HelpPage(QWidget):
 
         guides = (
             (
-                "1. Muat dataset dari komputer",
-                "Buka Dataset, pilih Upload Dataset, lalu pilih file CSV. Pada jendela konfirmasi, "
-                "periksa nama dataset, pemisah kolom, encoding, dan kolom target. Pastikan baris "
-                "pertama berisi nama kolom, lalu pilih Unggah & Pratinjau.",
+                "1. Unggah dataset dari komputer",
+                "Buka Dataset → Unggah dari komputer, lalu pilih atau seret file ke area unggah. "
+                "Format yang didukung: CSV, TSV, XLS/XLSX, JSON, JSONL, dan Parquet hingga 200 MB. "
+                "Pada konfirmasi, periksa nama kolom; untuk CSV/TSV, tinjau pemisah dan encoding. "
+                "Lanjutkan dengan Unggah & Pratinjau.",
                 "Buka Dataset",
                 self.main_window.open_datasets_page,
             ),
             (
-                "2. Cari dataset online",
-                "Buka Dataset Search, ketik kata kunci, pilih Kaggle dataset, Hugging Face dataset, "
-                "atau Semua sumber, lalu pilih Cari. Pilih berkas CSV yang tersedia dan pilih "
-                "Impor & Analisis untuk mengunduh dan membukanya.",
+                "2. Cari dan unduh dataset publik",
+                "Buka Dataset Search, masukkan kata kunci, pilih Kaggle, Hugging Face, atau Semua sumber, "
+                "lalu tekan Cari. Sebelum mengunduh, gunakan ikon folder untuk memilih lokasi simpan; "
+                "ikon folder terbuka akan membukanya. Pilih dataset dan file yang sesuai, lalu tekan "
+                "Impor & Analisis untuk mengunduh, memuat, dan memulai Analysis.",
                 "Buka Dataset Search",
                 self.main_window.open_dataset_search_page,
             ),
             (
-                "3. Pratinjau dan rapikan data",
-                "Di halaman Dataset, periksa beberapa baris, daftar kolom, nilai kosong, dan duplikat. "
-                "Gunakan pilihan pembersihan cepat yang tersedia bila diperlukan, lalu pilih "
-                "Lanjutkan ke Analysis.",
+                "3. Pratinjau dan bersihkan dataset",
+                "Di tab Pratinjau, periksa ukuran, nama kolom, dan contoh baris. Buka Analysis untuk "
+                "meninjau missing values, duplikat, dan outlier. Jika perlu, gunakan aksi imputasi "
+                "median/modus, hapus baris kosong, atau hapus duplikat. Tinjau pilihan sebelum "
+                "menerapkannya: pembersihan membuat versi dataset baru, sedangkan outlier hanya "
+                "ditandai untuk ditinjau dan tidak otomatis dihapus. Nilai 0 juga tidak otomatis "
+                "dianggap sebagai missing value.",
                 "Buka pratinjau Dataset",
                 self.main_window.open_datasets_page,
             ),
             (
-                "4. Jalankan analisis dataset",
-                "Pada halaman Analysis, pilih Jalankan Analysis. Tinjau ringkasan dataset, statistik kolom, "
-                "kualitas data, nilai kosong, duplikat, pencilan, dan hubungan antar kolom. "
-                "Gunakan hasilnya untuk menentukan langkah berikutnya.",
+                "4. Jalankan EDA dan uji statistik",
+                "Pada halaman Analysis, tekan Jalankan Analysis untuk membuat ringkasan, statistik "
+                "kolom, pemeriksaan kualitas, dan visualisasi hubungan data. Untuk analisis inferensial, "
+                "tekan Uji Statistik, pilih uji yang sesuai, lalu baca asumsi dan hasilnya sebelum "
+                "menyimpan hasil ke Analysis.",
                 "Buka Analysis",
                 self.main_window.open_analysis_page,
             ),
             (
-                "5. Tinjau ML Intelligence",
-                "Setelah dataset dimuat, buka ML Intelligence untuk melihat perkiraan jenis tugas "
-                "Machine Learning dan metode yang disarankan. Periksa alasan dan keterbatasan "
-                "rekomendasi sebelum memilih metode penelitian.",
+                "5. Tentukan task dan target ML",
+                "Buka ML Intelligence → Opsi ML. Pilih task berdasarkan tujuan: klasifikasi/regresi "
+                "memerlukan kolom target; clustering mengelompokkan data tanpa target; forecasting "
+                "memerlukan target numerik dan kolom waktu. Deteksi task hanya perkiraan dari struktur "
+                "dataset. Bila saran sistem keliru, pilih task dan target yang benar secara manual. "
+                "Dataset yang sama bisa dipakai untuk task berbeda jika tujuan penelitiannya berbeda.",
                 "Buka ML Intelligence",
                 self.main_window.open_ml_page,
             ),
             (
-                "6. Cari referensi penelitian",
-                "Setelah analisis tersedia, buka Academic Research dan pilih Jalankan Academic Research. "
-                "Tinjau kata kunci, query, dan hasil paper. Periksa sumber dan relevansi paper "
-                "sebelum menggunakannya dalam tulisan.",
+                "6. Atur fitur, algoritma, dan validasi",
+                "Di Opsi ML, centang Pilih algoritma otomatis agar DORA mengevaluasi metode yang "
+                "tersedia untuk task itu; hapus centangnya untuk memilih algoritma sendiri. Pada tab Fitur, pilih kolom input "
+                "yang relevan dan jangan masukkan label target sebagai fitur. Data uji akhir (10–40%, "
+                "bawaan 20%) disisihkan untuk evaluasi akhir. Fold validasi (2–10, bawaan 3) membantu "
+                "membandingkan model klasifikasi/regresi pada data latih bila jumlah data memenuhi "
+                "syarat; model teratas kemudian diuji pada data uji akhir yang terpisah. Dataset kecil "
+                "mungkin tidak memenuhi syarat uji akhir, jadi periksa status evaluasinya. Untuk "
+                "forecasting, pemisahan mengikuti urutan waktu; "
+                "holdout dan fold klasifikasi/regresi tidak berlaku untuk clustering atau deteksi anomali.",
+                "Buka opsi ML",
+                self.main_window.open_ml_page,
+            ),
+            (
+                "7. Jalankan dan baca hasil ML",
+                "Setelah memeriksa task, target, fitur, dan algoritma, tekan Jalankan di dialog Opsi ML. "
+                "Model benar-benar dilatih dan dibandingkan sesuai skema evaluasi yang tersedia. Baca "
+                "metrik sesuai tujuan (misalnya F1 untuk klasifikasi atau MAE/RMSE untuk regresi), "
+                "status evaluasi, dan catatan data uji; jangan memilih model dari satu angka tanpa "
+                "memeriksa konteks dan kualitas dataset.",
+                "Lihat ML Intelligence",
+                self.main_window.open_ml_page,
+            ),
+            (
+                "8. Cari literatur akademik",
+                "Setelah Analysis tersedia, buka Academic Research dan tekan Jalankan Academic Research. "
+                "Tinjau kata kunci, query, dan ringkasan hasil pencarian. Tahap ini menyiapkan kandidat "
+                "literatur untuk ditinjau lebih lanjut; hasil otomatis bukan pengganti telaah paper.",
                 "Buka Academic Research",
                 self.main_window.open_research_page,
             ),
             (
-                "7. Tinjau paper dan temuan riset",
-                "Gunakan Papers untuk melihat kandidat paper. Research Landscape merangkum pola "
-                "metode dan publikasi; Research Gap menampilkan kandidat celah riset yang bisa "
-                "ditinjau lebih lanjut.",
+                "9. Periksa paper dan sumbernya",
+                "Buka Papers untuk meninjau kandidat paper, abstrak, tahun, dan tautan sumber. Gunakan "
+                "aksi pemeriksaan indeks/akreditasi bila tersedia pada hasil, lalu verifikasi status "
+                "dan relevansi di sumber aslinya sebelum mencantumkannya dalam tulisan.",
                 "Buka Papers",
                 self.main_window.open_papers_tool,
             ),
             (
-                "8. Buat laporan",
-                "Buka Research Report, pilih Perbarui Pratinjau, lalu tekan Simpan sebagai PDF "
-                "jika tombol ekspor sudah aktif. Laporan gabungan membutuhkan dataset, Analisis "
-                "Dataset, ML Intelligence, dan Academic Research.",
+                "10. Tinjau landscape dan kandidat research gap",
+                "Sesudah menjalankan Academic Research, buka Research Landscape untuk melihat pola "
+                "tema/metode yang ditemukan dan Research Gap untuk membaca kandidat celah riset. "
+                "Kandidat gap adalah bahan eksplorasi, bukan kesimpulan otomatis; verifikasi dengan "
+                "membaca paper sumber dan menilai kebaruan penelitian Anda.",
+                "Buka Research Landscape",
+                self.main_window.open_landscape_tool,
+            ),
+            (
+                "11. Buat dan simpan laporan PDF",
+                "Buka Research Report, tekan Perbarui Pratinjau, lalu periksa isi laporan dan status "
+                "setiap tahap. Jalankan Analysis, ML, dan Academic Research terlebih dahulu bila "
+                "ingin laporan yang lengkap. Setelah tombol ekspor aktif, tekan Simpan sebagai PDF "
+                "dan pilih lokasi file.",
                 "Buka Research Report",
                 self.main_window.open_report_tool,
+            ),
+            (
+                "12. Gunakan Editor Analysis untuk kode",
+                "Untuk analisis yang lebih khusus, buka Editor Analysis, pilih tahapan/template, "
+                "periksa kode dan nama kolom target, lalu Jalankan sel atau Jalankan semua. Baca "
+                "output dan pesan error sebelum meneruskan; simpan notebook bila ingin melanjutkan "
+                "pekerjaan nanti. Fitur ini cocok untuk pengguna yang nyaman membaca atau mengubah "
+                "kode Python.",
+                "Buka Editor Analysis",
+                self.main_window.open_editor_analysis_page,
             ),
         )
         for title, body, action, callback in guides:
@@ -15540,7 +15569,7 @@ class MainWindow(QMainWindow):
         )
         self._startup_checkpoint("Menyiapkan halaman bantuan…")
         self.about_page = AboutPage()
-        self.copyright_page = CopyrightPage()
+        self.copyright_page = CopyrightPage(self)
         self.help_page = HelpPage(self)
 
         self.pages = {
@@ -15947,6 +15976,8 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _sanitize_visible_ui_widget(widget, event_type):
+        if widget.property("preserveVisibleCopy"):
+            return
         tooltip = widget.toolTip()
         cleaned_tooltip = _clean_visible_ui_copy(tooltip)
         if cleaned_tooltip != tooltip:

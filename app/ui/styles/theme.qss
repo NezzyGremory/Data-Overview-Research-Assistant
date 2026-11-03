@@ -240,7 +240,7 @@ QPushButton#primaryButton:hover,
 QPushButton#analyzeButton:hover,
 QPushButton#runButton:hover,
 QPushButton#uploadButton:hover { background: var(--blue-hover); border-color: var(--blue-hover); }
-QPushButton#datasetPreviewUploadButton { background: var(--blue); border: 1px solid var(--blue); border-radius: var(--small-radius); color: var(--surface); min-height: 60px; padding: 0; }
+QPushButton#datasetPreviewUploadButton { background: var(--blue); border: 1px solid var(--blue); border-radius: var(--small-radius); color: var(--surface); min-height: 46px; padding: 0; }
 QPushButton#datasetPreviewUploadButton:hover { background: var(--blue-hover); border-color: var(--blue-hover); }
 QPushButton#datasetPreviewUploadButton:pressed { background: var(--blue); }
 QPushButton#datasetPreviewUploadButton:disabled { background: var(--border-solid); border-color: var(--border-solid); }
@@ -330,23 +330,26 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
 /* Dataset: upload */
 #uploadPage QLabel#pageSubtitle,
 #datasetPreviewHeader QLabel#pageSubtitle { font-size: 23px; }
-#uploadPageSectionTitle { color: var(--heading); font-family: "Inter"; font-size: 25px; font-weight: 700; }
+#uploadPageSectionTitle { color: var(--heading); font-family: "Inter"; font-size: 18px; font-weight: 700; }
 #uploadDropzone { background: var(--surface); border: 2px dashed var(--blue-bright); border-radius: var(--small-radius); }
+#uploadDropzone:hover { background: var(--canvas); border-color: var(--blue); }
 #uploadDropIcon { background: transparent; border: none; }
 #uploadSearchIcon { background: var(--blue-active); border-radius: 14px; }
-#uploadStepBadge { background: var(--blue-active); border-radius: 20px; color: var(--blue); font-size: 16px; font-weight: 700; }
-#uploadDropTitle { color: var(--heading); font-size: 25px; font-weight: 700; }
-#uploadDropDescription, #uploadDropSizeLimit { color: var(--body); font-size: 23px; }
-#uploadStepDetail { color: var(--body); font-size: 16px; }
-#uploadTipsText { color: var(--body); font-size: 16px; }
-#uploadBrowseLink { background: transparent; border: none; color: var(--blue-bright); font-size: 23px; padding: 0; font-weight: 600; }
+#uploadStepBadge { background: var(--blue-active); border-radius: 20px; color: var(--blue); font-size: 14px; font-weight: 700; }
+#uploadDropTitle { color: var(--heading); font-size: 20px; font-weight: 700; }
+#uploadDropDescription, #uploadDropSizeLimit { color: var(--body); font-size: 13px; }
+#uploadStepDetail { color: var(--body); font-size: 12px; }
+#uploadTipsText { color: var(--body); font-size: 13px; }
+#uploadBrowseLink { background: transparent; border: none; color: var(--blue-bright); font-size: 14px; padding: 0; font-weight: 600; }
 #uploadBrowseLink:hover { color: var(--blue); text-decoration: underline; }
 #uploadStep, #uploadSearchCard, #uploadTipsCard { background: var(--surface); border: 1px solid var(--border); border-radius: var(--small-radius); }
 #uploadSearchCard, #uploadTipsCard { border-radius: var(--card-radius); }
-#uploadStepTitle { color: var(--heading); font-size: 20px; font-weight: 700; }
-#uploadSearchCard #cardTitle, #uploadTipsCard #cardTitle { color: var(--heading); font-family: "Inter"; font-size: 20px; font-weight: 600; }
-#uploadSearchCard #cardDescription { font-size: 16px; }
-#uploadSearchButton { text-align: left; padding-left: 12px; }
+#uploadStepTitle { color: var(--heading); font-size: 14px; font-weight: 700; }
+#uploadSearchCard #cardTitle, #uploadTipsCard #cardTitle { color: var(--heading); font-family: "Inter"; font-size: 16px; font-weight: 600; }
+#uploadSearchCard #cardDescription { font-size: 13px; }
+#uploadSearchButton { text-align: left; padding-left: 12px; font-size: 14px; }
+#uploadPage QLabel#pageSubtitle { font-size: 14px; }
+#uploadPage #uploadCard { padding: 0; }
 
 /* Dataset Preview: keep its spreadsheet controls inside the shared DORA light theme. */
 #datasetPreviewScroll, #datasetPreviewScroll::viewport, #datasetPreviewContainer { background: #F6FBFF; }
@@ -1632,4 +1635,136 @@ QScrollBar::handle:horizontal:hover:!disabled {
 QScrollBar::add-line:horizontal:hover:!disabled,
 QScrollBar::sub-line:horizontal:hover:!disabled {
     background-color: #EEF4FF;
+}
+
+/* Cinematic Credits page */
+QWidget#copyrightPage,
+QWidget#creditsStage,
+QWidget#creditsOpeningScene,
+QWidget#creditsClosingScene,
+QScrollArea#creditsRollArea,
+QWidget#creditsRollContent {
+    background-color: #000000;
+}
+QWidget#creditsControls {
+    background: transparent;
+}
+QPushButton#creditsControlButton {
+    color: rgba(255, 255, 255, 205);
+    background-color: rgba(255, 255, 255, 22);
+    border: 1px solid transparent;
+    border-radius: 5px;
+    font-family: "Inter";
+    font-size: 13px;
+    min-height: 40px;
+    padding: 0 13px;
+}
+QPushButton#creditsControlButton:hover {
+    color: #FFFFFF;
+    background-color: rgba(255, 255, 255, 42);
+}
+QPushButton#creditsControlButton:focus {
+    color: #FFFFFF;
+    background-color: rgba(255, 255, 255, 36);
+    border-color: #B8B8B8;
+}
+QCheckBox#creditsReduceMotion {
+    color: rgba(255, 255, 255, 190);
+    spacing: 8px;
+    font-family: "Inter";
+    font-size: 13px;
+    min-height: 40px;
+}
+QCheckBox#creditsReduceMotion::indicator {
+    width: 15px;
+    height: 15px;
+    border: 1px solid rgba(255, 255, 255, 150);
+    border-radius: 2px;
+    background-color: transparent;
+}
+QCheckBox#creditsReduceMotion::indicator:checked {
+    background-color: #B8B8B8;
+    border-color: #B8B8B8;
+}
+QLabel#creditsProduction,
+QLabel#creditsProjectLine,
+QLabel#creditsSmallCaption,
+QLabel#creditsFooter {
+    color: #B8B8B8;
+    font-family: "Inter";
+    font-size: 14px;
+    font-weight: 400;
+}
+QLabel#creditsSmallCaption {
+    font-size: 13px;
+}
+QLabel#creditsDoraTitle {
+    color: #FFFFFF;
+    font-family: "Inter";
+    font-size: 66px;
+    font-weight: 600;
+}
+QLabel#creditsTagline {
+    color: #B8B8B8;
+    font-family: "Inter";
+    font-size: 17px;
+    font-weight: 400;
+}
+QLabel#creditsProjectLine {
+    font-size: 13px;
+}
+QLabel#creditsGroup {
+    color: #FFFFFF;
+    font-family: "Inter";
+    font-size: 15px;
+    font-weight: 600;
+}
+QLabel#creditsRole {
+    color: #B8B8B8;
+    font-family: "Inter";
+    font-size: 16px;
+    font-weight: 500;
+}
+QLabel#creditsName {
+    color: #FFFFFF;
+    font-family: "Inter";
+    font-size: 23px;
+    font-weight: 400;
+}
+QLabel#creditsThanks {
+    color: #B8B8B8;
+    font-family: "Inter";
+    font-size: 17px;
+    font-weight: 400;
+}
+QLabel#creditsClosingMessage {
+    color: #FFFFFF;
+    font-family: "Inter";
+    font-size: 21px;
+    font-weight: 500;
+}
+QLabel#creditsClosingDora {
+    color: #FFFFFF;
+    font-family: "Inter";
+    font-size: 50px;
+    font-weight: 600;
+}
+QLabel#creditsClosingStudio {
+    color: #B8B8B8;
+    font-family: "Inter";
+    font-size: 14px;
+    font-weight: 400;
+}
+QScrollArea#creditsRollArea QScrollBar:vertical {
+    width: 8px;
+    background-color: #000000;
+}
+QScrollArea#creditsRollArea QScrollBar::handle:vertical {
+    min-height: 36px;
+    background-color: rgba(184, 184, 184, 110);
+    border-radius: 4px;
+}
+QScrollArea#creditsRollArea QScrollBar::add-line:vertical,
+QScrollArea#creditsRollArea QScrollBar::sub-line:vertical {
+    height: 0;
 }
