@@ -1450,6 +1450,26 @@ QProgressBar::chunk {
 
 
 /* Progress feedback for long-running analysis and model training. */
+#mlRunOptionsPanel {
+    background: #FFFFFF;
+    border: @px(1) solid #DCE8F7;
+    border-radius: @px(12);
+}
+#mlRunOptionsPanel QComboBox,
+#mlRunOptionsPanel QSpinBox {
+    min-height: @px(34);
+}
+#mlRunOptionsPanel QTabWidget::pane {
+    background: #FFFFFF;
+    border: @px(1) solid #DCE8F7;
+    border-radius: @px(8);
+}
+#mlRunOptionsPanel QListWidget {
+    background: #FAFCFF;
+    border: @px(1) solid #E3ECF7;
+    border-radius: @px(7);
+}
+
 #loadingSpinner {
     color: #3478E5;
     font-size: @px(23);

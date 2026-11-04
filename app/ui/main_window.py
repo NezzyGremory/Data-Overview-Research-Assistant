@@ -7361,9 +7361,8 @@ class MLIntelligencePage(QWidget):
         title.setObjectName("mlPageTitle")
 
         description = QLabel(
-            "Deteksi task Machine Learning "
-            "dan rekomendasi metode berdasarkan "
-            "struktur serta karakteristik dataset."
+            "Pilih task dan target, lalu sistem membandingkan algoritma "
+            "dan menampilkan rekomendasi berdasarkan hasil evaluasi dataset."
         )
 
         description.setObjectName("mlPageDescription")
@@ -7389,7 +7388,7 @@ class MLIntelligencePage(QWidget):
 
         header.addStretch()
 
-        self.refresh_button = QPushButton("Jalankan ML")
+        self.refresh_button = QPushButton("Training Model")
 
         self.refresh_button.setObjectName(
             "primaryButton"
@@ -7400,11 +7399,6 @@ class MLIntelligencePage(QWidget):
             self.run_detection
         )
 
-        self.options_button = QPushButton("Opsi ML")
-        self.options_button.setObjectName("secondaryButton")
-        self.options_button.clicked.connect(self.show_run_options)
-
-        header.addWidget(self.options_button)
         header.addWidget(
             self.refresh_button
         )
@@ -7485,7 +7479,7 @@ class MLIntelligencePage(QWidget):
         self.last_method_result = {}
         self.last_intelligence_result = {}
         self._rendered_result_signature = None
-        self.refresh_button.setText("Jalankan ML")
+        self.refresh_button.setText("Training Model")
 
         self.clear_content()
 
@@ -7571,14 +7565,30 @@ class MLIntelligencePage(QWidget):
             self.show_empty_state()
             return
 
-        from app.ui.ml_run_options_dialog import MLRunOptionsDialog
+        from app.ui.ml_run_options_dialog import MLRunOptionsPanel
 
         suggested_result = self.last_task_result or self.detector.detect(
             fingerprint, dataframe=dataframe
         )
-        dialog = MLRunOptionsDialog(dataframe, suggested_result, self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            self._start_ml_run(dialog.options())
+        self.clear_content()
+        options_panel = MLRunOptionsPanel(
+            dataframe,
+            suggested_result,
+            self,
+            on_submit=self._start_ml_run,
+            on_cancel=self._close_run_options,
+        )
+        self._options_panel = options_panel
+        self.content_layout.addWidget(options_panel)
+        self.content_layout.addStretch()
+        options_panel.show()
+
+    def _close_run_options(self):
+        self._options_panel = None
+        if self.last_task_result and self.last_method_result:
+            self.display_result(self.last_task_result, self.last_method_result)
+        else:
+            self.show_ready_state()
 
     def _start_ml_run(self, options=None):
         if self._ml_thread is not None:
@@ -7599,8 +7609,8 @@ class MLIntelligencePage(QWidget):
             )
 
         self._current_ml_options = dict(options or {})
+        self._options_panel = None
         self.refresh_button.setEnabled(False)
-        self.options_button.setEnabled(False)
         self.refresh_button.setText("Training models...")
         self.clear_content()
         self._ml_loading_card = LoadingCard(
@@ -7697,8 +7707,7 @@ class MLIntelligencePage(QWidget):
 
     def _finish_ml_run(self):
         self.refresh_button.setEnabled(True)
-        self.options_button.setEnabled(True)
-        self.refresh_button.setText("Jalankan Ulang ML" if self.last_task_result else "Jalankan ML")
+        self.refresh_button.setText("Latih Ulang" if self.last_task_result else "Training Model")
 
     def _cleanup_ml_worker(self):
         self._ml_worker = None
@@ -8524,7 +8533,7 @@ class MLIntelligencePage(QWidget):
         }
         self.last_intelligence_result = saved_methods.get("_intelligence_result") or {}
         self.display_result(self.last_task_result, self.last_method_result)
-        self.refresh_button.setText("Jalankan Ulang ML")
+        self.refresh_button.setText("Latih Ulang")
         return True
 
     def show_ready_state(self):

@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QSpinBox,
     QTabWidget,
     QVBoxLayout,
@@ -36,7 +37,7 @@ FORECAST_METHODS = [
 ]
 
 
-class MLRunOptionsDialog(QDialog):
+class MLRunOptionsPanel(QWidget):
     TASKS = [
         ("Klasifikasi biner", "binary_classification"),
         ("Klasifikasi multikelas", "multiclass_classification"),
@@ -46,7 +47,15 @@ class MLRunOptionsDialog(QDialog):
         ("Forecasting time-series", "time_series_forecasting"),
     ]
 
-    def __init__(self, dataframe: pd.DataFrame, task_result: dict, parent=None):
+    def __init__(
+        self,
+        dataframe: pd.DataFrame,
+        task_result: dict,
+        parent=None,
+        embedded=True,
+        on_submit=None,
+        on_cancel=None,
+    ):
         super().__init__(parent)
         if getattr(sys, "frozen", False):
             from app.core.runtime_packages import runtime_package_directory
@@ -57,25 +66,35 @@ class MLRunOptionsDialog(QDialog):
                 importlib.invalidate_caches()
         self.dataframe = dataframe
         self.task_result = task_result or {}
+        self.embedded = embedded
+        self.on_submit = on_submit
+        self.on_cancel = on_cancel
         self._items: dict[str, QListWidgetItem] = {}
-        self.setWindowTitle("Opsi Machine Learning")
-        screen = parent.screen() if parent is not None else QApplication.primaryScreen()
-        available = screen.availableGeometry() if screen is not None else None
-        max_width = max(360, available.width() - 32) if available is not None else 650
-        max_height = max(420, available.height() - 32) if available is not None else 720
-        self.setMinimumSize(min(570, max_width), min(520, max_height))
-        self.setMaximumSize(max_width, max_height)
-        self.resize(min(650, max_width), min(720, max_height))
+        self.setObjectName("mlRunOptionsPanel")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(24, 22, 24, 20)
-        root.setSpacing(14)
+        root.setContentsMargins(
+            20 if embedded else 24,
+            18 if embedded else 22,
+            20 if embedded else 24,
+            18 if embedded else 20,
+        )
+        root.setSpacing(12 if embedded else 14)
 
-        title = QLabel("Atur task dan algoritma")
+        title = QLabel("Training Model" if embedded else "Atur task dan algoritma")
         title.setObjectName("sectionTitle")
         intro = QLabel(
-            "Tentukan tujuan analisis dan kolom target sebelum training. "
-            "Dataset yang sama dapat dipakai untuk klasifikasi atau clustering."
+            (
+                "Pilih task, target, dan fitur. Sistem membandingkan algoritma "
+                "yang cocok lalu menampilkan hasil evaluasinya."
+            )
+            if embedded
+            else (
+                "Tentukan tujuan analisis dan kolom target sebelum training. "
+                "Dataset yang sama dapat dipakai untuk klasifikasi atau clustering."
+            )
         )
         intro.setObjectName("cardDescription")
         intro.setWordWrap(True)
@@ -102,14 +121,18 @@ class MLRunOptionsDialog(QDialog):
                 candidate_label.setWordWrap(True)
                 root.addWidget(candidate_label)
 
-        self.auto_check = QCheckBox("Pilih algoritma otomatis")
+        self.auto_check = QCheckBox(
+            "Rekomendasikan algoritma otomatis" if embedded else "Pilih algoritma otomatis"
+        )
         self.auto_check.setChecked(True)
         root.addWidget(self.auto_check)
 
-        fields = QGridLayout()
-        fields.setHorizontalSpacing(12)
-        fields.setVerticalSpacing(10)
-        fields.addWidget(QLabel("Task"), 0, 0)
+        fields = QVBoxLayout() if embedded else QGridLayout()
+        if embedded:
+            fields.setSpacing(10)
+        else:
+            fields.setHorizontalSpacing(12)
+            fields.setVerticalSpacing(10)
         self.task_combo = QComboBox()
         self.task_combo.addItem("Pilih task analisis...", None)
         for label, task in self.TASKS:
@@ -118,26 +141,64 @@ class MLRunOptionsDialog(QDialog):
         index = self.task_combo.findData(detected)
         if index > 0 and not (detected == "clustering" and candidates):
             self.task_combo.setCurrentIndex(index)
-        fields.addWidget(self.task_combo, 0, 1)
 
-        fields.addWidget(QLabel("Target"), 1, 0)
         self.target_combo = QComboBox()
-        fields.addWidget(self.target_combo, 1, 1)
-
-        fields.addWidget(QLabel("Kolom waktu"), 2, 0)
         self.time_combo = QComboBox()
-        fields.addWidget(self.time_combo, 2, 1)
-        fields.addWidget(QLabel("Data uji akhir"), 3, 0)
         self.test_percent = QSpinBox()
         self.test_percent.setRange(10, 40)
         self.test_percent.setValue(20)
         self.test_percent.setSuffix(" %")
-        fields.addWidget(self.test_percent, 3, 1)
-        fields.addWidget(QLabel("Fold validasi"), 4, 0)
+        self.test_percent.setToolTip(
+            "Persentase data yang disisihkan untuk evaluasi akhir model."
+        )
         self.cv_folds = QSpinBox()
         self.cv_folds.setRange(2, 10)
         self.cv_folds.setValue(3)
-        fields.addWidget(self.cv_folds, 4, 1)
+        self.cv_folds.setToolTip(
+            "Jumlah lipatan validasi silang untuk membandingkan model."
+        )
+
+        self.time_label = QLabel("Kolom waktu")
+        if embedded:
+            task_target_row = QHBoxLayout()
+            task_target_row.setSpacing(12)
+            task_target_row.addWidget(QLabel("Task"))
+            task_target_row.addWidget(self.task_combo, 1)
+            task_target_row.addWidget(QLabel("Target"))
+            task_target_row.addWidget(self.target_combo, 1)
+            fields.addLayout(task_target_row)
+
+            self.time_row_widget = QWidget()
+            time_row = QHBoxLayout(self.time_row_widget)
+            time_row.setContentsMargins(0, 0, 0, 0)
+            time_row.setSpacing(12)
+            time_row.addWidget(self.time_label)
+            time_row.addWidget(self.time_combo, 1)
+            time_row.addStretch(1)
+            fields.addWidget(self.time_row_widget)
+
+            validation_row = QHBoxLayout()
+            validation_row.setSpacing(12)
+            validation_row.addWidget(QLabel("Data uji akhir"))
+            validation_row.addWidget(self.test_percent)
+            validation_row.addStretch(1)
+            validation_row.addWidget(QLabel("Fold validasi"))
+            validation_row.addWidget(self.cv_folds)
+            fields.addLayout(validation_row)
+            self.test_percent.setFixedWidth(144)
+            self.cv_folds.setFixedWidth(144)
+        else:
+            self.time_row_widget = None
+            fields.addWidget(QLabel("Task"), 0, 0)
+            fields.addWidget(self.task_combo, 0, 1)
+            fields.addWidget(QLabel("Target"), 1, 0)
+            fields.addWidget(self.target_combo, 1, 1)
+            fields.addWidget(self.time_label, 2, 0)
+            fields.addWidget(self.time_combo, 2, 1)
+            fields.addWidget(QLabel("Data uji akhir"), 3, 0)
+            fields.addWidget(self.test_percent, 3, 1)
+            fields.addWidget(QLabel("Fold validasi"), 4, 0)
+            fields.addWidget(self.cv_folds, 4, 1)
         root.addLayout(fields)
 
         tabs = QTabWidget()
@@ -180,6 +241,9 @@ class MLRunOptionsDialog(QDialog):
         cancel.setObjectName("secondaryButton")
         run = QPushButton("Jalankan")
         run.setObjectName("primaryButton")
+        if embedded:
+            cancel.setText("Kembali")
+            run.setText("Latih dan tampilkan rekomendasi")
         buttons.addWidget(cancel)
         buttons.addWidget(run)
         root.addLayout(buttons)
@@ -193,7 +257,7 @@ class MLRunOptionsDialog(QDialog):
         self.clear_button.clicked.connect(
             lambda _checked=False: self._set_all(Qt.CheckState.Unchecked)
         )
-        cancel.clicked.connect(lambda _checked=False: self.reject())
+        cancel.clicked.connect(lambda _checked=False: self._cancel_options())
         run.clicked.connect(lambda _checked=False: self._accept_options())
         self._populate_task_controls()
         self._sync_mode()
@@ -320,6 +384,12 @@ class MLRunOptionsDialog(QDialog):
         task = self.task_combo.currentData()
         self.target_combo.setEnabled(task in {"binary_classification", "multiclass_classification", "regression", "time_series_forecasting"})
         self.time_combo.setEnabled(task == "time_series_forecasting")
+        show_time = task == "time_series_forecasting"
+        if self.time_row_widget is not None:
+            self.time_row_widget.setVisible(show_time)
+        else:
+            self.time_label.setVisible(show_time)
+            self.time_combo.setVisible(show_time)
         self.test_percent.setEnabled(task != "clustering" and task != "anomaly_detection")
         self.cv_folds.setEnabled(task in {"binary_classification", "multiclass_classification", "regression"})
         self.feature_list.setEnabled(task != "time_series_forecasting")
@@ -353,4 +423,64 @@ class MLRunOptionsDialog(QDialog):
         if not self.auto_check.isChecked() and not self.options()["requested_methods"]:
             QMessageBox.warning(self, "Algoritma belum dipilih", "Pilih minimal satu algoritma untuk dijalankan.")
             return
+        if callable(self.on_submit):
+            self.on_submit(self.options())
+
+    def _cancel_options(self):
+        if callable(self.on_cancel):
+            self.on_cancel()
+
+
+class MLRunOptionsDialog(QDialog):
+    """Modal wrapper retained for existing callers and manual-option flows."""
+
+    TASKS = MLRunOptionsPanel.TASKS
+
+    def __init__(self, dataframe: pd.DataFrame, task_result: dict, parent=None):
+        super().__init__(parent)
+        self.dataframe = dataframe
+        self.task_result = task_result or {}
+        self.embedded = False
+        self.setWindowTitle("Opsi Machine Learning")
+        screen = parent.screen() if parent is not None else QApplication.primaryScreen()
+        available = screen.availableGeometry() if screen is not None else None
+        max_width = max(360, available.width() - 32) if available is not None else 650
+        max_height = max(420, available.height() - 32) if available is not None else 720
+        self.setMinimumSize(min(570, max_width), min(520, max_height))
+        self.setMaximumSize(max_width, max_height)
+        self.resize(min(650, max_width), min(720, max_height))
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.panel = MLRunOptionsPanel(
+            dataframe,
+            self.task_result,
+            self,
+            embedded=False,
+            on_submit=self._accept_options,
+            on_cancel=self.reject,
+        )
+        layout.addWidget(self.panel)
+
+        for name in (
+            "suggestion_label",
+            "auto_check",
+            "task_combo",
+            "target_combo",
+            "time_combo",
+            "test_percent",
+            "cv_folds",
+            "hint",
+            "model_list",
+            "feature_list",
+            "select_all_button",
+            "clear_button",
+        ):
+            setattr(self, name, getattr(self.panel, name))
+        self._items = self.panel._items
+
+    def options(self) -> dict:
+        return self.panel.options()
+
+    def _accept_options(self, _options):
         self.accept()
