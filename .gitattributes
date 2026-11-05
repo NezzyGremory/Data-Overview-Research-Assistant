@@ -1,0 +1,4 @@
+# Keep GitHub's language breakdown focused on Python.
+# Runtime assets and configuration remain available in the repository.
+* linguist-detectable=false
+*.py linguist-detectable=true
