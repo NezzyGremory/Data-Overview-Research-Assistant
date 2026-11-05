@@ -39,7 +39,7 @@ backend/.env
 backend/.env.*
 !backend/.env.example
 
-# Local AI/editor instructions and agent state
+# Local development instructions and editor state
 AGENTS.md
 CLAUDE.md
 GEMINI.md
@@ -98,6 +98,10 @@ logs/
 /install.ps1
 /potongan-node.json
 *.backup.md
+.pytest_dora_*_tmp/
+
+# Project notes and reports kept locally
+/docs/
 
 # Generated builds, installers, and binary archives
 build/
