@@ -12,4 +12,5 @@ jinja2
 matplotlib
 pytest
 Pillow
+opencv-python-headless
 PyInstaller

@@ -35,7 +35,7 @@ Source: "..\hasil_compile\Data-Overview-Research-Assistant-v2.0.0-runtimefix\pay
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"
+Name: "{autodesktop}\DORA"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"
 
 [Run]
 Filename: "{app}\{#AppExeName}"; Description: "Launch {#AppName}"; Flags: postinstall nowait skipifsilent

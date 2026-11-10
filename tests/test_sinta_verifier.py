@@ -1,5 +1,6 @@
+import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import httpx
 
@@ -383,6 +384,55 @@ class TestSintaVerifier(unittest.TestCase):
             absent = self.verifier.verify(["1234-5678"], "Wanted Journal", 2023)
         self.assertEqual(absent.status, "NOT_IN_SINTA")
         self.assertEqual(absent.lookup_status, "NOT_FOUND")
+
+    def test_gemini_profile_search_uses_current_json_output_format_with_google_search(self):
+        response = Mock(
+            status_code=200,
+            json=Mock(return_value={
+                "candidates": [{
+                    "content": {
+                        "parts": [{
+                            "text": (
+                                '{"profile_url":"https://sinta.kemdiktisaintek.go.id/'
+                                'journals/profile/12345","journal_name":"Jurnal Contoh",'
+                                '"matched_issn":"12345678","evidence":"ISSN cocok"}'
+                            )
+                        }]
+                    }
+                }]
+            }),
+        )
+        with patch.dict(os.environ, {"GEMINI_SINTA_MODEL": "", "GEMINI_MODEL": ""}), patch.object(
+            self.verifier, "_gemini_api_keys", return_value=["test-key"]
+        ), patch("app.research.sinta_verifier.httpx.post", return_value=response) as post:
+            candidate, note = self.verifier._find_gemini_profile_candidate(
+                ["1234-5678"], "Jurnal Contoh"
+            )
+
+        self.assertEqual(note, "")
+        self.assertEqual(candidate["profile_url"], "https://sinta.kemdiktisaintek.go.id/journals/profile/12345")
+        request = post.call_args.kwargs["json"]
+        self.assertEqual(request["tools"], [{"googleSearch": {}}])
+        generation = request["generationConfig"]
+        self.assertEqual(
+            generation["responseFormat"]["text"]["mimeType"],
+            "APPLICATION_JSON",
+        )
+        self.assertEqual(generation["responseFormat"]["text"]["schema"]["type"], "object")
+        self.assertNotIn("responseSchema", generation)
+
+    def test_gemini_authentication_failure_is_explained_without_exposing_key(self):
+        response = Mock(status_code=401, text="API key is invalid")
+        with patch.dict(os.environ, {"GEMINI_SINTA_MODEL": "", "GEMINI_MODEL": ""}), patch.object(
+            self.verifier, "_gemini_api_keys", return_value=["secret-test-key"]
+        ), patch("app.research.sinta_verifier.httpx.post", return_value=response):
+            candidate, note = self.verifier._find_gemini_profile_candidate(
+                ["1234-5678"], "Jurnal Contoh"
+            )
+
+        self.assertIsNone(candidate)
+        self.assertIn("API key Gemini tidak valid", note)
+        self.assertNotIn("secret-test-key", note)
 
     def test_year_normalization_handles_string_float_and_invalid_values(self):
         self.assertEqual(self.verifier.normalize_year("2023"), 2023)

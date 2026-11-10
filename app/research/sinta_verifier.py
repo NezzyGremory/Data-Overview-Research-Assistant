@@ -8,7 +8,7 @@ import json
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from typing import Any, Dict, List, Optional
-from urllib.parse import quote_plus, urljoin, urlsplit
+from urllib.parse import quote_plus, unquote, urljoin, urlsplit
 
 import httpx
 
@@ -39,6 +39,7 @@ class SintaVerificationResult:
     notes: str = ""
     assistive_candidate_url: Optional[str] = None
     assistive_note: str = ""
+    evidence_doi: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -64,6 +65,7 @@ class SintaVerificationResult:
             "notes": self.notes,
             "assistive_candidate_url": self.assistive_candidate_url,
             "assistive_note": self.assistive_note,
+            "evidence_doi": self.evidence_doi,
         }
 
     @classmethod
@@ -93,6 +95,26 @@ class SintaVerificationResult:
             notes=str(data.get("notes") or ""),
             assistive_candidate_url=data.get("assistive_candidate_url"),
             assistive_note=str(data.get("assistive_note") or ""),
+            evidence_doi=data.get("evidence_doi"),
+        )
+
+
+@dataclass
+class _SintaElement:
+    tag: str
+    attrs: Dict[str, str] = field(default_factory=dict)
+    children: list = field(default_factory=list)
+
+    def nodes(self):
+        yield self
+        for child in self.children:
+            if isinstance(child, _SintaElement):
+                yield from child.nodes()
+
+    def text(self) -> str:
+        return " ".join(
+            child.text() if isinstance(child, _SintaElement) else child
+            for child in self.children
         )
 
 
@@ -101,6 +123,7 @@ class _SintaDirectoryHtmlParser(HTMLParser):
 
     _BLOCK_TAGS = {"br", "p", "div", "article", "li", "h1", "h2", "h3", "h4", "tr", "td"}
     _VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
+    _IGNORED_TAGS = {"script", "style", "noscript", "nav", "footer", "head"}
     _RECORD_CLASSES = {
         "card", "journal-card", "card-journal", "journal-item", "journal-list-item",
         "journal-result", "journal-entry", "result-item", "search-result", "list-group-item",
@@ -112,42 +135,67 @@ class _SintaDirectoryHtmlParser(HTMLParser):
         self.records: List[List[str]] = []
         self._record_parts: Optional[List[str]] = None
         self._record_stack: List[str] = []
+        self.root = _SintaElement("document")
+        self._nodes = [self.root]
+        self._ignored_stack: List[str] = []
 
     def handle_starttag(self, tag: str, attrs: Any):
+        tag = tag.lower()
+        if self._ignored_stack or tag in self._IGNORED_TAGS:
+            if tag not in self._VOID_TAGS:
+                self._ignored_stack.append(tag)
+            return
         attributes = dict(attrs)
+        node = _SintaElement(tag, attributes)
+        self._nodes[-1].children.append(node)
+        if tag not in self._VOID_TAGS:
+            self._nodes.append(node)
         classes = set((attributes.get("class") or "").casefold().split())
         is_journal_record_class = any(
             re.search(r"(?:^|[-_])journal[-_](?:card|item|result|entry)(?:$|[-_])", value)
             for value in classes
         )
         is_record = (
-            tag.lower() == "article"
+            tag == "article"
             or bool(classes & self._RECORD_CLASSES)
             or is_journal_record_class
         )
         if self._record_parts is None and is_record:
             self._record_parts = []
             self._record_stack = [tag.lower()]
-        elif self._record_parts is not None and tag.lower() not in self._VOID_TAGS:
-            self._record_stack.append(tag.lower())
-        if tag.lower() in self._BLOCK_TAGS:
+        elif self._record_parts is not None and tag not in self._VOID_TAGS:
+            self._record_stack.append(tag)
+        if tag in self._BLOCK_TAGS:
             self.parts.append("\n")
             if self._record_parts is not None:
                 self._record_parts.append("\n")
 
     def handle_endtag(self, tag: str):
-        if tag.lower() in self._BLOCK_TAGS:
+        tag = tag.lower()
+        if self._ignored_stack:
+            if tag in self._ignored_stack:
+                index = len(self._ignored_stack) - 1 - self._ignored_stack[::-1].index(tag)
+                del self._ignored_stack[index:]
+            return
+        for index in range(len(self._nodes) - 1, 0, -1):
+            if self._nodes[index].tag == tag:
+                del self._nodes[index:]
+                break
+        if tag in self._BLOCK_TAGS:
             self.parts.append("\n")
             if self._record_parts is not None:
                 self._record_parts.append("\n")
-        if self._record_parts is not None and tag.lower() in self._record_stack:
-            match_index = len(self._record_stack) - 1 - self._record_stack[::-1].index(tag.lower())
+        if self._record_parts is not None and tag in self._record_stack:
+            match_index = len(self._record_stack) - 1 - self._record_stack[::-1].index(tag)
             del self._record_stack[match_index:]
             if not self._record_stack:
                 self.records.append(self._lines(self._record_parts))
                 self._record_parts = None
 
     def handle_data(self, data: str):
+        if self._ignored_stack:
+            return
+        self._nodes[-1].children.append(data)
         self.parts.append(data)
         if self._record_parts is not None:
             self._record_parts.append(data)
@@ -221,6 +269,10 @@ class SintaVerifier:
     """
 
     BASE_URL = "https://sinta.kemdiktisaintek.go.id/journals"
+    PARSER_VERSION = "v5"
+    CACHE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
+    _ISSN_PATTERN = re.compile(r"(?:P-ISSN|E-ISSN|ISSN)\s*[:#]?\s*([0-9Xx-]+)", re.I)
+    _DOI_PATTERN = re.compile(r"\b10\.\d{4,9}/[^\s<>\"']+", re.I)
 
     def __init__(self, timeout: float = 8.0):
         self.timeout = timeout
@@ -240,7 +292,8 @@ class SintaVerifier:
         """Menghapus strip, spasi, dan menormalkan huruf X."""
         if not issn:
             return ""
-        return re.sub(r"[^0-9Xx]", "", str(issn)).upper()
+        cleaned = re.sub(r"[^0-9Xx]", "", str(issn)).upper()
+        return cleaned if re.fullmatch(r"\d{7}[\dX]", cleaned) else ""
 
     @staticmethod
     def normalize_name(name: Optional[str]) -> str:
@@ -276,10 +329,22 @@ class SintaVerifier:
     def normalize_doi(value: Optional[str]) -> str:
         if not value:
             return ""
-        doi = html.unescape(str(value)).strip().casefold()
+        doi = unquote(html.unescape(str(value))).strip().casefold()
         doi = re.sub(r"^https?://(?:dx\.)?doi\.org/", "", doi)
         doi = re.sub(r"^doi\s*:\s*", "", doi)
-        return doi.strip().rstrip(".,;:)]}>")
+        doi = doi.strip().rstrip(".,;:>")
+        # Closing parentheses may be part of a DOI; remove only citation wrappers.
+        for closing, opening in ((")", "("), ("]", "["), ("}", "{")):
+            while doi.endswith(closing) and doi.count(closing) > doi.count(opening):
+                doi = doi[:-1]
+        return doi
+
+    @classmethod
+    def _check_official_response(cls, response):
+        response.raise_for_status()
+        parts = urlsplit(str(response.url))
+        if parts.scheme != "https" or parts.hostname != "sinta.kemdiktisaintek.go.id":
+            raise ValueError("Respons verifikasi tidak berasal dari domain resmi SINTA.")
 
     def _get_client(self) -> httpx.Client:
         if self._client is None:
@@ -316,7 +381,7 @@ class SintaVerifier:
         for url in urls:
             try:
                 response = self._get_client().get(url)
-                response.raise_for_status()
+                self._check_official_response(response)
                 self._search_cache[cache_key] = response.text
                 return response.text
             except httpx.HTTPStatusError as exc:
@@ -338,38 +403,59 @@ class SintaVerifier:
         normalized_url = f"https://{parts.hostname}{parts.path.rstrip('/')}/"
         if normalized_url not in self._profile_cache:
             response = self._get_client().get(normalized_url)
-            response.raise_for_status()
+            self._check_official_response(response)
             self._profile_cache[normalized_url] = response.text
         return self._profile_cache[normalized_url]
 
     @classmethod
-    def _profile_url_for_issn(cls, html_text: str, issn: Optional[str]) -> Optional[str]:
+    def _profile_url_for_issn(
+        cls, html_text: str, issn: Optional[str], journal_name: str = ""
+    ) -> Optional[str]:
+        """Find a profile link inside the same result element as its identity."""
         target = cls.normalize_issn(issn)
-        if not target:
+        target_name = cls.normalize_name(journal_name)
+        if not target and not target_name:
             return None
-        issn_match = next(
-            (
-                match
-                for match in re.finditer(r"(?<!\d)(?:\d[\s-]*){7}[0-9Xx](?![\w])", html_text)
-                if cls.normalize_issn(match.group()) == target
-            ),
-            None,
-        )
-        if not issn_match:
-            return None
-        links = list(re.finditer(
-            r"href\s*=\s*['\"]([^'\"]*/journals/profile/\d+[^'\"]*)['\"]",
-            html_text,
-            re.I,
-        ))
-        before = [link for link in links if link.start() <= issn_match.start()]
-        link = before[-1] if before else next(
-            (candidate for candidate in links if candidate.start() > issn_match.start()),
-            None,
-        )
-        if not link:
-            return None
-        return urljoin(cls.BASE_URL + "/", link.group(1))
+        parser = _SintaDirectoryHtmlParser()
+        parser.feed(html_text)
+        matches = set()
+        for node in parser.root.nodes():
+            if node.tag not in {"div", "article", "li", "section", "tr"}:
+                continue
+            node_text = node.text()
+            issns = {
+                cls.normalize_issn(value)
+                for value in cls._ISSN_PATTERN.findall(node_text)
+            }
+            name_match = bool(target_name) and any(
+                child.tag in {"h1", "h2", "h3", "h4", "a"}
+                and cls.normalize_name(child.text()) == target_name
+                for child in node.nodes()
+            )
+            if not (target in issns if target else name_match):
+                continue
+            headings = {
+                cls.normalize_name(child.text())
+                for child in node.nodes()
+                if child.tag in {"h1", "h2", "h3", "h4"}
+                and cls.normalize_name(child.text())
+            }
+            if len(headings) > 1:
+                continue
+            links = {
+                urljoin(cls.BASE_URL + "/", child.attrs.get("href") or "").rstrip("/")
+                for child in node.nodes()
+                if child.tag == "a"
+            }
+            links = {
+                url for url in links
+                if re.fullmatch(
+                    r"https://sinta\.kemdiktisaintek\.go\.id/journals/profile/\d+", url
+                )
+            }
+            if len(links) == 1:
+                matches.update(links)
+        return next(iter(matches)) if len(matches) == 1 else None
 
     @staticmethod
     def _extract_rank_from_lines(lines: List[str], require_current_label: bool = False):
@@ -446,29 +532,101 @@ class SintaVerifier:
         return None, False, "", False
 
     @classmethod
+    def _current_profile_rank(cls, parser: _SintaDirectoryHtmlParser):
+        """Bind a current-rank label to its own profile section."""
+        candidates = []
+        for node in parser.root.nodes():
+            text = node.text()
+            if re.search(r"history\s+accreditation|riwayat\s+akreditasi|\bDOI\s*:", text, re.I):
+                continue
+            result = cls._extract_rank_from_lines([text], require_current_label=True)
+            if result[3]:
+                candidates.append((node, result))
+        leaves = [
+            result for node, result in candidates
+            if not any(
+                other is not node and any(child is other for child in node.nodes())
+                for other, _ in candidates
+            )
+        ]
+        ranks = {result[0] for result in leaves}
+        if len(ranks) == 1 and None not in ranks and not any(result[1] for result in leaves):
+            return next(iter(ranks)), False, "", True
+        if leaves:
+            return None, True, "Bagian peringkat terkini memuat informasi yang bertentangan.", True
+        return None, False, "Label peringkat terkini tidak ditemukan pada bagian profil jurnal.", False
+
+    @classmethod
     def _article_record_rank(cls, profile_html: str, article_doi: str):
         target_doi = cls.normalize_doi(article_doi)
         if not target_doi:
             return None
         parser = _SintaDirectoryHtmlParser()
         parser.feed(profile_html)
-        for line in parser.get_lines():
-            if target_doi not in cls.normalize_doi(line):
-                continue
-            accredited = bool(re.search(r"\b(?:accred(?:itation)?|akreditasi)\b", line, re.I))
-            mentions = cls._extract_rank_from_lines([line])
-            rank, ambiguous, reason, _ = mentions
-            if ambiguous:
-                return {"found": True, "rank": None, "ambiguous": True, "notes": reason}
-            if accredited and rank:
-                return {"found": True, "rank": rank, "ambiguous": False, "notes": ""}
-            return {
-                "found": True,
-                "rank": None,
-                "ambiguous": False,
-                "notes": "DOI artikel ditemukan di profil resmi SINTA, tetapi label peringkat akreditasinya tidak tersedia.",
+        article_nodes = [
+            node for node in parser.root.nodes()
+            if node.tag == "article"
+            or set((node.attrs.get("class") or "").casefold().split())
+            & {"publication", "ar-list-item", "article-item", "publication-item"}
+        ]
+        candidates = []
+        found = False
+        for node in parser.root.nodes():
+            text = node.text()
+            identifiers = text + " " + " ".join(
+                child.attrs.get("href") or ""
+                for child in node.nodes() if child.tag == "a"
+            )
+            dois = {
+                cls.normalize_doi(value)
+                for value in cls._DOI_PATTERN.findall(identifiers)
             }
-        return None
+            if target_doi not in dois:
+                continue
+            found = True
+            if article_nodes and not any(node is article for article in article_nodes):
+                continue
+            if node.tag not in {"div", "article", "li", "tr", "p", "section"}:
+                continue
+            # A containing panel with multiple article identifiers cannot provide
+            # an article-specific accreditation label.
+            if dois != {target_doi} or len(re.findall(r"\bDOI\s*:", text, re.I)) > 1:
+                continue
+            labels = re.findall(
+                r"\b(?:accred(?:itation)?|akreditasi)\s*:\s*"
+                r"(SINTA\s*[-:]?\s*[1-6]\b|S[1-6]\b|Unknown\b|[-?])",
+                text,
+                re.I,
+            )
+            if not labels:
+                continue
+            ranks = {
+                "S" + match.group() if (match := re.search(r"[1-6]", label)) else None
+                for label in labels
+            }
+            candidates.append((node, ranks))
+        if not found:
+            return None
+        leaves = [
+            (node, ranks) for node, ranks in candidates
+            if not any(
+                other is not node and any(child is other for child in node.nodes())
+                for other, _ in candidates
+            )
+        ]
+        ranks = set().union(*(value for _, value in leaves)) if leaves else set()
+        ambiguous = len(ranks) > 1
+        rank = next(iter(ranks)) if len(ranks) == 1 else None
+        return {
+            "found": True,
+            "rank": rank,
+            "ambiguous": ambiguous,
+            "notes": (
+                "DOI yang sama memiliki label akreditasi yang bertentangan pada profil resmi."
+                if ambiguous else "" if rank else
+                "DOI artikel ditemukan di profil resmi SINTA, tetapi label peringkat akreditasinya tidak tersedia."
+            ),
+        }
 
     def _resolve_from_official_profile(
         self,
@@ -514,23 +672,34 @@ class SintaVerifier:
         profile_parser = _SintaDirectoryHtmlParser()
         profile_parser.feed(profile_html)
         profile_lines = profile_parser.get_lines()
+        profile_text = " ".join(profile_lines)
+        identity_text = re.split(
+            (
+                r"\b(?:current\s+ac{1,2}reditation|"
+                r"history\s+accreditation|DOI\s*:)"
+            ),
+            profile_text,
+            maxsplit=1,
+            flags=re.I,
+        )[0]
         expected_issns = {
             self.normalize_issn(value) for value in (issn_list or [])
             if self.normalize_issn(value)
         }
         profile_issns = {
             self.normalize_issn(value)
-            for value in re.findall(
-                r"(?:P-ISSN|E-ISSN|ISSN)\s*[:#]?\s*([0-9Xx-]+)",
-                " ".join(profile_lines),
-                re.I,
-            )
+            for value in self._ISSN_PATTERN.findall(identity_text)
             if self.normalize_issn(value)
         }
         matched_issn = next(iter(expected_issns & profile_issns), None)
-        profile_journal_name = self._journal_name_from_profile(profile_lines)
+        headings = [
+            node.text().strip() for node in profile_parser.root.nodes()
+            if node.tag in {"h1", "h2", "h3"} and node.text().strip()
+        ]
+        profile_journal_name = self._journal_name_from_profile(headings or profile_lines)
         exact_name_match = bool(
-            result.match_method == "JOURNAL_NAME"
+            not expected_issns
+            and result.match_method == "JOURNAL_NAME"
             and self.normalize_name(result.journal_name)
             and self.normalize_name(result.journal_name)
             == self.normalize_name(profile_journal_name)
@@ -542,6 +711,9 @@ class SintaVerifier:
             result.lookup_status = "NO_MATCH"
             result.is_ambiguous = False
             result.match_method = "NONE"
+            result.period_start = result.period_end = None
+            result.period_confirmed = False
+            result.period_status = "UNKNOWN"
             result.notes = (
                 "Profil resmi yang ditautkan dari hasil pencarian tidak memuat ISSN artikel. "
                 "Peringkat tidak ditetapkan karena identitas jurnal tidak cocok."
@@ -553,22 +725,31 @@ class SintaVerifier:
         result.issn_matched = self.format_issn(matched_issn) if matched_issn else None
         result.all_issns = [self.format_issn(value) for value in sorted(profile_issns)]
         result.journal_name = profile_journal_name or result.journal_name
-        profile_text = " ".join(profile_lines)
-        period_match = re.search(
+        all_ranks = set(re.findall(r"\bSINTA\s*[-:]?\s*([1-6])\b", profile_text, re.I))
+        period_ranges = re.findall(
             r"(?:masa\s+berlaku|periode(?:\s+akreditasi)?|akreditasi\s+berlaku|"
             r"valid(?:ity)?\s+period|accreditation\s+period|sk\s+akreditasi)"
             r"[^0-9]{0,80}(20\d{2})\s*(?:-|\u2013|\u2014|sampai|hingga|to|s\.d\.)\s*(20\d{2})",
             profile_text,
             re.I,
         )
-        result.period_start = int(period_match.group(1)) if period_match else None
-        result.period_end = int(period_match.group(2)) if period_match else None
+        if (
+            len(set(period_ranges)) != 1
+            or len(all_ranks) > 1
+            or re.search(r"history\s+accreditation|riwayat\s+akreditasi", profile_text, re.I)
+        ):
+            result.period_start = result.period_end = None
+        elif period_ranges:
+            result.period_start, result.period_end = map(int, period_ranges[0])
+        else:
+            result.period_start = result.period_end = None
 
         # If SINTA itself lists this exact article DOI, its article-level
         # accreditation label is the strongest available evidence.
         article_record = self._article_record_rank(profile_html, article_doi or "")
         if article_record is not None:
             result.match_method = "DOI"
+            result.evidence_doi = self.normalize_doi(article_doi)
             result.checked_for_year = self.normalize_year(article_year)
             result.is_ambiguous = bool(article_record.get("ambiguous"))
             result.ambiguity_reason = str(article_record.get("notes") or "")
@@ -596,10 +777,7 @@ class SintaVerifier:
                 result.notes = str(article_record.get("notes") or "Peringkat artikel tidak tercantum pada profil resmi SINTA.")
             return result
 
-        current_rank, ambiguous, reason, explicit_current = self._extract_rank_from_lines(
-            profile_lines,
-            require_current_label=True,
-        )
+        current_rank, ambiguous, reason, explicit_current = self._current_profile_rank(profile_parser)
         result.period_confirmed = False
         result.checked_for_year = self.normalize_year(article_year)
         result.match_method = "ISSN" if matched_issn else "JOURNAL_NAME"
@@ -752,12 +930,23 @@ class SintaVerifier:
                 chosen.is_ambiguous = True
                 chosen.lookup_status = "AMBIGUOUS"
                 chosen.status = "UNVERIFIED"
+                chosen.rank = None
                 chosen.period_status = "PERIOD_CHECK_REQUIRED"
                 chosen.ambiguity_reason = (
                     "Beberapa entri jurnal berbeda cocok dengan metadata pencarian. "
                     "Periksa nama dan ISSN pada sumber resmi."
                 )
                 chosen.notes = chosen.ambiguity_reason
+                return chosen
+            if chosen.is_ambiguous and chosen.match_method == "JOURNAL_NAME":
+                chosen.status = "UNVERIFIED"
+                chosen.lookup_status = "AMBIGUOUS"
+                chosen.rank = None
+                chosen.period_status = "PERIOD_CHECK_REQUIRED"
+                chosen.notes = chosen.ambiguity_reason or (
+                    "Kecocokan nama belum cukup untuk menetapkan peringkat."
+                )
+                return chosen
             return self._resolve_from_official_profile(
                 chosen,
                 clean_issns,
@@ -860,17 +1049,18 @@ class SintaVerifier:
                 f"ISSN: {', '.join(self.format_issn(value) for value in normalized_issns) or '(tidak tersedia)'}"
             )
             schema = {
-                "type": "OBJECT",
+                "type": "object",
                 "properties": {
-                    "profile_url": {"type": "STRING"},
-                    "journal_name": {"type": "STRING"},
-                    "matched_issn": {"type": "STRING"},
-                    "evidence": {"type": "STRING"},
+                    "profile_url": {"type": "string"},
+                    "journal_name": {"type": "string"},
+                    "matched_issn": {"type": "string"},
+                    "evidence": {"type": "string"},
                 },
                 "required": ["profile_url", "journal_name", "matched_issn", "evidence"],
                 "propertyOrdering": ["profile_url", "journal_name", "matched_issn", "evidence"],
             }
             response = None
+            transport_error = ""
             deadline = time.monotonic() + 20.0
             quota_limited = False
             for model in models:
@@ -891,8 +1081,12 @@ class SintaVerifier:
                                     "generationConfig": {
                                         "temperature": 0,
                                         "maxOutputTokens": 500,
-                                        "responseMimeType": "application/json",
-                                        "responseSchema": schema,
+                                        "responseFormat": {
+                                            "text": {
+                                                "mimeType": "APPLICATION_JSON",
+                                                "schema": schema,
+                                            }
+                                        },
                                         **({"thinkingConfig": {"thinkingLevel": "low"}} if model.startswith("gemini-3") else {}),
                                     },
                                 },
@@ -901,7 +1095,15 @@ class SintaVerifier:
                                     connect=min(5.0, request_timeout),
                                 ),
                             )
-                        except (httpx.TimeoutException, httpx.RequestError):
+                        except httpx.TimeoutException:
+                            transport_error = "Waktu tunggu koneksi Gemini habis. Periksa koneksi internet lalu coba lagi."
+                            if attempt < 2 and time.monotonic() < deadline:
+                                time.sleep(min(0.4 * attempt, max(0.0, deadline - time.monotonic())))
+                                continue
+                            response = None
+                            break
+                        except httpx.RequestError:
+                            transport_error = "Gemini tidak dapat dijangkau. Periksa koneksi internet atau firewall lalu coba lagi."
                             if attempt < 2 and time.monotonic() < deadline:
                                 time.sleep(min(0.4 * attempt, max(0.0, deadline - time.monotonic())))
                                 continue
@@ -945,26 +1147,59 @@ class SintaVerifier:
                 self._gemini_candidate_failure_cache[cache_key] = (note, time.monotonic() + 60.0)
                 return None, note
             if response is None:
-                return None, "Gemini belum dapat menemukan profil; pemeriksaan dapat dicoba kembali."
-            response.raise_for_status()
-            payload = response.json()
-            parts = (
-                payload.get("candidates", [{}])[0]
-                .get("content", {})
-                .get("parts", [])
-            )
+                return None, transport_error or "Gemini belum memberi respons. Periksa koneksi internet lalu coba lagi."
+            if response.status_code == 401:
+                return None, (
+                    "API key Gemini tidak valid atau masih bertipe Standard lama. Buat Auth key baru di Google AI Studio "
+                    "lalu masukkan ulang lewat pengaturan aplikasi."
+                )
+            if response.status_code == 403:
+                return None, (
+                    "Project atau pembatasan key menolak Gemini API. Buat Auth key baru di Google AI Studio dan "
+                    "pastikan key dibatasi untuk Gemini API."
+                )
+            if response.status_code == 400:
+                return None, (
+                    "Gemini menolak format permintaan (HTTP 400). Pastikan aplikasi dan model Gemini API yang dipakai "
+                    "mendukung Google Search serta output JSON."
+                )
+            if response.status_code == 404:
+                return None, "Model Gemini tidak tersedia untuk key ini (HTTP 404). Periksa konfigurasi model Gemini."
+            if response.status_code == 429:
+                return None, "Batas permintaan Gemini tercapai. Periksa kuota atau billing API key."
+            if response.status_code >= 500:
+                return None, f"Layanan Gemini sedang bermasalah (HTTP {response.status_code}). Coba lagi nanti."
+            if response.status_code != 200:
+                return None, f"Permintaan Gemini ditolak (HTTP {response.status_code}). Periksa konfigurasi API key."
+            try:
+                payload = response.json()
+            except (ValueError, json.JSONDecodeError):
+                return None, "Gemini mengirim respons yang tidak dapat dibaca. Coba lagi nanti."
+            candidates = payload.get("candidates") if isinstance(payload, dict) else None
+            if not isinstance(candidates, list) or not candidates or not isinstance(candidates[0], dict):
+                return None, "Gemini tidak mengembalikan kandidat teks. Periksa akses model lalu coba lagi."
+            content = candidates[0].get("content")
+            parts = content.get("parts", []) if isinstance(content, dict) else []
             response_text = "\n".join(
                 str(part.get("text") or "") for part in parts if isinstance(part, dict)
             ).strip()
             response_text = re.sub(r"^```(?:json)?\s*|\s*```$", "", response_text, flags=re.I)
-            parsed = json.loads(response_text)
+            if not response_text:
+                return None, "Gemini tidak mengembalikan teks. Periksa akses model atau coba lagi nanti."
+            try:
+                parsed = json.loads(response_text)
+            except json.JSONDecodeError:
+                return None, "Respons Gemini tidak berformat JSON yang dapat dibaca. Coba lagi nanti."
+            if not isinstance(parsed, dict):
+                return None, "Respons Gemini tidak berisi data profil dalam format yang diharapkan."
             url = str(parsed.get("profile_url") or "").strip()
             if not re.fullmatch(
                 r"https://sinta\.kemdiktisaintek\.go\.id/journals/profile/\d+/?",
                 url,
             ):
-                self._gemini_candidate_cache[cache_key] = None
-                return None, "Gemini belum menemukan profil resmi yang dapat dicocokkan."
+                note = "Gemini belum menemukan profil resmi yang dapat dicocokkan."
+                self._gemini_candidate_failure_cache[cache_key] = (note, time.monotonic() + 60.0)
+                return None, note
             candidate = {
                 "profile_url": url,
                 "journal_name": str(parsed.get("journal_name") or journal_name).strip(),
@@ -974,7 +1209,7 @@ class SintaVerifier:
             self._gemini_candidate_cache[cache_key] = candidate
             return candidate, ""
         except Exception:
-            return None, "Gemini belum dapat menemukan profil; pemeriksaan dapat dicoba kembali."
+            return None, "Terjadi kesalahan saat memproses respons Gemini. Coba lagi nanti."
 
     def verify(
         self,
@@ -1066,7 +1301,7 @@ class SintaVerifier:
         result = (
             SintaVerificationResult.from_dict(journal_result)
             if isinstance(journal_result, dict)
-            else journal_result
+            else SintaVerificationResult.from_dict(journal_result.to_dict())
         )
         if not article_doi or not result.source_url:
             return self.evaluate_for_year(result, article_year)
@@ -1166,7 +1401,7 @@ class SintaVerifier:
             if matched_issn:
                 matched_entries.append((entry, matched_issn, "ISSN"))
                 continue
-            if target_norm:
+            if target_norm and not clean_target_issns:
                 name_lines = [
                     self.normalize_name(line)
                     for line in entry
@@ -1319,7 +1554,11 @@ class SintaVerifier:
             journal_name=found_journal_name or journal_name,
             issn_matched=self.format_issn(matched_issn) if matched_issn else None,
             all_issns=formatted_issns,
-            source_url=self._profile_url_for_issn(html_text, matched_issn) or source_url,
+            source_url=self._profile_url_for_issn(
+                html_text,
+                matched_issn,
+                journal_name if match_method == "JOURNAL_NAME" else "",
+            ) or source_url,
             verification_source="Direktori Resmi SINTA (sinta.kemdiktisaintek.go.id)",
             verification_date=time.strftime("%Y-%m-%d %H:%M"),
             match_method=match_method,
@@ -1343,7 +1582,15 @@ class SintaVerifier:
         """Gunakan hasil identitas jurnal yang sama untuk tahun tiap artikel."""
         if isinstance(result, dict):
             result = SintaVerificationResult.from_dict(result)
+        else:
+            result = SintaVerificationResult.from_dict(result.to_dict())
         year = cls.normalize_year(article_year)
+        if (
+            result.period_status == "ARTICLE_RECORD"
+            and result.evidence_doi
+            and result.checked_for_year == year
+        ):
+            return result
         result.checked_for_year = year
         if not result.found:
             return result

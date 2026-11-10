@@ -56,6 +56,22 @@ def _write_popup_csv() -> Path:
     return path
 
 
+def _write_vision_preview(dataset_dir: Path) -> Path:
+    from PIL import Image, ImageDraw
+
+    for label, color in (("cats", (70, 120, 210)), ("dogs", (80, 160, 110))):
+        folder = dataset_dir / label
+        folder.mkdir(parents=True, exist_ok=True)
+        image = Image.new("RGB", (160, 120), color)
+        painter = ImageDraw.Draw(image)
+        painter.ellipse((42, 20, 118, 96), fill=(238, 210, 165))
+        painter.rectangle((52, 58, 108, 104), fill=color)
+        painter.ellipse((60, 49, 67, 56), fill=(30, 35, 45))
+        painter.ellipse((93, 49, 100, 56), fill=(30, 35, 45))
+        image.save(folder / f"sample_{label}.jpg", quality=88)
+    return dataset_dir
+
+
 def _analysis_preview_result(window, dataframe: pd.DataFrame) -> dict:
     analyzers = {
         "profile": window.profiler.profile,
@@ -85,7 +101,7 @@ def main() -> int:
         required=True,
         choices=(
             "dataset-empty", "dataset-loaded", "upload-loaded", "dataset-search", "analysis",
-            "overview", "overview-empty", "landscape", "about", "popup", "editor-analysis", "ml",
+            "overview", "overview-empty", "landscape", "about", "popup", "editor-analysis", "ml", "vision",
         ),
     )
     parser.add_argument("--width", type=int, default=1920)
@@ -95,7 +111,18 @@ def main() -> int:
     parser.add_argument("--debug-layout", action="store_true")
     args = parser.parse_args()
 
-    from app.ui.main_window import MainWindow, UploadDatasetDialog
+    from app.ui import main_window as main_window_module
+    from app.storage import database as database_module
+    from app.core import config as config_module
+
+    temporary_data = tempfile.TemporaryDirectory(prefix="dora_ui_screenshot_")
+    temporary_data_dir = Path(temporary_data.name)
+    config_module.get_data_dir = lambda: temporary_data_dir
+    database_module.get_data_dir = lambda: temporary_data_dir
+    main_window_module.get_data_dir = lambda: temporary_data_dir
+
+    MainWindow = main_window_module.MainWindow
+    UploadDatasetDialog = main_window_module.UploadDatasetDialog
 
     app = QApplication.instance() or QApplication(["dora-ui-screenshot"])
     window = MainWindow()
@@ -270,6 +297,9 @@ def main() -> int:
         popup_path = _write_popup_csv()
         dialog = UploadDatasetDialog(window, popup_path)
         window.open_upload_page()
+    elif args.page == "vision":
+        vision_dataset = _write_vision_preview(temporary_data_dir / "vision_demo")
+        window.open_vision_page()
 
     window.show()
     window.resize(args.width, args.height)
@@ -292,7 +322,23 @@ def main() -> int:
     output = args.output or (PROJECT_ROOT / "screenshots" / f"app_{args.page}.png")
     output.parent.mkdir(parents=True, exist_ok=True)
 
+    capture_attempts = 0
+
     def capture() -> None:
+        nonlocal capture_attempts
+        capture_attempts += 1
+        if args.page == "vision":
+            page = window.vision_intelligence_page
+            if page is None:
+                QTimer.singleShot(100, capture)
+                return
+            tab = page.image_tab
+            if tab.analysis is None and page.active_thread is None and not tab.path_edit.text():
+                tab.set_dataset_path(str(vision_dataset))
+                page.start_analysis(tab)
+            if (page.active_thread is not None or not tab.gallery.count()) and capture_attempts < 50:
+                QTimer.singleShot(100, capture)
+                return
         if args.debug_layout and args.page == "overview":
             for name, widget in (
                 ("topbar", window.topbar),
@@ -547,7 +593,8 @@ def main() -> int:
                 temporary_path.unlink(missing_ok=True)
         if dialog is not None:
             dialog.close()
-        window._session_data_cleaned = True
+        window._session_data_saved = True
+        window._save_window_geometry = lambda: None
         window.close()
         QTimer.singleShot(350, app.quit)
 
@@ -557,6 +604,7 @@ def main() -> int:
         popup_path.unlink(missing_ok=True)
     if preview_path is not None:
         preview_path.unlink(missing_ok=True)
+    temporary_data.cleanup()
     return 0
 
 

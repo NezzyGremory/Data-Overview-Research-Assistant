@@ -5,6 +5,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 from app.ai.local_explainer import LocalAcademicExplainer
 from app.ai.gemini_explainer import (
@@ -124,6 +125,32 @@ class TestExplainerSystem(unittest.TestCase):
         text2, src2 = explainer.explain_with_source(analysis_with_fp)
         self.assertEqual(text1, text2)
         self.assertEqual(src1, src2)
+
+    def test_rejected_gemini_key_gives_actionable_auth_key_guidance(self):
+        fp = "test_rejected_key_fp"
+        analysis = dict(self.sample_analysis)
+        analysis["fingerprint"] = {"fingerprint": fp}
+        _EXPLANATION_CACHE.pop(fp, None)
+        explainer = GeminiDatasetExplainer(api_key="secret-test-key")
+        response = Mock(
+            status_code=403,
+            text="PERMISSION_DENIED",
+            json=Mock(return_value={
+                "error": {
+                    "message": "Requests from referer blocked for secret-test-key"
+                }
+            }),
+        )
+
+        with patch("app.ai.gemini_explainer.httpx.post", return_value=response):
+            _text, source = explainer.explain_with_source(analysis)
+
+        self.assertEqual(source, "local")
+        self.assertIn("Auth key baru", explainer.last_error)
+        self.assertIn("batasi untuk Gemini API", explainer.last_error)
+        self.assertIn("Detail Google:", explainer.last_error)
+        self.assertIn("[key disamarkan]", explainer.last_error)
+        self.assertNotIn("secret-test-key", explainer.last_error)
 
 
 if __name__ == "__main__":

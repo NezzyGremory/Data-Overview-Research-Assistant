@@ -99,7 +99,7 @@ class DropMissingOptionsDialog(QDialog):
         self.fill_value.setPlaceholderText("Nilai konstanta (untuk method constant)")
         strategy_options_layout.addWidget(self.fill_value)
         self.group_by = QLineEdit()
-        self.group_by.setPlaceholderText("Kolom grup, pisahkan dengan koma (opsional)")
+        self.group_by.setPlaceholderText("Kolom grup (gunakan tanda , sebagai pemisah; opsional)")
         strategy_options_layout.addWidget(self.group_by)
         layout.addWidget(self.strategy_options)
 

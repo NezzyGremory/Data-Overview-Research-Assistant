@@ -278,7 +278,18 @@ class GeminiDatasetExplainer:
                                 failures.append(f"{model_name}: kuota atau batas permintaan tercapai (HTTP 403)")
                                 quota_limited = True
                                 break
-                            failures.append(f"API key ditolak (HTTP {response.status_code})")
+                            google_detail = self._provider_error_detail(response, api_key)
+                            detail_suffix = f" Detail Google: {google_detail}" if google_detail else ""
+                            if response.status_code == 401:
+                                failures.append(
+                                    "API key tidak valid atau masih bertipe Standard lama; buat Auth key baru "
+                                    f"di Google AI Studio.{detail_suffix}"
+                                )
+                            else:
+                                failures.append(
+                                    "Akses Gemini API ditolak (HTTP 403). Buat Auth key baru di Google AI Studio "
+                                    f"dan batasi untuk Gemini API.{detail_suffix}"
+                                )
                             # An authorization error is key-specific; try the next key.
                             key_rejected = True
                             break
@@ -348,6 +359,23 @@ class GeminiDatasetExplainer:
             return self.local_explainer.explain(analysis)
         except Exception:
             return "Penjelasan lokal belum dapat dibuat dari hasil analisis ini. Jalankan ulang analisis dataset."
+
+    @staticmethod
+    def _provider_error_detail(response: httpx.Response, api_key: str) -> str:
+        """Return a short provider reason while ensuring the configured key stays private."""
+        try:
+            payload = response.json()
+        except (ValueError, json.JSONDecodeError):
+            return ""
+        if not isinstance(payload, dict):
+            return ""
+        error = payload.get("error")
+        if not isinstance(error, dict):
+            return ""
+        message = " ".join(str(error.get("message") or "").split())
+        if api_key:
+            message = message.replace(api_key, "[key disamarkan]")
+        return message[:220]
 
     def _models_to_try(self) -> List[str]:
         """Daftar model resmi yang dicoba berurutan."""

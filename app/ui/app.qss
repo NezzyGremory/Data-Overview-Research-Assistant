@@ -2093,3 +2093,192 @@ QFrame#contentCard[researchGapExplanation="true"] {
     background: #4F8CFF;
     border-radius: @px(3);
 }
+
+/* Vision Intelligence stays within the shared DORA workspace palette. */
+#visionAnalysisTabs::pane {
+    background: transparent;
+    border: none;
+}
+
+#visionAnalysisTabs QTabBar::tab {
+    background: #EEF4FC;
+    border: @px(1) solid #DCE8F7;
+    border-bottom: none;
+    border-top-left-radius: @px(8);
+    border-top-right-radius: @px(8);
+    color: #61728A;
+    font-size: @px(12);
+    font-weight: 600;
+    min-height: @px(34);
+    padding: 0 @px(16);
+    margin-right: @px(4);
+}
+
+#visionAnalysisTabs QTabBar::tab:selected {
+    background: #FFFFFF;
+    color: #2B6FD8;
+    border-color: #CFE3FF;
+}
+
+#visionStatCard {
+    background: #FFFFFF;
+    border: @px(1) solid #DCE8F7;
+    border-radius: @px(12);
+}
+
+#visionMetricTitle, #visionFieldLabel, #visionRecommendationFieldName {
+    color: #7D8BA0;
+    font-size: @px(10);
+    font-weight: 700;
+}
+
+#visionMetricValue {
+    color: #172033;
+    font-size: @px(21);
+    font-weight: 750;
+}
+
+#visionMetricDetail, #visionMutedLabel {
+    color: #8391A4;
+    font-size: @px(10);
+}
+
+#visionSectionTitle, #visionSubsectionTitle {
+    color: #1C2B40;
+    font-size: @px(13);
+    font-weight: 700;
+}
+
+#visionSubsectionTitle { margin-top: @px(4); }
+
+#visionStatusLabel {
+    color: #52657D;
+    font-size: @px(11);
+}
+
+#visionProgressBar {
+    background: #E8F0FC;
+    border: none;
+    border-radius: @px(4);
+    color: #52657D;
+    max-height: @px(16);
+    text-align: center;
+}
+
+#visionProgressBar::chunk {
+    background: #4F8CFF;
+    border-radius: @px(4);
+}
+
+QLineEdit#visionDatasetPath, QComboBox#visionTaskSelector {
+    background: #FFFFFF;
+    border: @px(1) solid #D8E3F1;
+    border-radius: @px(8);
+    color: #344158;
+    min-height: @px(34);
+    padding: 0 @px(9);
+}
+
+QLineEdit#visionDatasetPath:focus, QComboBox#visionTaskSelector:focus {
+    border-color: #8AB7F4;
+}
+
+#visionEmptyLabel {
+    background: #F7FAFE;
+    border: @px(1) dashed #D5E2F1;
+    border-radius: @px(8);
+    color: #8290A4;
+    font-size: @px(11);
+    padding: @px(10);
+}
+
+#visionDistributionLabel, #visionDistributionValue, #visionDetailValue {
+    color: #52657D;
+    font-size: @px(11);
+}
+
+#visionDistributionBar {
+    background: #EAF1FB;
+    border: none;
+    border-radius: @px(4);
+    max-height: @px(9);
+}
+
+#visionDistributionBar::chunk {
+    background: #77A8F3;
+    border-radius: @px(4);
+}
+
+#visionGallery {
+    background: #F7FAFE;
+    border: @px(1) solid #E1EAF5;
+    border-radius: @px(9);
+    color: #52657D;
+    outline: none;
+}
+
+#visionGallery::item {
+    border: @px(1) solid transparent;
+    border-radius: @px(7);
+    padding: @px(4);
+}
+
+#visionGallery::item:selected {
+    background: #E9F2FF;
+    border-color: #BDD7FA;
+}
+
+#visionSampleViewer {
+    background: #F7FAFE;
+    border: @px(1) solid #E1EAF5;
+    border-radius: @px(9);
+    color: #8391A4;
+    font-size: @px(11);
+    padding: @px(6);
+}
+
+#visionQualityNote {
+    color: #596A82;
+    font-size: @px(11);
+}
+
+#visionPrimaryRecommendation, #visionAlternativeRecommendation {
+    background: #FFFFFF;
+    border: @px(1) solid #DCE8F7;
+    border-radius: @px(10);
+}
+
+#visionPrimaryRecommendation { border-left: @px(3) solid #4F8CFF; }
+#visionAlternativeRecommendation { background: #FAFCFF; }
+
+#visionRecommendationEyebrow {
+    color: #5482C4;
+    font-size: @px(9);
+    font-weight: 800;
+    letter-spacing: @px(0.5);
+}
+
+#visionRecommendationTitle {
+    color: #172033;
+    font-size: @px(14);
+    font-weight: 700;
+}
+
+#visionRecommendationTask {
+    color: #6E7E93;
+    font-size: @px(10);
+}
+
+#visionRecommendationFieldValue {
+    color: #52657D;
+    font-size: @px(10);
+}
+
+#visionWarningLabel {
+    background: #FFF8E8;
+    border: @px(1) solid #F2DEA8;
+    border-radius: @px(7);
+    color: #87651B;
+    font-size: @px(10);
+    padding: @px(8);
+}

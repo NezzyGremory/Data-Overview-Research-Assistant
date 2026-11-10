@@ -24,6 +24,9 @@ a = Analysis(
     datas=runtime_datas + collect_data_files("pip") + copy_metadata("pip"),
     hiddenimports=[
         "app.ui.editor_notebook_kernel",
+        # Vision loads OpenCV lazily so image-only installs can still report a
+        # useful missing-dependency message; collect it explicitly for builds.
+        "cv2",
         "PySide6.QtSvg",
         *collect_submodules("pip"),
     ],

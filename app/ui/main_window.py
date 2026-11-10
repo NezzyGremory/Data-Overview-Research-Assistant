@@ -126,15 +126,30 @@ def _resource_path(relative_path: str | Path) -> Path:
     return Path(__file__).resolve().parent / relative
 
 
-def _without_ui_punctuation(value: str) -> str:
-    """Remove sentence punctuation from visible interface copy."""
-    text = re.sub(r"(?<=\d)[.,](?=\d)", " koma ", str(value or ""))
-    text = re.sub(r"[.,;]", " ", text)
-    return re.sub(r"[ \t]{2,}", " ", text)
+def _normalize_visible_ui_punctuation(value: str) -> str:
+    """Use a comma for decimal points while preserving visible punctuation."""
+    text = str(value or "")
+    protected_tokens = []
+
+    def protect_numeric_identifier(match):
+        token = f"\uFFF0{len(protected_tokens)}\uFFF1"
+        protected_tokens.append(match.group(0))
+        return token
+
+    text = re.sub(
+        r"\b\d+(?:\.\d+){2,}\b|\b10\.\d{4,9}/[^\s<>\"']+",
+        protect_numeric_identifier,
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r"(?<=\d)\.(?=\d)", ",", text)
+    for index, original in enumerate(protected_tokens):
+        text = text.replace(f"\uFFF0{index}\uFFF1", original)
+    return text
 
 
 class _UiCopyHtmlCleaner(HTMLParser):
-    """Keep rich text markup while cleaning the words shown inside it."""
+    """Keep rich text markup while normalizing decimal separators in its text."""
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
@@ -158,7 +173,7 @@ class _UiCopyHtmlCleaner(HTMLParser):
         if self._raw_text_tag:
             self.parts.append(data)
         else:
-            self.parts.append(html_escape(_without_ui_punctuation(data), quote=False))
+            self.parts.append(html_escape(_normalize_visible_ui_punctuation(data), quote=False))
 
     def handle_comment(self, data):
         self.parts.append(f"<!--{data}-->")
@@ -176,7 +191,7 @@ def _clean_visible_ui_copy(value: str) -> str:
         parser.feed(text)
         parser.close()
         return "".join(parser.parts)
-    return _without_ui_punctuation(text)
+    return _normalize_visible_ui_punctuation(text)
 
 
 def _sinta_ui_text(value: Any) -> str:
@@ -5042,7 +5057,8 @@ class AnalysisPage(QWidget):
         if self._gemini_label is not None:
             self._gemini_label.setText("Sedang menyusun interpretasi berdasarkan hasil analisis...")
         if self._gemini_status_label is not None:
-            self._gemini_status_label.setText("Menghubungi Gemini secara aman di latar belakang; hasil lokal tetap tersedia jika gagal.")
+            self._gemini_status_label.setText("Penjelasan otomatis sedang disiapkan.")
+            self._gemini_status_label.setToolTip("")
 
         thread.started.connect(worker.run)
         worker.finished.connect(self._on_gemini_finished)
@@ -5087,26 +5103,26 @@ class AnalysisPage(QWidget):
         if self._gemini_label is not None:
             self._gemini_label.setText(text)
         if self._gemini_status_label is not None:
-            self._gemini_status_label.setText(
-                "Sumber penjelasan: Gemini"
-                if source == "gemini"
-                else (
-                    "Gemini tidak tersedia; ditampilkan penjelasan lokal. "
-                    + (detail if detail else "Periksa API key dan koneksi internet.")
+            if source == "gemini":
+                status_text = "Penjelasan otomatis selesai dengan Gemini."
+                self._gemini_status_label.setToolTip("")
+            else:
+                status_text = "Penjelasan otomatis tersedia."
+                self._gemini_status_label.setToolTip(
+                    detail or "Gemini tidak tersedia; penjelasan cadangan digunakan."
                 )
-            )
+            self._gemini_status_label.setText(status_text)
 
     def _on_gemini_failed(self, request_id: int, message: str):
         if request_id != self._gemini_request_id:
             return
         if self._gemini_label is not None:
             self._gemini_label.setText(
-                "Gagal memuat interpretasi cloud. Sistem menggunakan interpretasi lokal."
+                "Penjelasan otomatis belum tersedia. Jalankan analisis kembali untuk mencoba lagi."
             )
         if self._gemini_status_label is not None:
-            self._gemini_status_label.setText(
-                "Penjelasan lokal juga belum berhasil dibuat. Coba jalankan analisis kembali."
-            )
+            self._gemini_status_label.setText("Penjelasan otomatis belum tersedia. Coba jalankan analisis kembali.")
+            self._gemini_status_label.setToolTip(message)
 
     # =====================================================
     # FORMAT COLLECTION
@@ -6081,29 +6097,37 @@ class AnalysisPage(QWidget):
         self._gemini_label.setWordWrap(True)
         layout.addWidget(self._gemini_label)
 
-        # Action row for API key configuration (optional)
-        cfg_row = QHBoxLayout()
-        cfg_row.setSpacing(10)
+        # Keep key controls on their own row so a long API status can use the
+        # full card width and grow vertically instead of squeezing beside it.
+        cfg_layout = QVBoxLayout()
+        cfg_layout.setContentsMargins(0, 0, 0, 0)
+        cfg_layout.setSpacing(8)
+        cfg_action_row = QHBoxLayout()
+        cfg_action_row.setSpacing(10)
 
         key_btn = QPushButton("Atur API Key (Opsional)")
         key_btn.setObjectName("secondaryButton")
         key_btn.setStyleSheet("font-size: 10px; padding: 2px 10px; min-height: 26px;")
         key_btn.clicked.connect(self._handle_configure_gemini_key)
-        cfg_row.addWidget(key_btn)
+        cfg_action_row.addWidget(key_btn)
+        cfg_action_row.addStretch()
+        cfg_layout.addLayout(cfg_action_row)
 
         configured = get_saved_api_key()
         status_text = (
-            "Gemini aktif; ringkasan analisis dikirim ke Google."
+            "API key tersimpan; Gemini akan dicoba saat menyusun penjelasan."
             if configured
-            else "Gemini opsional; tanpa API key, aplikasi menggunakan penjelasan lokal."
+            else "Gemini opsional; penjelasan otomatis tetap tersedia."
         )
         status_note = QLabel(status_text)
         status_note.setObjectName("cardDescription")
+        status_note.setTextFormat(Qt.PlainText)
         status_note.setWordWrap(True)
+        status_note.setMinimumWidth(0)
+        status_note.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self._gemini_status_label = status_note
-        cfg_row.addWidget(status_note)
-        cfg_row.addStretch()
-        layout.addLayout(cfg_row)
+        cfg_layout.addWidget(status_note)
+        layout.addLayout(cfg_layout)
 
         self.result_layout.addWidget(card)
         self._start_gemini_explanation(result)
@@ -9800,13 +9824,7 @@ class ResearchPage(QWidget):
                         existing = paper.get("sinta_screening") or {}
                         expected_key = self._screening_metadata_key(paper)
                         saved_key = saved.get("metadata_key")
-                        legacy_matches = (
-                            not saved_key
-                            and bool(saved.get("period_confirmed"))
-                            and str(saved.get("checked_for_year") or "")
-                            == str(paper.get("year") or "")
-                        )
-                        if saved_key == expected_key or legacy_matches:
+                        if saved_key == expected_key:
                             if not existing.get("period_confirmed"):
                                 paper["sinta_screening"] = {**existing, **saved}
                     existing = paper.get("sinta_screening")
@@ -9843,6 +9861,27 @@ class ResearchPage(QWidget):
                 bool(self._all_papers) and self._non_sinta_thread is None
             )
         self._apply_paper_filter()
+
+    @staticmethod
+    def _sinta_screening_is_fresh(screening):
+        from app.research.sinta_verifier import SintaVerifier
+
+        if str(screening.get("lookup_status") or "").upper() == "MANUALLY_CONFIRMED":
+            return bool(screening.get("period_confirmed") and screening.get("metadata_key"))
+        checked_at = screening.get("checked_at") or screening.get("verification_date")
+        if not checked_at:
+            return False
+        parsed = None
+        for format_string in ("%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+            try:
+                parsed = time.mktime(time.strptime(str(checked_at), format_string))
+                break
+            except (TypeError, ValueError, OverflowError):
+                continue
+        if parsed is None:
+            return False
+        age = time.time() - parsed
+        return -300 <= age <= SintaVerifier.CACHE_MAX_AGE_SECONDS
 
     @staticmethod
     def _sinta_screening(paper):
@@ -9885,6 +9924,32 @@ class ResearchPage(QWidget):
                 "Versi lama menyimpulkan status ini dari periode yang tidak mencakup tahun artikel. "
                 "Periksa SK historis sebelum menyimpulkan akreditasi."
             )
+        current_key = ResearchPage._screening_metadata_key(paper)
+        stored_key = screening.get("metadata_key")
+        manually_confirmed = (
+            str(screening.get("lookup_status") or "").upper()
+            == "MANUALLY_CONFIRMED"
+        )
+        metadata_mismatch = bool(stored_key and stored_key != current_key)
+        missing_manual_key = manually_confirmed and not stored_key
+        if (
+            metadata_mismatch
+            or missing_manual_key
+            or (
+                (screening.get("checked_at") or screening.get("verification_date"))
+                and not manually_confirmed
+                and not ResearchPage._sinta_screening_is_fresh(screening)
+            )
+        ):
+            screening["status"] = "UNVERIFIED"
+            screening["rank"] = None
+            screening["lookup_status"] = "STALE"
+            screening["period_status"] = "UNKNOWN"
+            screening["period_confirmed"] = False
+            screening["notes"] = (
+                "Snapshot otomatis SINTA sudah lebih dari tujuh hari. "
+                "Periksa kembali direktori resmi sebelum memakai peringkatnya."
+            )
         return screening
 
     @staticmethod
@@ -9903,7 +9968,7 @@ class ResearchPage(QWidget):
         year = SintaVerifier.normalize_year(paper.get("year"))
         doi = SintaVerifier.normalize_doi(str(paper.get("doi") or ""))
         return (
-            f"sinta-parser:v4|issn:{','.join(normalized_issns)}"
+            f"sinta-parser:{SintaVerifier.PARSER_VERSION}|issn:{','.join(normalized_issns)}"
             f"|journal:{journal}|year:{year or ''}|doi:{doi}"
         )
 
@@ -9930,6 +9995,8 @@ class ResearchPage(QWidget):
         if lookup_status == "RANK_UNAVAILABLE":
             return "Peringkat Tidak Terbaca"
         if lookup_status == "LEGACY_UNVERIFIED":
+            return "Perlu Diperiksa Ulang"
+        if lookup_status == "STALE":
             return "Perlu Diperiksa Ulang"
         labels = {
             "UNVERIFIED": "Belum Diperiksa",
@@ -11065,21 +11132,6 @@ class ResearchPage(QWidget):
             )
             return
 
-        cache_key = self._screening_metadata_key(paper)
-        cached_result = self._sinta_lookup_cache.get(cache_key)
-        if cached_result is None:
-            existing_screening = self._sinta_screening(paper)
-            if (
-                existing_screening.get("metadata_key") == cache_key
-                and existing_screening.get("found")
-            ):
-                cached_result = existing_screening
-        if cached_result is not None:
-            self._on_sinta_lookup_result(
-                paper_index, self._paper_identity(paper), cached_result
-            )
-            return
-
         self.check_sinta_button.setEnabled(False)
         self.sinta_batch_button.setEnabled(False)
         self.other_index_button.setEnabled(False)
@@ -11828,10 +11880,8 @@ class PapersToolPage(QWidget):
     def _clean_ui_text(value):
         if value is None:
             return ""
-        return "\n".join(
-            " ".join(line.replace(".", " ").replace(",", " ").split())
-            for line in str(value).splitlines()
-        ).strip()
+        text = _normalize_visible_ui_punctuation(str(value))
+        return "\n".join(" ".join(line.split()) for line in text.splitlines()).strip()
 
     @staticmethod
     def _format_relevance(value):
@@ -11840,7 +11890,88 @@ class PapersToolPage(QWidget):
         whole, separator, fraction = f"{value:.1f}".partition(".")
         if not separator or fraction == "0":
             return f"{whole}%"
-        return f"{whole} koma {fraction}%"
+        return f"{whole},{fraction}%"
+
+    def _update_sinta_distribution_chart(self):
+        axes = getattr(self, "sinta_distribution_axes", None)
+        canvas = getattr(self, "sinta_distribution_canvas", None)
+        if axes is None or canvas is None:
+            return
+
+        ranks = [f"S{value}" for value in range(1, 7)]
+        counts = {rank: 0 for rank in ranks}
+        confirmed_count = 0
+        for paper in getattr(self, "papers", []):
+            if not isinstance(paper, dict):
+                continue
+            screening = ResearchPage._sinta_screening(paper)
+            lookup_status = str(screening.get("lookup_status") or "").upper()
+            # The verifier keeps an observed rank in `rank` when the current
+            # SINTA result is present but its SK period still needs review.
+            rank = str(screening.get("rank") or screening.get("status") or "").upper()
+            period_status = str(screening.get("period_status") or "").upper()
+            period_confirmed = bool(screening.get("period_confirmed")) or period_status in {
+                "VALID", "ARTICLE_RECORD", "MANUALLY_CONFIRMED"
+            }
+            if rank in counts and lookup_status in {
+                "VERIFIED", "MANUALLY_CONFIRMED", "PERIOD_UNVERIFIED"
+            }:
+                counts[rank] += 1
+                if lookup_status in {"VERIFIED", "MANUALLY_CONFIRMED"} and period_confirmed:
+                    confirmed_count += 1
+
+        total = sum(counts.values())
+        all_papers = len(getattr(self, "papers", []))
+        if total:
+            pending_count = total - confirmed_count
+            summary = (
+                f"{total} dari {all_papers} paper memiliki peringkat SINTA terdeteksi; "
+                f"{confirmed_count} terkonfirmasi, {pending_count} menunggu cek periode SK."
+            )
+        else:
+            summary = "Belum ada peringkat SINTA yang terdeteksi dari indeks."
+        self.sinta_distribution_summary.setText(summary)
+
+        figure = self.sinta_distribution_figure
+        figure.patch.set_facecolor("#FFFFFF")
+        axes.clear()
+        axes.set_facecolor("#FFFFFF")
+        axes.set_yticks(range(len(ranks)), labels=ranks)
+        axes.invert_yaxis()
+        axes.set_xticks([])
+        axes.tick_params(axis="y", labelsize=8, length=0, pad=4, colors="#53667D")
+        axes.set_xlim(0, max(1, max(counts.values(), default=0) * 1.24))
+        axes.grid(axis="x", color="#E7EDF5", linewidth=0.7)
+        axes.set_axisbelow(True)
+        for spine in axes.spines.values():
+            spine.set_visible(False)
+
+        palette = ["#174A8B", "#2367B2", "#3582CF", "#5B9DE0", "#86B5E5", "#A9C9E9"]
+        values = [counts[rank] for rank in ranks]
+        axes.barh(range(len(ranks)), values, color=palette, height=0.58)
+        for position, value in enumerate(values):
+            axes.text(
+                value + 0.025,
+                position,
+                str(value),
+                va="center",
+                ha="left",
+                fontsize=8,
+                color="#34465E",
+            )
+        if not total:
+            axes.text(
+                0.52,
+                0.5,
+                "Belum ada peringkat SINTA terdeteksi",
+                transform=axes.transAxes,
+                ha="center",
+                va="center",
+                fontsize=8,
+                color="#8795A8",
+            )
+        figure.tight_layout(pad=0.7)
+        canvas.draw_idle()
 
     def _build_ui(self):
         root = QVBoxLayout(self)
@@ -11984,12 +12115,19 @@ class PapersToolPage(QWidget):
         sinta_status_layout.setContentsMargins(14, 10, 14, 10)
         sinta_status_layout.setSpacing(6)
 
+        status_row = QBoxLayout(QBoxLayout.LeftToRight)
+        self._sinta_status_row_layout = status_row
+        status_copy = QWidget()
+        status_copy_layout = QVBoxLayout(status_copy)
+        status_copy_layout.setContentsMargins(0, 0, 0, 0)
+        status_copy_layout.setSpacing(6)
+
         self.sinta_batch_status = QLabel(
             "Status SINTA dan indeks lain ditampilkan terpisah Jurnal di luar SINTA dapat muncul pada indeks lain"
         )
         self.sinta_batch_status.setObjectName("cardDescription")
         self.sinta_batch_status.setWordWrap(True)
-        sinta_status_layout.addWidget(self.sinta_batch_status)
+        status_copy_layout.addWidget(self.sinta_batch_status)
 
         self.sinta_scope_note = QLabel(
             "SINTA memeriksa akreditasi dan periode berlaku DOI dicocokkan bila tersedia pada profil resmi\n"
@@ -11999,7 +12137,38 @@ class PapersToolPage(QWidget):
         )
         self.sinta_scope_note.setObjectName("cardDescription")
         self.sinta_scope_note.setWordWrap(True)
-        sinta_status_layout.addWidget(self.sinta_scope_note)
+        status_copy_layout.addWidget(self.sinta_scope_note)
+        status_row.addWidget(status_copy, 3)
+
+        distribution_panel = QFrame()
+        distribution_panel.setObjectName("researchCard")
+        distribution_layout = QVBoxLayout(distribution_panel)
+        distribution_layout.setContentsMargins(10, 8, 10, 8)
+        distribution_layout.setSpacing(3)
+
+        distribution_title = QLabel("Distribusi Peringkat SINTA")
+        distribution_title.setObjectName("sectionTitle")
+        self.sinta_distribution_summary = QLabel(
+            "Belum ada peringkat yang terverifikasi."
+        )
+        self.sinta_distribution_summary.setObjectName("cardDescription")
+        self.sinta_distribution_summary.setWordWrap(True)
+        distribution_layout.addWidget(distribution_title)
+        distribution_layout.addWidget(self.sinta_distribution_summary)
+
+        self.sinta_distribution_figure = Figure(figsize=(3.7, 1.42), dpi=90)
+        self.sinta_distribution_axes = self.sinta_distribution_figure.add_subplot(111)
+        self.sinta_distribution_canvas = FigureCanvasQTAgg(
+            self.sinta_distribution_figure
+        )
+        self.sinta_distribution_canvas.setMinimumHeight(126)
+        self.sinta_distribution_canvas.setMaximumHeight(150)
+        self.sinta_distribution_canvas.setToolTip(
+            "Grafik menampilkan peringkat yang ditemukan dari indeks SINTA, termasuk yang masih menunggu konfirmasi periode SK."
+        )
+        distribution_layout.addWidget(self.sinta_distribution_canvas)
+        status_row.addWidget(distribution_panel, 2)
+        sinta_status_layout.addLayout(status_row)
 
         self.sinta_batch_progress = QProgressBar()
         self.sinta_batch_progress.setTextVisible(False)
@@ -12007,6 +12176,7 @@ class PapersToolPage(QWidget):
         self.sinta_batch_progress.setVisible(False)
         sinta_status_layout.addWidget(self.sinta_batch_progress)
         root.addWidget(sinta_status_panel)
+        self._update_sinta_distribution_chart()
 
         # -----------------------------------------------------
         # PAPER TABLE
@@ -12176,6 +12346,7 @@ class PapersToolPage(QWidget):
             "Jalankan Academic Research untuk menampilkan paper di sini"
         ))
         self.count_label.setText("0 paper")
+        self._update_sinta_distribution_chart()
         self.accreditation_status_label.setText("Penilaian jurnal aktif")
         self.open_source_button.setEnabled(False)
         self.source_menu.clear()
@@ -12208,6 +12379,8 @@ class PapersToolPage(QWidget):
                 str(screening.get("status") or ""),
                 str(screening.get("lookup_status") or ""),
                 str(screening.get("rank") or ""),
+                str(screening.get("period_status") or ""),
+                bool(screening.get("period_confirmed")),
                 str(screening.get("checked_at") or ""),
                 str(screening.get("other_indexes", {})),
                 str(screening.get("official_assessments_status") or ""),
@@ -12406,6 +12579,7 @@ class PapersToolPage(QWidget):
 
         self.filtered_papers = filtered
         self._populate_table()
+        self._update_sinta_distribution_chart()
 
     # =====================================================
     # TABLE
@@ -12813,6 +12987,9 @@ class PapersToolPage(QWidget):
         )
         self._paper_header_layout.setSpacing(10 if compact else 20)
         self._paper_toolbar_layout.setDirection(
+            QBoxLayout.TopToBottom if compact else QBoxLayout.LeftToRight
+        )
+        self._sinta_status_row_layout.setDirection(
             QBoxLayout.TopToBottom if compact else QBoxLayout.LeftToRight
         )
         self.paper_table.setHorizontalHeaderLabels(
@@ -13494,23 +13671,17 @@ class ResearchGapToolPage(QWidget):
         metrics.addWidget(InfoCard("Paper dianalisis", str(len(self.research_result.get("papers", []))), "Literatur yang ditemukan"))
         explanation = self.research_result.get("gap_explanation") or {}
         explanation_source = explanation.get("source", "") if isinstance(explanation, dict) else ""
-        explanation_status = (
-            "Gemini" if explanation_source == "gemini"
-            else ("Gagal" if explanation_source == "error" else ("Lokal" if explanation else "Belum dibuat"))
-        )
-        metrics.addWidget(InfoCard("Penjelasan", explanation_status, "Ringkasan lokal tersedia jika Gemini tidak merespons"))
         self.content.addLayout(metrics)
 
         if self._explanation_thread is not None:
             self.content.addWidget(LoadingCard(
                 "Menyusun penjelasan Research Gap",
-                "Menyiapkan ringkasan. Jika Gemini tidak tersedia, penjelasan lokal akan ditampilkan.",
+                "Menyiapkan ringkasan berdasarkan paper yang ditemukan.",
                 self.container,
             ))
         elif isinstance(explanation, dict) and explanation.get("text"):
             self._add_explanation_card(
                 explanation.get("text", ""), explanation_source,
-                explanation.get("reason", ""),
             )
         else:
             self._add_explanation_card(
@@ -13524,7 +13695,7 @@ class ResearchGapToolPage(QWidget):
         if not items:
             gap_status = str(gaps.get("status") or "").upper() if isinstance(gaps, dict) else ""
             if gap_status == "ERROR":
-                empty_text = "Analisis kandidat gap belum selesai. Lihat penjelasan lokal untuk status dan langkah pemeriksaannya."
+                empty_text = "Analisis kandidat gap belum selesai. Periksa kembali setelah proses selesai."
             elif gap_status == "SKIPPED":
                 empty_text = "Analisis kandidat gap belum dijalankan. Buka tab Research Gap untuk menghitungnya."
             elif self.research_result.get("papers"):
@@ -13545,7 +13716,7 @@ class ResearchGapToolPage(QWidget):
         self.content.addWidget(note)
         self.content.addStretch()
 
-    def _add_explanation_card(self, text, source, reason=""):
+    def _add_explanation_card(self, text, source):
 
         card = QFrame()
         card.setObjectName("contentCard")
@@ -13557,21 +13728,14 @@ class ResearchGapToolPage(QWidget):
         eyebrow.setObjectName("gapExplanationEyebrow")
         title = QLabel("Penjelasan dan saran penelitian")
         title.setObjectName("sectionTitle")
-        source_names = {
-            "gemini": "Dibantu Gemini",
-            "local": "Ringkasan lokal",
-            "error": "Penjelasan belum berhasil dibuat",
-            "menunggu": "Menunggu analisis",
-        }
-        source_label = QLabel(f"Sumber: {source_names.get(source, source)}")
-        source_label.setObjectName("statusLabel")
-        if reason:
-            reason_label = QLabel(reason)
-            reason_label.setObjectName("errorState" if source == "error" else "cardDescription")
-            reason_label.setWordWrap(True)
+        display_text = (
+            "Penjelasan otomatis belum tersedia. Silakan coba lagi setelah beberapa saat."
+            if source == "error"
+            else text
+        )
         markdown_document = QTextDocument()
         markdown_document.setDefaultFont(self.font())
-        markdown_document.setMarkdown(str(text))
+        markdown_document.setMarkdown(str(display_text))
         body = QLabel()
         body.setObjectName("gapExplanationBody")
         body.setTextFormat(Qt.RichText)
@@ -13581,9 +13745,6 @@ class ResearchGapToolPage(QWidget):
         body.setMinimumHeight(60)
         layout.addWidget(eyebrow)
         layout.addWidget(title)
-        layout.addWidget(source_label)
-        if reason:
-            layout.addWidget(reason_label)
         layout.addWidget(body)
         self.content.addWidget(card)
 
@@ -14662,6 +14823,7 @@ class MainWindow(QMainWindow):
             ),
             "gap_tool_page": ("_explanation_thread",),
             "report_tool_page": ("_report_thread",),
+            "vision_intelligence_page": ("_thread",),
         }
         active = []
         for page_name, attributes in worker_fields.items():
@@ -14760,6 +14922,9 @@ class MainWindow(QMainWindow):
             return
 
         self._shutdown_pending = True
+        vision_page = getattr(self, "vision_intelligence_page", None)
+        if vision_page is not None:
+            vision_page.cancel_active_operation()
         self._shutdown_idle_checks = 0
         self.setWindowTitle("Data Overview & Research Assistant — Menutup sesi")
         if self.centralWidget() is not None:
@@ -15559,10 +15724,12 @@ class MainWindow(QMainWindow):
         self.gap_tool_page = None
         self.research_insights_page = None
         self.report_tool_page = None
+        self.vision_intelligence_page = None
         self._ml_page_build_scheduled = False
         self._research_page_build_scheduled = False
         self._insights_page_build_scheduled = False
         self._report_page_build_scheduled = False
+        self._vision_page_build_scheduled = False
 
         self._ml_placeholder = deferred_page(
             "mlLoadingPlaceholder", "ML Intelligence"
@@ -15575,6 +15742,9 @@ class MainWindow(QMainWindow):
         )
         self._report_placeholder = deferred_page(
             "reportLoadingPlaceholder", "Research Report"
+        )
+        self._vision_placeholder = deferred_page(
+            "visionLoadingPlaceholder", "Vision Intelligence"
         )
         self._startup_checkpoint("Menyiapkan halaman bantuan…")
         self.about_page = AboutPage()
@@ -15597,6 +15767,7 @@ class MainWindow(QMainWindow):
             "landscape": self._insights_placeholder,
             "gap": self._insights_placeholder,
             "report": self._report_placeholder,
+            "vision": self._vision_placeholder,
             "about": self.about_page,
             "copyright": self.copyright_page,
             "help": self.help_page,
@@ -15642,6 +15813,7 @@ class MainWindow(QMainWindow):
             "landscape": "Research Landscape",
             "gap": "Research Gap",
             "report": "Research Report",
+            "vision": "Vision Intelligence",
             "about": "Tentang DORA",
             "copyright": "Credits",
             "help": "Bantuan",
@@ -15744,11 +15916,12 @@ class MainWindow(QMainWindow):
         self._add_nav_section(layout, "RUANG KERJA")
         layout.itemAt(layout.count() - 1).widget().setFixedHeight(32)
         layout.addSpacing(2)
-        self._add_nav_group(layout, 238, 15, 8, (
+        self._add_nav_group(layout, 281, 15, 8, (
             ("dataset_search", "dataset-search.svg", "Dataset Search"),
             ("dataset", "dataset.svg", "Dataset"),
             ("analysis", "analysis.svg", "Analysis"),
             ("ml", "ml-intelligence.svg", "ML Intelligence"),
+            ("vision", "vision-intelligence.svg", "Vision Intelligence"),
             ("dashboard", "overview.svg", "Overview"),
         ))
         layout.addSpacing(8)
@@ -15861,6 +16034,7 @@ class MainWindow(QMainWindow):
                 "analysis": (24, 24),
                 "editor_analysis": (24, 24),
                 "ml": (24, 24),
+                "vision": (24, 24),
                 "dashboard": (26, 26),
                 "research": (30, 24),
                 "papers": (30, 30),
@@ -15894,6 +16068,7 @@ class MainWindow(QMainWindow):
             "editor_analysis": self.open_editor_analysis_page,
             "node_editor": self.open_node_editor_page,
             "ml": self.open_ml_page,
+            "vision": self.open_vision_page,
             "research": self.open_research_page,
             "papers": self.open_papers_tool,
             "landscape": self.open_landscape_tool,
@@ -16406,7 +16581,7 @@ class MainWindow(QMainWindow):
         original = ("dataset_search", "dataset", "analysis", "ml", "dashboard")
         page4 = (
             "dashboard", "dataset_search", "dataset", "analysis",
-            "ml",
+            "ml", "vision",
         )
         ordered_keys = page4 if page4_mode else original
         buttons = [self.nav_buttons[key] for key in ordered_keys if key in self.nav_buttons]
@@ -16419,7 +16594,7 @@ class MainWindow(QMainWindow):
             )
         if self.sidebar_group_cards:
             self.sidebar_group_cards[0].setFixedHeight(
-                self.scale_manager.px(180 if page4_mode else 238)
+                self.scale_manager.px(202 if page4_mode else 281)
             )
         self._workspace_navigation_mode = page4_mode
 
@@ -16599,6 +16774,27 @@ class MainWindow(QMainWindow):
             self.upload_page.update_loaded_state(None, "")
             self.datasets_tabs.setCurrentWidget(self.upload_page)
         self._show_page("dataset")
+
+    def open_vision_page(self):
+        if self.vision_intelligence_page is None:
+            self._show_page("vision")
+            if not self._vision_page_build_scheduled:
+                self._vision_page_build_scheduled = True
+                QTimer.singleShot(40, self._create_vision_page)
+            return
+        self._show_page("vision")
+        self.vision_intelligence_page.restore_project(self.current_project_id)
+
+    def _create_vision_page(self):
+        self._vision_page_build_scheduled = False
+        if self.vision_intelligence_page is not None:
+            return
+        from app.ui.vision_intelligence_page import VisionIntelligencePage
+
+        page = VisionIntelligencePage(self)
+        self.vision_intelligence_page = page
+        self._replace_lazy_page("vision", page)
+        page.restore_project(self.current_project_id)
 
     def open_datasets_page(self):
         # Open the existing dataset preview when data is loaded, or the upload

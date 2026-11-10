@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from difflib import SequenceMatcher
 from typing import Dict, List, Optional, Set
 
@@ -44,6 +45,76 @@ class PaperRanker:
         "schema": 0.20,
         "keyword": 0.10,
         "metadata": 0.05,
+    }
+
+    RANKING_VERSION = "topic-evidence-v2"
+
+    GENERIC_KEYWORDS = {
+        "data", "dataset", "datasets", "file", "files", "table", "record", "records",
+        "research", "study", "studies", "paper", "papers", "article", "articles",
+        "analysis", "analyze", "analyses", "using", "based", "approach", "method",
+        "methods", "model", "models", "algorithm", "algorithms", "feature", "features",
+        "variable", "variables", "value", "values", "result", "results", "prediction",
+        "predictions", "predictive", "classification", "regression", "clustering",
+        "machine learning", "deep learning", "random forest", "support vector machine",
+        "svm", "neural network", "neural networks", "xgboost", "logistic regression",
+        "csv", "tsv", "xlsx", "xls", "json", "parquet",
+    }
+
+    GENERIC_TOPIC_TOKENS = {
+        "the", "and", "for", "of", "in", "on", "to", "with", "by", "from", "as",
+        "or", "at", "a", "an", "is", "are", "dan", "dari", "yang", "untuk",
+        "pada", "dengan", "terhadap", "sebuah", "dalam", "berdasarkan",
+        "data", "dataset", "datasets", "file", "files", "table", "record", "records",
+        "id", "index", "row", "uuid", "key", "unnamed",
+        "research", "study", "studies", "paper", "papers", "article", "articles",
+        "analysis", "analyze", "analyses", "using", "based", "approach", "method",
+        "methods", "model", "models", "algorithm", "algorithms", "feature", "features",
+        "variable", "variables", "value", "values", "result", "results", "prediction",
+        "predictions", "predictive", "classification", "regression", "clustering",
+        "machine", "learning", "deep", "random", "forest", "support", "vector", "svm",
+        "neural", "network", "networks", "xgboost", "logistic", "csv", "tsv", "xlsx",
+        "xls", "json", "parquet",
+    }
+
+    DATASET_NAME_GENERIC = {
+        "data", "dataset", "datasets", "file", "table", "train", "test", "training",
+        "testing", "final", "copy", "new", "csv", "tsv", "xlsx", "xls", "json",
+        "parquet", "txt", "v1", "v2", "v3",
+    }
+
+    GENERIC_SCHEMA_TOKENS = {
+        "id", "index", "row", "record", "uuid", "key", "column", "feature",
+        "value", "unnamed", "target", "label", "class", "unknown", "null", "none",
+    }
+
+    GENERIC_SCHEMA_TYPES = {
+        "string", "text", "number", "numeric", "integer", "float", "boolean",
+        "categorical", "datetime", "date", "unknown", "object",
+    }
+
+    TOPIC_ALIASES = {
+        "student": {"students", "siswa", "murid", "pelajar", "mahasiswa"},
+        "depression": {"depresi", "depressive symptoms", "student depression"},
+        "student performance": {
+            "student achievement", "academic performance", "academic achievement",
+            "student success", "hasil belajar siswa", "prestasi akademik",
+        },
+        "performance": {"achievement", "success", "kinerja", "prestasi", "pencapaian"},
+        "education": {"educational", "pendidikan", "edukasi", "pembelajaran"},
+        "learning outcomes": {"hasil belajar", "learning achievement", "academic outcomes"},
+        "attendance": {"kehadiran", "absensi"},
+        "study hours": {"hours studied", "jam belajar", "waktu belajar"},
+        "parental involvement": {"keterlibatan orang tua", "parental support"},
+        "access to resources": {"akses sumber daya", "resource access"},
+        "extracurricular activities": {
+            "kegiatan ekstrakurikuler", "aktivitas ekstrakurikuler",
+        },
+        "sleep hours": {"jam tidur", "durasi tidur"},
+        "customer": {"customers", "pelanggan", "konsumen"},
+        "sales": {"selling", "penjualan"},
+        "healthcare": {"health", "kesehatan", "layanan kesehatan"},
+        "financial": {"finance", "keuangan"},
     }
 
     CONFIDENCE_LEVELS = (
@@ -309,6 +380,7 @@ class PaperRanker:
             ml_result,
             fingerprint,
         )
+        target = self._clean_topic_term(target) or None
 
         methods = self._extract_methods(
             ml_result
@@ -399,12 +471,16 @@ class PaperRanker:
             )
         )
 
+        title_text = self._normalize(title)
+        abstract_text = self._normalize(abstract)
+        keyword_text = " ".join(paper_keywords)
+
         paper_text = self._normalize(
             " ".join(
                 [
                     title,
                     abstract,
-                    " ".join(paper_keywords),
+                    keyword_text,
                 ]
             )
         )
@@ -420,6 +496,9 @@ class PaperRanker:
             target=target,
             methods=methods,
             paper_text=paper_text,
+            title_text=title_text,
+            abstract_text=abstract_text,
+            keyword_text=keyword_text,
         )
 
         # ------------------------------------------------------
@@ -503,6 +582,17 @@ class PaperRanker:
             + metadata_score
             * self.weights["metadata"]
         )
+
+        topic_evidence_score = max(
+            semantic_score,
+            dataset_name_score,
+            schema_score,
+            keyword_score,
+            domain_score,
+            target_score,
+        )
+        if topic_evidence_score <= 0:
+            final_score = 0.0
 
         final_score = max(
             0.0,
@@ -622,6 +712,7 @@ class PaperRanker:
             "reasons": reasons,
 
             "ranking_status": "HEURISTIC",
+            "ranking_version": self.RANKING_VERSION,
         }
 
     # ==========================================================
@@ -636,6 +727,9 @@ class PaperRanker:
         target: str | None,
         methods: Set[str],
         paper_text: str,
+        title_text: str = "",
+        abstract_text: str = "",
+        keyword_text: str = "",
     ) -> float:
 
         if not paper_text:
@@ -677,26 +771,10 @@ class PaperRanker:
                 )
             )
 
-        for method in methods:
-            normalized_method = self._normalize(
-                method
-            )
-
-            profile_terms.add(
-                normalized_method
-            )
-
-            profile_terms.update(
-                self.METHOD_ALIASES.get(
-                    normalized_method,
-                    set(),
-                )
-            )
-
         profile_terms = {
-            self._normalize(term)
+            self._clean_topic_term(term)
             for term in profile_terms
-            if self._normalize(term)
+            if self._clean_topic_term(term)
         }
 
         if not profile_terms:
@@ -725,11 +803,16 @@ class PaperRanker:
 
             total_weight += weight
 
-            if self._concept_match(
-                term,
-                paper_text,
-            ):
+            if self._concept_match(term, title_text):
                 matched += weight
+                continue
+
+            if self._concept_match(term, keyword_text):
+                matched += weight * 0.8
+                continue
+
+            if self._concept_match(term, abstract_text or paper_text):
+                matched += weight * 0.65
                 continue
 
             if len(term) >= 5:
@@ -751,11 +834,7 @@ class PaperRanker:
                     ):
                         continue
 
-                    ratio = SequenceMatcher(
-                        None,
-                        term,
-                        token,
-                    ).ratio()
+                    ratio = SequenceMatcher(None, term, token).ratio()
 
                     best_ratio = max(
                         best_ratio,
@@ -766,7 +845,7 @@ class PaperRanker:
                         break
 
                 if best_ratio >= 0.90:
-                    matched += weight * 0.75
+                    matched += weight * 0.5
 
         if total_weight <= 0:
             return 0.0
@@ -780,6 +859,17 @@ class PaperRanker:
     # DATASET NAME MATCH
     # ==========================================================
 
+    @classmethod
+    def _normalize_dataset_name(cls, value) -> str:
+        normalized = cls._normalize(value)
+        tokens = [
+            token for token in normalized.split()
+            if token not in cls.DATASET_NAME_GENERIC
+            and not re.fullmatch(r"v\d+", token)
+            and not token.isdigit()
+        ]
+        return " ".join(tokens)
+
     def _dataset_name_score(
         self,
         dataset_name: str | None,
@@ -790,7 +880,7 @@ class PaperRanker:
         if not dataset_name:
             return 0.0
 
-        normalized_name = self._normalize(
+        normalized_name = self._normalize_dataset_name(
             dataset_name
         )
 
@@ -823,7 +913,7 @@ class PaperRanker:
             normalized_name,
             abstract,
         ):
-            return 90.0
+            return 78.0
 
         name_tokens = {
             token
@@ -834,28 +924,16 @@ class PaperRanker:
         if not name_tokens:
             return 0.0
 
-        text_tokens = set(
-            paper_text.split()
-        )
+        title_tokens = set(title.split())
+        abstract_tokens = set(abstract.split())
+        if not name_tokens.intersection(title_tokens | abstract_tokens):
+            return 0.0
+        title_coverage = len(name_tokens & title_tokens) / len(name_tokens)
+        abstract_coverage = len(name_tokens & abstract_tokens) / len(name_tokens)
+        token_score = (title_coverage * 0.8 + abstract_coverage * 0.2) * 100
+        sequence_score = SequenceMatcher(None, normalized_name, title[:3000]).ratio() * 100
 
-        matched = name_tokens & text_tokens
-
-        token_score = (
-            len(matched)
-            / len(name_tokens)
-        ) * 100
-
-        sequence_score = SequenceMatcher(
-            None,
-            normalized_name,
-            paper_text[:5000],
-        ).ratio() * 100
-
-        return min(
-            85.0,
-            token_score * 0.75
-            + sequence_score * 0.25,
-        )
+        return min(90.0, token_score * 0.85 + sequence_score * 0.15)
 
     # ==========================================================
     # SCHEMA MATCH
@@ -938,9 +1016,10 @@ class PaperRanker:
 
             for candidate in candidates:
 
-                normalized = self._normalize(
-                    candidate
-                )
+                normalized = self._clean_topic_term(candidate)
+                tokens = set(normalized.split())
+                if tokens and tokens <= self.GENERIC_SCHEMA_TOKENS:
+                    continue
 
                 if normalized:
                     column_names.add(
@@ -991,7 +1070,7 @@ class PaperRanker:
                 )
             )
 
-            if semantic_type:
+            if semantic_type and semantic_type not in self.GENERIC_SCHEMA_TYPES:
                 semantic_types.add(
                     semantic_type
                 )
@@ -1326,6 +1405,16 @@ class PaperRanker:
     ) -> List[str]:
 
         reasons = []
+        topic_evidence = max(
+            semantic_score,
+            dataset_name_score,
+            schema_score,
+            keyword_score,
+        )
+        if topic_evidence <= 0:
+            reasons.append(
+                "Tidak ditemukan kecocokan topik; metadata dan metode saja tidak menaikkan skor relevansi."
+            )
 
         if semantic_score >= 70:
             reasons.append(
@@ -1363,9 +1452,9 @@ class PaperRanker:
                 "Keyword match sedang."
             )
 
-        if metadata_score >= 70:
+        if metadata_score >= 70 and topic_evidence > 0:
             reasons.append(
-                "Metadata research cukup lengkap dan relevan."
+                "Metadata paper melengkapi evidence topik yang ditemukan."
             )
 
         reasons.append(
@@ -1595,13 +1684,12 @@ class PaperRanker:
                 keywords
             ]
 
-        return {
-            self._normalize(
-                str(keyword)
-            )
+        cleaned = {
+            self._clean_topic_term(str(keyword))
             for keyword in keywords
             if str(keyword).strip()
         }
+        return {keyword for keyword in cleaned if keyword}
 
     @staticmethod
     def _extract_domain(
@@ -1767,15 +1855,11 @@ class PaperRanker:
         ]
 
         for candidate in candidates:
-
-            if candidate:
-
-                value = str(
-                    candidate
-                ).strip()
-
-                if value:
-                    return value
+            if not candidate:
+                continue
+            value = self._normalize_dataset_name(candidate)
+            if value:
+                return value
 
         return None
 
@@ -1843,30 +1927,42 @@ class PaperRanker:
         return result
 
     @staticmethod
-    def _normalize(
-        text,
-    ) -> str:
+    def _normalize(text) -> str:
 
         if text is None:
             return ""
 
-        text = str(
-            text
-        ).lower()
+        text = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", str(text))
+        text = unicodedata.normalize("NFKD", text.casefold())
+        text = "".join(char for char in text if not unicodedata.combining(char))
+        text = re.sub(r"[^\w\s-]", " ", text, flags=re.UNICODE)
+        text = re.sub(r"[_-]+", " ", text)
+        return re.sub(r"\s+", " ", text).strip()
 
-        text = re.sub(
-            r"[^a-z0-9\s-]",
-            " ",
-            text,
+    @classmethod
+    def _clean_topic_term(cls, value) -> str:
+        normalized = cls._normalize(value)
+        if not normalized:
+            return ""
+        if normalized in cls.GENERIC_KEYWORDS:
+            return ""
+
+        known_topic_phrases = set(cls.TOPIC_ALIASES)
+        known_topic_phrases.update(
+            cls._normalize(alias)
+            for aliases in cls.TOPIC_ALIASES.values()
+            for alias in aliases
         )
+        if normalized in known_topic_phrases:
+            return normalized
 
-        text = re.sub(
-            r"\s+",
-            " ",
-            text,
-        )
-
-        return text.strip()
+        words = [
+            word for word in normalized.split()
+            if word not in cls.GENERIC_TOPIC_TOKENS
+            and not word.isdigit()
+        ]
+        cleaned = " ".join(words)
+        return "" if cleaned in cls.GENERIC_KEYWORDS else cleaned
 
     # ==========================================================
     # CONCEPT MATCHING
@@ -1892,30 +1988,38 @@ class PaperRanker:
         if not text:
             return False
 
-        if PaperRanker._phrase_in_text(
-            keyword,
-            text,
-        ):
-            return True
+        variants = {keyword}
+        for canonical, aliases in PaperRanker.TOPIC_ALIASES.items():
+            concept_variants = {
+                PaperRanker._normalize(canonical),
+                *(PaperRanker._normalize(alias) for alias in aliases),
+            }
+            if keyword in concept_variants:
+                variants.update(concept_variants)
 
-        words = keyword.split()
+        for variant in variants:
+            if PaperRanker._phrase_in_text(variant, text):
+                return True
 
-        if len(words) != 1:
-            return False
+        if " " in keyword:
+            words = [word for word in keyword.split() if len(word) >= 3]
+            component_hits = sum(
+                PaperRanker._concept_match(word, text)
+                for word in words
+            )
+            return bool(words) and component_hits >= max(2, (len(words) + 1) // 2)
 
-        word = words[0]
-
+        word = keyword
         if len(word) < 3:
             return False
 
-        variants = {
-            word,
+        variants.update({
             word.rstrip("s"),
             word + "s",
             word + "ing",
             word + "ed",
             word + "ion",
-        }
+        })
 
         irregular = {
             "survived": {
@@ -1944,20 +2048,8 @@ class PaperRanker:
             },
         }
 
-        variants.update(
-            irregular.get(
-                word,
-                set(),
-            )
-        )
-
-        return any(
-            PaperRanker._phrase_in_text(
-                variant,
-                text,
-            )
-            for variant in variants
-        )
+        variants.update(irregular.get(word, set()))
+        return any(PaperRanker._phrase_in_text(variant, text) for variant in variants)
 
     # ==========================================================
     # PHRASE MATCHING
@@ -1980,13 +2072,7 @@ class PaperRanker:
         if not phrase or not text:
             return False
 
-        pattern = (
-            r"(?<![a-z0-9])"
-            + re.escape(
-                phrase
-            )
-            + r"(?![a-z0-9])"
-        )
+        pattern = r"(?<!\w)" + re.escape(phrase) + r"(?!\w)"
 
         return re.search(
             pattern,
