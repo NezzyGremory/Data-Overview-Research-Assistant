@@ -1,0 +1,4 @@
+# Optional local knowledge-base document parsers.
+# Ollama inference uses the existing httpx dependency and does not need an SDK.
+PyMuPDF
+python-docx

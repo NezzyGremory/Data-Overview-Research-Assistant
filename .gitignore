@@ -101,7 +101,9 @@ logs/
 .pytest_dora_*_tmp/
 
 # Project notes and reports kept locally
-/docs/
+/docs/*
+!/docs/tanya_dora/
+!/docs/tanya_dora/**
 
 # Generated builds, installers, and binary archives
 build/
@@ -121,6 +123,7 @@ hasil_compile/
 
 # Generated screenshots; existing tracked documentation screenshots stay tracked
 screenshots/*.png
+!screenshots/tanya_dora_page.png
 
 # IDE and operating-system files
 .vscode/

@@ -2410,3 +2410,133 @@ QLineEdit#visionDatasetPath:focus, QComboBox#visionTaskSelector:focus {
     font-weight: 700;
     padding: @px(9) @px(12);
 }
+
+/* Tanya DORA local assistant */
+#tanyaDoraPage { background: #F1F7FF; }
+#tanyaDoraTitle {
+    color: #172033;
+    font-family: "Plus Jakarta Sans";
+    font-size: @px(27);
+    font-weight: 750;
+}
+#tanyaDoraSubtitle, #tanyaDoraPrivacyNote, #tanyaDoraActivity {
+    color: #7A899C;
+    font-size: @px(12);
+}
+#tanyaDoraStatus {
+    background: #EEF5FF;
+    border: @px(1) solid #D7E6F8;
+    border-radius: @px(10);
+    color: #46627F;
+    font-size: @px(11);
+    padding: @px(9) @px(12);
+}
+#tanyaDoraStatus[state="ready"] { background: #E9F7ED; border-color: #C7E8D0; color: #236B3B; }
+#tanyaDoraStatus[state="warning"] { background: #FFF7E6; border-color: #F1DFB0; color: #806114; }
+#tanyaDoraStatus[state="error"] { background: #FFF0EF; border-color: #F1D2CF; color: #9A3F39; }
+#tanyaDoraControls,
+#tanyaDoraHistoryPanel,
+#tanyaDoraChatPanel {
+    background: #FFFFFF;
+    border: @px(1) solid #D9E7F5;
+    border-radius: @px(14);
+}
+#tanyaDoraFieldLabel { color: #50627A; font-size: @px(11); font-weight: 650; }
+#tanyaDoraSectionTitle, #tanyaDoraReferenceHeading {
+    color: #24364D;
+    font-family: "Plus Jakarta Sans";
+    font-size: @px(14);
+    font-weight: 700;
+}
+#tanyaDoraHistoryList, #tanyaDoraSourceList {
+    background: transparent;
+    border: none;
+    outline: none;
+    color: #34445C;
+    font-size: @px(12);
+}
+#tanyaDoraHistoryList::item, #tanyaDoraSourceList::item {
+    border-radius: @px(7);
+    padding: @px(7) @px(8);
+}
+#tanyaDoraHistoryList::item:hover, #tanyaDoraSourceList::item:hover { background: #F1F6FD; }
+#tanyaDoraHistoryList::item:selected, #tanyaDoraSourceList::item:selected {
+    background: #E6F0FF;
+    color: #075FA6;
+}
+#tanyaDoraIconButton, #tanyaDoraSmallButton, #tanyaDoraStopButton {
+    background: #F7FAFE;
+    border: @px(1) solid #D9E5F2;
+    border-radius: @px(8);
+    color: #376487;
+    font-size: @px(11);
+    font-weight: 600;
+    min-height: @px(30);
+    padding: 0 @px(9);
+}
+#tanyaDoraIconButton { font-size: @px(18); min-width: @px(32); padding: 0; }
+#tanyaDoraIconButton:hover, #tanyaDoraSmallButton:hover { background: #EEF5FF; border-color: #B8D1EF; }
+#tanyaDoraStopButton { color: #A13A37; border-color: #E7C9C6; }
+#tanyaDoraStopButton:enabled:hover { background: #FFF0EF; }
+#tanyaDoraStopButton:disabled, #tanyaDoraSmallButton:disabled { color: #9AA7B7; }
+#tanyaDoraTranscript {
+    background: #FBFDFF;
+    border: @px(1) solid #E6EDF5;
+    border-radius: @px(10);
+    color: #29394E;
+    font-size: @px(13);
+    padding: @px(12);
+    selection-background-color: #C9E0FF;
+}
+#tanyaDoraReferences { background: #F7FAFE; border: @px(1) solid #E5ECF5; border-radius: @px(9); }
+#tanyaDoraReferenceHeading { color: #48627F; font-size: @px(11); min-width: @px(95); }
+#tanyaDoraSourceDetail { color: #607188; font-size: @px(10); }
+#tanyaDoraInput {
+    background: #FFFFFF;
+    border: @px(1) solid #CAD9E9;
+    border-radius: @px(10);
+    color: #24364D;
+    font-size: @px(13);
+    padding: @px(10);
+}
+#tanyaDoraInput:focus { border-color: #5B9CDB; }
+#tanyaDoraControls QComboBox, #tanyaDoraControls QDoubleSpinBox {
+    background: #FFFFFF;
+    border: @px(1) solid #D7E2EE;
+    border-radius: @px(7);
+    color: #29394E;
+    min-height: @px(32);
+    padding: 0 @px(8);
+}
+#tanyaDoraControls QComboBox::drop-down { border: none; width: @px(24); }
+
+#tanyaDoraManagementPage { background: #F1F7FF; }
+#tanyaDoraStudioTitle {
+    color: #172B4D; font-size: @px(25); font-weight: 750;
+}
+#tanyaDoraStudioSubtitle, #tanyaDoraStudioHint {
+    color: #61738A; font-size: @px(11);
+}
+#tanyaDoraStudioStatus {
+    color: #35516F; background: #F7FAFE; border: @px(1) solid #DCE7F3;
+    border-radius: @px(8); padding: @px(9) @px(12); font-size: @px(11);
+}
+#tanyaDoraStudioPanel {
+    background: #FFFFFF; border: @px(1) solid #E1E9F3; border-radius: @px(10);
+}
+#tanyaDoraStudioHeading { color: #29445F; font-size: @px(13); font-weight: 700; }
+#tanyaDoraStudioTabs::pane {
+    background: #FFFFFF; border: @px(1) solid #E1E9F3; border-radius: @px(9);
+    top: -@px(1);
+}
+#tanyaDoraStudioTabs QTabBar::tab {
+    background: #EAF1F9; color: #53677F; border: @px(1) solid #DCE6F1;
+    border-bottom: none; border-top-left-radius: @px(7); border-top-right-radius: @px(7);
+    padding: @px(9) @px(13); margin-right: @px(3); font-size: @px(11); font-weight: 650;
+}
+#tanyaDoraStudioTabs QTabBar::tab:selected { background: #FFFFFF; color: #245A8F; }
+#tanyaDoraStudioTabs QTabBar::tab:hover:!selected { background: #F3F7FC; }
+#tanyaDoraStudioCode {
+    background: #F8FAFD; color: #26384D; border: @px(1) solid #DCE5EF;
+    border-radius: @px(7); padding: @px(10); font-family: "Intel One Mono"; font-size: @px(10);
+}

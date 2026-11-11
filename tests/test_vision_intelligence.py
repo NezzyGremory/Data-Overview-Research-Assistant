@@ -405,6 +405,54 @@ def test_image_sample_gallery_keeps_pagination_and_bounded_thumbnail_cache():
     tab.close()
 
 
+def test_image_ml_results_render_candidate_metrics_and_confusion_matrix():
+    from PySide6.QtWidgets import QApplication
+
+    from app.ui.vision_intelligence_page import _VisionTab
+
+    class PageStub:
+        def start_analysis(self, _tab):
+            pass
+
+        def start_recognition(self, _tab):
+            pass
+
+        def cancel_active_operation(self):
+            pass
+
+        def update_recommendations(self, _tab):
+            pass
+
+        def load_previews(self, _tab, _references):
+            pass
+
+    global _QT_TEST_APP
+    _QT_TEST_APP = QApplication.instance() or QApplication([])
+    tab = _VisionTab(PageStub(), "image")
+    tab._render_recognition_ml_tables({
+        "status": "evaluated",
+        "selected_model": "Linear SVM",
+        "candidate_models": [
+            {"model": "Linear SVM", "mean_macro_f1": 0.85, "std_macro_f1": 0.03},
+            {"model": "Extra Trees", "mean_macro_f1": 0.75, "std_macro_f1": 0.05},
+        ],
+        "class_metrics": [
+            {"class": "cats", "support": 2, "precision": 1.0, "recall": 0.5, "f1": 0.67},
+            {"class": "dogs", "support": 2, "precision": 0.67, "recall": 1.0, "f1": 0.8},
+        ],
+        "classes": ["cats", "dogs"],
+        "confusion_matrix": [[1, 1], [0, 2]],
+    })
+
+    assert tab.recognition_model_table.rowCount() == 2
+    assert tab.recognition_model_table.item(0, 3).text() == "Terpilih"
+    assert tab.recognition_class_table.rowCount() == 2
+    assert tab.recognition_class_table.item(0, 3).text() == "50,0%"
+    assert tab.recognition_confusion_table.item(0, 2).text() == "1"
+    assert not tab.recognition_confusion_table.isHidden()
+    tab.close()
+
+
 def test_image_analysis_zip_classes_corrupt_and_preview(tmp_path):
     root = tmp_path / "source"
     _make_image(root / "class-a" / "a.png")

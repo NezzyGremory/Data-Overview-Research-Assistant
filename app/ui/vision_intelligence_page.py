@@ -628,7 +628,7 @@ class _VisionTab(QWidget):
         self.recognition_samples = None
         if self.dataset_type == "image":
             self.recognition_card, recognition_layout = self._card(
-                "Deep Learning + Training ML Berlabel"
+                "Deep Learning + Pelatihan ML Berlabel"
             )
             recognition_action = QHBoxLayout()
             self.recognition_button = QPushButton("Jalankan Pengenalan + Evaluasi ML")
@@ -645,13 +645,13 @@ class _VisionTab(QWidget):
             recognition_layout.addWidget(self._small_note(
                 "DORA membandingkan SGD Logistic, Linear SVM, dan Extra Trees dengan macro-F1 3-fold pada data latih, lalu melaporkan metrik pada holdout 20% yang terpisah. Bobot MobileNetV2 tetap pralatih dan tidak di-fine-tune. Label folder/CSV perlu divalidasi sebagai ground truth; akurasi 100% universal tidak dapat dijanjikan. Object detection/segmentation memerlukan anotasi dan model khusus."
             ))
-            recognition_distribution_title = QLabel("Prediksi kelas pada seluruh gambar")
+            recognition_distribution_title = QLabel("Distribusi prediksi MobileNetV2 ImageNet-1K")
             recognition_distribution_title.setObjectName("visionSubsectionTitle")
             recognition_layout.addWidget(recognition_distribution_title)
             self.recognition_chart = _RecognitionBarChart(self.recognition_card)
             recognition_layout.addWidget(self.recognition_chart)
             recognition_chart_note = self._small_note(
-                "8 kelas terbanyak. Batang menunjukkan jumlah gambar per kelas; label di ujung batang menunjukkan jumlah serta persentase dari semua gambar yang berhasil diklasifikasi."
+                "8 kelas ImageNet teratas. Batang menunjukkan jumlah prediksi MobileNetV2 per kelas; label menunjukkan jumlah dan persentase dari semua gambar yang berhasil diklasifikasi. Ini bukan distribusi ground truth atau hasil classifier ML terlatih."
             )
             recognition_chart_note.setObjectName("visionRecognitionNote")
             recognition_layout.addWidget(recognition_chart_note)
@@ -667,7 +667,7 @@ class _VisionTab(QWidget):
             self.recognition_model_table.setObjectName("visionRecognitionModelTable")
             self._configure_result_table(
                 self.recognition_model_table,
-                ("Model", "Macro-F1 mean", "Simpangan", "Status"),
+                ("Model", "Rata-rata macro-F1", "Std. deviasi", "Keterangan"),
                 max_height=174,
             )
             recognition_layout.addWidget(self.recognition_model_table)
@@ -1127,7 +1127,9 @@ class _VisionTab(QWidget):
                 f"validasi silang macro-F1 {_format_number(float(cv_result.get('mean_macro_f1') or 0) * 100, 1)}% "
                 f"± {_format_number(float(cv_result.get('std_macro_f1') or 0) * 100, 1)}%.\n"
                 f"Holdout berstrata 20%: {custom_ml.get('validation_samples', 0)} gambar uji; "
-                f"{custom_ml.get('training_samples', 0)} gambar latih · {metric_text}.\n"
+                f"{custom_ml.get('training_samples', 0)} gambar latih dari "
+                f"{custom_ml.get('sampled_labeled_images', 0)} vektor fitur; "
+                f"{custom_ml.get('available_labeled_images', 0)} gambar berlabel terbaca · {metric_text}.\n"
                 + str(custom_ml.get("note") or "")
             )
             if custom_ml.get("model_path"):

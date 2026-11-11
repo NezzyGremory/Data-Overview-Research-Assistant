@@ -1,0 +1,9 @@
+{
+  "runtime": "ollama",
+  "base_url": "http://127.0.0.1:11434",
+  "chat_model": "choose-an-installed-local-model",
+  "embedding_model": null,
+  "temperature": 0.2,
+  "online_research_enabled": false,
+  "automatic_model_download": false
+}

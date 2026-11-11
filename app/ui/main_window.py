@@ -15725,11 +15725,15 @@ class MainWindow(QMainWindow):
         self.research_insights_page = None
         self.report_tool_page = None
         self.vision_intelligence_page = None
+        self.tanya_dora_page = None
+        self.tanya_dora_studio_page = None
         self._ml_page_build_scheduled = False
         self._research_page_build_scheduled = False
         self._insights_page_build_scheduled = False
         self._report_page_build_scheduled = False
         self._vision_page_build_scheduled = False
+        self._tanya_dora_page_build_scheduled = False
+        self._tanya_dora_studio_build_scheduled = False
 
         self._ml_placeholder = deferred_page(
             "mlLoadingPlaceholder", "ML Intelligence"
@@ -15745,6 +15749,12 @@ class MainWindow(QMainWindow):
         )
         self._vision_placeholder = deferred_page(
             "visionLoadingPlaceholder", "Vision Intelligence"
+        )
+        self._tanya_dora_placeholder = deferred_page(
+            "tanyaDoraLoadingPlaceholder", "Tanya DORA"
+        )
+        self._tanya_dora_studio_placeholder = deferred_page(
+            "tanyaDoraStudioLoadingPlaceholder", "Tanya DORA Studio"
         )
         self._startup_checkpoint("Menyiapkan halaman bantuan…")
         self.about_page = AboutPage()
@@ -15768,6 +15778,8 @@ class MainWindow(QMainWindow):
             "gap": self._insights_placeholder,
             "report": self._report_placeholder,
             "vision": self._vision_placeholder,
+            "tanya_dora": self._tanya_dora_placeholder,
+            "tanya_dora_studio": self._tanya_dora_studio_placeholder,
             "about": self.about_page,
             "copyright": self.copyright_page,
             "help": self.help_page,
@@ -15814,6 +15826,8 @@ class MainWindow(QMainWindow):
             "gap": "Research Gap",
             "report": "Research Report",
             "vision": "Vision Intelligence",
+            "tanya_dora": "Tanya DORA",
+            "tanya_dora_studio": "Tanya DORA Management Studio",
             "about": "Tentang DORA",
             "copyright": "Credits",
             "help": "Bantuan",
@@ -15939,10 +15953,12 @@ class MainWindow(QMainWindow):
         layout.addSpacing(2)
         optional_tools = [
             ("editor_analysis", "editor-analysis.svg", "Editor Analysis"),
+            ("tanya_dora", "tanya-dora.svg", "Tanya DORA"),
+            ("tanya_dora_studio", "tanya-dora.svg", "Tanya DORA Studio"),
         ]
         if NODE_EDITOR_UI_ENABLED:
             optional_tools.append(("node_editor", "node-editor.svg", "Node Editor"))
-        optional_tools_height = 104 if NODE_EDITOR_UI_ENABLED else 62
+        optional_tools_height = 20 + (42 * len(optional_tools))
         self._add_nav_group(layout, optional_tools_height, 8, 8, optional_tools)
         layout.addStretch()
 
@@ -16035,6 +16051,8 @@ class MainWindow(QMainWindow):
                 "editor_analysis": (24, 24),
                 "ml": (24, 24),
                 "vision": (24, 24),
+                "tanya_dora": (24, 24),
+                "tanya_dora_studio": (24, 24),
                 "dashboard": (26, 26),
                 "research": (30, 24),
                 "papers": (30, 30),
@@ -16069,6 +16087,8 @@ class MainWindow(QMainWindow):
             "node_editor": self.open_node_editor_page,
             "ml": self.open_ml_page,
             "vision": self.open_vision_page,
+            "tanya_dora": self.open_tanya_dora_page,
+            "tanya_dora_studio": self.open_tanya_dora_studio_page,
             "research": self.open_research_page,
             "papers": self.open_papers_tool,
             "landscape": self.open_landscape_tool,
@@ -16795,6 +16815,93 @@ class MainWindow(QMainWindow):
         self.vision_intelligence_page = page
         self._replace_lazy_page("vision", page)
         page.restore_project(self.current_project_id)
+
+    def open_tanya_dora_page(self):
+        if self.tanya_dora_page is None:
+            self._show_page("tanya_dora")
+            if not self._tanya_dora_page_build_scheduled:
+                self._tanya_dora_page_build_scheduled = True
+                QTimer.singleShot(40, self._create_tanya_dora_page)
+            return
+        self._show_page("tanya_dora")
+
+    def _create_tanya_dora_page(self):
+        self._tanya_dora_page_build_scheduled = False
+        if self.tanya_dora_page is not None:
+            return
+        from app.ui.tanya_dora_page import TanyaDoraPage
+
+        page = TanyaDoraPage(tool_context_provider=self._tanya_dora_tool_context)
+        self.tanya_dora_page = page
+        self._replace_lazy_page("tanya_dora", page)
+
+    def open_tanya_dora_studio_page(self):
+        if self.tanya_dora_studio_page is None:
+            self._show_page("tanya_dora_studio")
+            if not self._tanya_dora_studio_build_scheduled:
+                self._tanya_dora_studio_build_scheduled = True
+                QTimer.singleShot(40, self._create_tanya_dora_studio_page)
+            return
+        self._show_page("tanya_dora_studio")
+
+    def _create_tanya_dora_studio_page(self):
+        self._tanya_dora_studio_build_scheduled = False
+        if self.tanya_dora_studio_page is not None:
+            return
+        from app.ui.tanya_dora_management_page import TanyaDoraManagementPage
+
+        page = TanyaDoraManagementPage(tool_context_provider=self._tanya_dora_tool_context)
+        page.model_activated.connect(self._on_tanya_dora_model_activated)
+        self.tanya_dora_studio_page = page
+        self._replace_lazy_page("tanya_dora_studio", page)
+
+    def _on_tanya_dora_model_activated(self, model_name: str):
+        if self.tanya_dora_page is not None:
+            self.tanya_dora_page.set_active_model(str(model_name))
+
+    def _tanya_dora_tool_context(self):
+        """Copy bounded, read-only DORA context for the local tool registry."""
+        dataframe = getattr(self, "current_dataset", None)
+        if dataframe is None:
+            return {"active_dataset": None, "analysis": {}}
+
+        try:
+            dataset_info = {
+                "name": Path(self._current_filename() or "Dataset").name,
+                "rows": int(dataframe.shape[0]),
+                "columns": int(dataframe.shape[1]),
+                "column_types": [
+                    {"name": str(column), "dtype": str(dataframe[column].dtype)}
+                    for column in list(dataframe.columns)[:250]
+                ],
+            }
+        except Exception:
+            return {"active_dataset": None, "analysis": {}}
+
+        raw_analysis = getattr(self, "analysis_result", None)
+        if not isinstance(raw_analysis, dict):
+            raw_analysis = {}
+        profile = raw_analysis.get("profile")
+        if isinstance(profile, dict) and (
+            profile.get("rows") != dataset_info["rows"]
+            or profile.get("columns") != dataset_info["columns"]
+        ):
+            raw_analysis = {}
+        allowed_keys = (
+            "profile",
+            "statistics",
+            "missing_values",
+            "duplicates",
+            "correlations",
+            "outliers",
+            "data_quality",
+        )
+        analysis = {
+            key: raw_analysis[key]
+            for key in allowed_keys
+            if key in raw_analysis
+        }
+        return {"active_dataset": dataset_info, "analysis": analysis}
 
     def open_datasets_page(self):
         # Open the existing dataset preview when data is loaded, or the upload

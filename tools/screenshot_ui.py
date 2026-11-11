@@ -101,7 +101,7 @@ def main() -> int:
         required=True,
         choices=(
             "dataset-empty", "dataset-loaded", "upload-loaded", "dataset-search", "analysis",
-            "overview", "overview-empty", "landscape", "about", "popup", "editor-analysis", "ml", "vision",
+            "overview", "overview-empty", "landscape", "about", "popup", "editor-analysis", "ml", "vision", "tanya-dora", "tanya-dora-studio",
         ),
     )
     parser.add_argument("--width", type=int, default=1920)
@@ -300,6 +300,10 @@ def main() -> int:
     elif args.page == "vision":
         vision_dataset = _write_vision_preview(temporary_data_dir / "vision_demo")
         window.open_vision_page()
+    elif args.page == "tanya-dora":
+        window.open_tanya_dora_page()
+    elif args.page == "tanya-dora-studio":
+        window.open_tanya_dora_studio_page()
 
     window.show()
     window.resize(args.width, args.height)
@@ -337,6 +341,23 @@ def main() -> int:
                 tab.set_dataset_path(str(vision_dataset))
                 page.start_analysis(tab)
             if (page.active_thread is not None or not tab.gallery.count()) and capture_attempts < 50:
+                QTimer.singleShot(100, capture)
+                return
+        if args.page == "tanya-dora":
+            page = window.tanya_dora_page
+            if page is None:
+                QTimer.singleShot(100, capture)
+                return
+            if page._model_thread is not None and page._model_thread.isRunning() and capture_attempts < 50:
+                QTimer.singleShot(100, capture)
+                return
+        if args.page == "tanya-dora-studio":
+            page = window.tanya_dora_studio_page
+            if page is None:
+                QTimer.singleShot(100, capture)
+                return
+            model_tab = page.model_tab
+            if model_tab and model_tab._status_thread is not None and model_tab._status_thread.isRunning() and capture_attempts < 50:
                 QTimer.singleShot(100, capture)
                 return
         if args.debug_layout and args.page == "overview":
@@ -593,6 +614,8 @@ def main() -> int:
                 temporary_path.unlink(missing_ok=True)
         if dialog is not None:
             dialog.close()
+        if args.page == "tanya-dora" and window.tanya_dora_page is not None:
+            window.tanya_dora_page.shutdown()
         window._session_data_saved = True
         window._save_window_geometry = lambda: None
         window.close()
@@ -600,6 +623,8 @@ def main() -> int:
 
     QTimer.singleShot(700, capture)
     app.exec()
+    if args.page == "tanya-dora" and window.tanya_dora_page is not None:
+        window.tanya_dora_page.shutdown()
     if popup_path is not None:
         popup_path.unlink(missing_ok=True)
     if preview_path is not None:

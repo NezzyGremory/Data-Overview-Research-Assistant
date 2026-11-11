@@ -1,0 +1,20 @@
+{
+  "base_model_path": "C:/models/local-instruct-model",
+  "dataset_version_id": "replace-with-saved-tdid-version-id",
+  "output_dir": "C:/models/tanya-dora-training",
+  "epochs": 1.0,
+  "learning_rate": 0.0002,
+  "per_device_batch_size": 1,
+  "gradient_accumulation_steps": 8,
+  "max_sequence_length": 1024,
+  "lora_rank": 8,
+  "lora_alpha": 16,
+  "lora_dropout": 0.05,
+  "quantization": "none",
+  "warmup_ratio": 0.03,
+  "weight_decay": 0.01,
+  "checkpoint_steps": 50,
+  "evaluation_steps": 50,
+  "random_seed": 42,
+  "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj"]
+}

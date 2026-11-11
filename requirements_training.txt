@@ -1,0 +1,7 @@
+# Optional SFT/LoRA workspace. Install a PyTorch build appropriate for the
+# operating system and CUDA/CPU setup using the official PyTorch selector first.
+transformers
+datasets
+peft
+trl
+accelerate

@@ -446,9 +446,9 @@ def _train_custom_classifier(
         "model_path": model_path,
         "artifact_note": artifact_note,
         "note": (
-            "Candidates were compared by three-fold macro-F1 on the training partition; reported test metrics use a separate stratified 20% holdout. "
-            "Small or duplicate-heavy datasets can still give unstable or optimistic estimates. Labels read from folder/CSV must be checked as ground truth. "
-            "MobileNetV2 weights are frozen; only the selected classical ML classifier is trained. The saved estimator expects the same MobileNetV2 score features."
+            "Seleksi kandidat memakai macro-F1 3-fold pada bagian data latih; metrik akhir memakai holdout berstrata 20% yang terpisah. "
+            "Dataset kecil atau banyak duplikat dapat menghasilkan estimasi yang tidak stabil atau terlalu optimistis. Label folder/CSV harus diperiksa sebagai ground truth. "
+            "Bobot MobileNetV2 tetap dibekukan; hanya classifier ML terpilih yang dilatih. Model tersimpan memerlukan fitur skor dari versi MobileNetV2 yang sama."
         ),
     }
 
@@ -597,6 +597,9 @@ def recognize_image_dataset(
                     )
                 except ValueError as error:
                     custom_ml = {"status": "not_trained", "note": f"Training ML dilewati: {error}"}
+        if custom_ml.get("status") == "evaluated":
+            custom_ml["available_labeled_images"] = int(sum(training_seen.values()))
+            custom_ml["sampled_labeled_images"] = int(sum(len(items) for items in training_samples.values()))
 
         _emit_progress(progress, 100, "Pengenalan gambar selesai")
         return {
