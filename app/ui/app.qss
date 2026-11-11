@@ -2161,7 +2161,7 @@ QFrame#contentCard[researchGapExplanation="true"] {
     border: none;
     border-radius: @px(4);
     color: #52657D;
-    max-height: @px(16);
+    max-height: @px(8);
     text-align: center;
 }
 
@@ -2242,6 +2242,39 @@ QLineEdit#visionDatasetPath:focus, QComboBox#visionTaskSelector:focus {
     font-size: @px(11);
 }
 
+#visionRecognitionSamples {
+    background: #F7FAFE;
+    border: @px(1) solid #E1EAF5;
+    border-radius: @px(9);
+    color: #52657D;
+    font-size: @px(11);
+    outline: none;
+}
+
+#visionRecognitionSamples::item {
+    border-bottom: @px(1) solid #E7EEF7;
+    min-height: @px(28);
+    padding: @px(7) @px(9);
+}
+
+#visionRecognitionStatus {
+    color: #344158;
+    font-size: @px(12);
+}
+
+#visionRecognitionNote {
+    color: #52657D;
+    font-size: @px(11);
+}
+
+#visionRecognitionModelTable, #visionRecognitionClassTable, #visionRecognitionConfusionTable {
+    font-size: @px(12);
+}
+
+#visionRecognitionModelTable::item, #visionRecognitionClassTable::item, #visionRecognitionConfusionTable::item {
+    padding: @px(4) @px(7);
+}
+
 #visionPrimaryRecommendation, #visionAlternativeRecommendation {
     background: #FFFFFF;
     border: @px(1) solid #DCE8F7;
@@ -2281,4 +2314,99 @@ QLineEdit#visionDatasetPath:focus, QComboBox#visionTaskSelector:focus {
     color: #87651B;
     font-size: @px(10);
     padding: @px(8);
+}
+
+#visionUploadEyebrow {
+    color: #6F86A5;
+    font-size: @px(10);
+    font-weight: 800;
+}
+
+#visionUploadCard {
+    background: #FFFFFF;
+    border: @px(1) solid #DCE8F7;
+    border-radius: @px(16);
+}
+
+#visionUploadIconBadge {
+    background: #4F8CFF;
+    border: @px(1) solid #4F8CFF;
+    border-radius: @px(20);
+}
+
+#visionUploadTitle {
+    color: #172033;
+    font-size: @px(23);
+    font-weight: 750;
+}
+
+#visionUploadDescription {
+    color: #64758D;
+    font-size: @px(12);
+}
+
+#visionUploadHint {
+    color: #687B95;
+    font-size: @px(10);
+}
+
+#visionUploadDisclaimer {
+    color: #8190A4;
+    font-size: @px(10);
+}
+
+#visionUploadPrimary {
+    background: #4F8CFF;
+    border: @px(1) solid #4F8CFF;
+    border-radius: @px(9);
+    color: #FFFFFF;
+    font-size: @px(12);
+    font-weight: 700;
+    min-height: @px(42);
+    padding: 0 @px(18);
+}
+
+#visionUploadPrimary:hover {
+    background: #3E7EF0;
+    border-color: #3E7EF0;
+}
+
+#visionUploadPrimary:pressed {
+    background: #326FD9;
+    border-color: #326FD9;
+}
+
+#visionUploadPrimary:disabled {
+    background: #AFC8EF;
+    border-color: #AFC8EF;
+}
+
+#visionUploadSecondary {
+    background: #F3F7FD;
+    border: @px(1) solid #D5E3F5;
+    border-radius: @px(9);
+    color: #3277C5;
+    font-size: @px(12);
+    font-weight: 700;
+    min-height: @px(42);
+    padding: 0 @px(18);
+}
+
+#visionUploadSecondary:hover {
+    background: #EAF2FE;
+    border-color: #B9D2F1;
+}
+
+#visionUploadSecondary:disabled {
+    color: #95A6BE;
+}
+
+#visionAnalysisScope {
+    background: #EEF5FF;
+    border: @px(1) solid #D2E3FA;
+    border-radius: @px(8);
+    color: #3277C5;
+    font-size: @px(10);
+    font-weight: 700;
+    padding: @px(9) @px(12);
 }

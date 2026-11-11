@@ -19,6 +19,7 @@ from app.vision.analyzer import (
     create_preview_thumbnails,
 )
 from app.vision.recommendations import recommend_approaches
+from app.vision.readiness import assess_image_readiness, assess_image_tasks
 from app.vision.storage import VisionAnalysisRepository
 
 
@@ -89,6 +90,319 @@ def test_image_analysis_reads_csv_labels_for_unstructured_folder(tmp_path):
     assert result["label_source"] == "metadata_csv"
     assert result["class_distribution"] == {"indoor": 1, "outdoor": 1}
     assert result["metadata_files"] == ["metadata.csv"]
+
+
+def test_image_overview_statistics_quality_and_class_imbalance(tmp_path):
+    root = tmp_path / "mixed-images"
+    class_a = root / "class-a"
+    class_b = root / "class-b"
+    class_a.mkdir(parents=True)
+    class_b.mkdir(parents=True)
+    grayscale = Image.new("L", (20, 10), 110)
+    grayscale.save(class_a / "gray.png")
+    for name, size in (("two.jpg", (32, 16)), ("three.jpg", (40, 20)), ("four.jpg", (64, 32))):
+        _make_image(class_a / name, size=size)
+    _make_image(class_b / "only.png", size=(16, 16))
+    _make_image(root / "unlabeled.png", size=(15, 25))
+
+    result = analyze_image_dataset(root)
+
+    assert result["total_files"] == 6
+    assert result["total_samples"] == 6
+    assert result["processing_batch_size"] == 25
+    assert result["labeled_count"] == 5
+    assert result["unlabeled_count"] == 1
+    assert result["class_count"] == 2
+    assert result["class_distribution"] == {"class-a": 4, "class-b": 1}
+    assert result["class_imbalance_ratio"] == pytest.approx(4.0)
+    assert result["class_count_coefficient_of_variation"] == pytest.approx(0.6)
+    assert result["label_source"] == "folder_structure"
+    assert "sementara" in result["label_source_description"]
+    assert result["dimensions"]["width_min"] == 15
+    assert result["dimensions"]["width_max"] == 64
+    assert result["dimensions"]["width_mean"] == pytest.approx(round((20 + 32 + 40 + 64 + 16 + 15) / 6, 2))
+    assert result["dimensions"]["resolution_pixels_min"] == 20 * 10
+    assert result["dimensions"]["resolution_pixels_max"] == 64 * 32
+    assert result["file_size_bytes"]["min"] > 0
+    assert result["file_size_bytes"]["max"] >= result["file_size_bytes"]["min"]
+    assert result["channel_counts"] == {"1": 1, "3": 5}
+    assert result["image_modes"]["L"] == 1
+    assert result["grayscale_content_count"] >= 1
+    assert "mean_laplacian_variance_64px" in result["visual_characteristics"]
+    assert "brightness_contrast_method" in result["visual_characteristics"]
+    assert "Tidak dihitung" in result["visual_characteristics"]["noise_estimation"]
+    assert result["width_distribution"]
+    assert result["height_distribution"]
+    assert result["aspect_ratio_buckets"]
+    assert result["file_size_distribution"]
+    assert set(result["formats"]) == {"JPEG", "PNG"}
+
+
+def test_large_image_statistics_use_bounded_deterministic_median_sample(monkeypatch, tmp_path):
+    import app.vision.analyzer as analyzer_module
+
+    monkeypatch.setattr(analyzer_module, "MAX_STATISTICS_SAMPLE", 2)
+    root = tmp_path / "many-images" / "class-a"
+    sizes = [(12, 10), (24, 20), (36, 30), (48, 40), (60, 50)]
+    for index, size in enumerate(sizes):
+        _make_image(root / f"{index}.png", size=size)
+
+    result = analyze_image_dataset(root.parent)
+
+    assert result["total_samples"] == len(sizes)
+    assert result["statistics_method"]["median_sample_size"] == 2
+    assert result["statistics_method"]["median_is_sampled"] is True
+    assert result["dimensions"]["width_min"] == 12
+    assert result["dimensions"]["width_max"] == 60
+    assert result["dimensions"]["width_mean"] == pytest.approx(36)
+    assert result["file_size_bytes"]["median_is_sampled"] is True
+
+
+def test_image_task_assessments_and_model_guidance_explain_prerequisites():
+    analysis = {
+        "dataset_type": "image",
+        "total_samples": 40,
+        "total_files": 40,
+        "labeled_count": 40,
+        "unlabeled_count": 0,
+        "has_labels": True,
+        "class_count": 2,
+        "class_distribution": {"a": 20, "b": 20},
+        "label_source_description": "Folder dipakai sebagai label sementara; validasi semantik.",
+        "annotation_readiness": {"note": "Anotasi YOLO/COCO/mask tidak diperiksa."},
+        "dimensions": {"width_max": 2048, "height_max": 1024},
+    }
+    tasks = {item["task"]: item for item in assess_image_tasks(analysis)}
+    readiness = assess_image_readiness(analysis, "classification")
+    classification = recommend_approaches(
+        "image", analysis, "classification", hardware={"gpu_available": False}
+    )
+    clustering = recommend_approaches(
+        "image", analysis, "image_clustering", hardware={"gpu_available": False}
+    )
+    detection = recommend_approaches(
+        "image", analysis, "object_detection", hardware={"gpu_available": False}
+    )
+    segmentation = recommend_approaches(
+        "image", analysis, "segmentation", hardware={"gpu_available": False}
+    )
+    low_ram = recommend_approaches(
+        "image", analysis, "classification",
+        hardware={"gpu_available": False, "ram_available_gb": 2.5},
+    )
+
+    assert "sementara" in tasks["Image Classification"]["evidence"]
+    assert tasks["Object Detection"]["status"] == "Anotasi belum diverifikasi"
+    assert "tidak diperiksa" in tasks["Object Detection"]["evidence"]
+    assert tasks["Image Segmentation"]["status"] == "Anotasi belum diverifikasi"
+    assert tasks["Image Similarity"]["status"] == "Dapat dieksplorasi"
+    assert tasks["Image Clustering"]["status"] == "Dapat dieksplorasi"
+    assert readiness["has_composite_score"] is False
+    assert len(readiness["items"]) == 6
+    assert "ResNet atau EfficientNet" in classification["primary"]["name"]
+    assert any("MobileNet" in item["name"] for item in classification["alternatives"])
+    assert "2,048" in classification["primary"]["computational_requirements"]
+    assert "MiniBatchKMeans" in clustering["primary"]["name"]
+    assert "Faster R-CNN" in detection["primary"]["name"]
+    assert "U-Net" in segmentation["primary"]["name"]
+    assert any("2,5 GiB" in warning for warning in low_ram["warnings"])
+
+
+def test_image_classifier_preprocessing_and_softmax_are_well_formed():
+    import numpy as np
+
+    from app.vision.image_classifier import _make_blob, _softmax
+
+    image = Image.new("RGB", (480, 320), (220, 90, 30))
+    blob = _make_blob(image)
+    probabilities = _softmax(np.array([0.0, 2.0, -1.0], dtype=np.float32))
+
+    assert blob.shape == (1, 3, 224, 224)
+    assert np.isfinite(blob).all()
+    assert probabilities.sum() == pytest.approx(1.0)
+    assert int(np.argmax(probabilities)) == 1
+
+
+def test_image_classifier_runs_top5_over_folder_and_maps_sample_previews(monkeypatch, tmp_path):
+    import cv2
+    import numpy as np
+
+    from app.vision.image_classifier import recognize_image_dataset
+
+    root = tmp_path / "image-classification"
+    _make_image(root / "cats" / "cat.jpg")
+    _make_image(root / "dogs" / "dog.jpg", color=(40, 190, 80))
+    analysis = analyze_image_dataset(root)
+    labels_path = tmp_path / "synset.txt"
+    labels_path.write_text(
+        "\n".join(f"{index + 1} class-{index}" for index in range(1000)),
+        encoding="utf-8",
+    )
+
+    class FakeNet:
+        def setPreferableBackend(self, _backend):
+            pass
+
+        def setPreferableTarget(self, _target):
+            pass
+
+        def setInput(self, _blob):
+            pass
+
+        def forward(self):
+            scores = np.zeros(1000, dtype=np.float32)
+            scores[11] = 7.0
+            scores[29] = 4.0
+            return scores[None, :]
+
+    monkeypatch.setattr(cv2.dnn, "readNetFromONNX", lambda _path: FakeNet())
+    result = recognize_image_dataset(
+        root,
+        model_path=tmp_path / "model.onnx",
+        labels_path=labels_path,
+        sample_references=analysis["sample_references"],
+        known_label_counts=analysis["class_distribution"],
+        label_source=analysis["label_source"],
+    )
+
+    assert result["model"] == "MobileNetV2 ImageNet-1K"
+    assert result["classified_count"] == 2
+    assert result["predicted_class_distribution"] == {"class-11": 2}
+    assert len(result["sample_predictions"]) == 2
+    assert all(item["predictions"][0]["label"] == "class-11" for item in result["sample_predictions"])
+    assert result["custom_ml"]["status"] == "not_trained"
+
+
+def test_image_classifier_reports_model_runtime_failure_instead_of_counting_bad_images(monkeypatch, tmp_path):
+    import cv2
+
+    from app.vision.image_classifier import recognize_image_dataset
+
+    root = tmp_path / "runtime-error" / "class-a"
+    _make_image(root / "image.png")
+    labels_path = tmp_path / "synset.txt"
+    labels_path.write_text("\n".join(f"class-{index}" for index in range(1000)), encoding="utf-8")
+
+    class BrokenNet:
+        def setPreferableBackend(self, _backend):
+            pass
+
+        def setPreferableTarget(self, _target):
+            pass
+
+        def setInput(self, _blob):
+            pass
+
+        def forward(self):
+            raise RuntimeError("model runtime failure")
+
+    monkeypatch.setattr(cv2.dnn, "readNetFromONNX", lambda _path: BrokenNet())
+    with pytest.raises(RuntimeError, match="model runtime failure"):
+        recognize_image_dataset(
+            root.parent,
+            model_path=tmp_path / "model.onnx",
+            labels_path=labels_path,
+        )
+
+
+def test_image_classifier_compares_models_and_evaluates_a_stratified_holdout(tmp_path):
+    from pathlib import Path
+
+    import numpy as np
+
+    from app.vision.image_classifier import _train_custom_classifier
+
+    samples = {
+        "class-a": [(np.concatenate((np.array([-10.0]), np.zeros(7))).astype(np.float32), f"a-{i}") for i in range(10)],
+        "class-b": [(np.concatenate((np.array([10.0]), np.zeros(7))).astype(np.float32), f"b-{i}") for i in range(10)],
+    }
+    result = _train_custom_classifier(
+        samples,
+        model_directory=tmp_path / "models",
+        dataset_path=tmp_path / "dataset",
+        label_source="folder",
+    )
+
+    assert result["status"] == "evaluated"
+    assert result["split"] == "80/20 stratified holdout"
+    assert result["selected_model"] in {"SGD Logistic Classifier", "Linear SVM", "Extra Trees"}
+    assert {item["model"] for item in result["candidate_models"]} == {
+        "SGD Logistic Classifier", "Linear SVM", "Extra Trees"
+    }
+    assert len(result["candidate_models"]) == 3
+    assert result["training_samples"] == 16
+    assert result["validation_samples"] == 4
+    assert result["accuracy"] == pytest.approx(1.0)
+    assert result["balanced_accuracy"] == pytest.approx(1.0)
+    assert result["macro_f1"] == pytest.approx(1.0)
+    assert result["weighted_f1"] == pytest.approx(1.0)
+    assert {item["class"] for item in result["class_metrics"]} == {"class-a", "class-b"}
+    assert all(item["f1"] == pytest.approx(1.0) for item in result["class_metrics"])
+    assert result["confusion_matrix"] == [[2, 0], [0, 2]]
+    assert result["model_path"] and Path(result["model_path"]).is_file()
+
+    import joblib
+    bundle = joblib.load(result["model_path"])
+    assert bundle["model"] == result["selected_model"]
+    assert bundle["classes"] == ["class-a", "class-b"]
+
+
+_QT_TEST_APP = None
+
+
+def test_image_sample_gallery_keeps_pagination_and_bounded_thumbnail_cache():
+    import io
+    from PySide6.QtWidgets import QApplication
+
+    from app.ui.vision_intelligence_page import _VisionTab
+
+    class PageStub:
+        def start_analysis(self, _tab):
+            pass
+
+        def start_recognition(self, _tab):
+            pass
+
+        def cancel_active_operation(self):
+            pass
+
+        def update_recommendations(self, _tab):
+            pass
+
+        def load_previews(self, _tab, _references):
+            pass
+
+    global _QT_TEST_APP
+    _QT_TEST_APP = QApplication.instance() or QApplication([])
+    tab = _VisionTab(PageStub(), "image")
+    assert tab.view_stack.currentWidget() is tab.upload_page
+    tab.show_results_page()
+    assert tab.view_stack.currentWidget() is tab.results_page
+    tab.show_upload_page()
+    assert tab.view_stack.currentWidget() is tab.upload_page
+    tab.sample_refs = [
+        {"name": f"image-{index}.png", "path": f"/tmp/image-{index}.png", "kind": "image"}
+        for index in range(25)
+    ]
+    tab.render_preview_page()
+    assert len(tab.selected_references()) == tab.PAGE_SIZE == 12
+    assert tab.next_button.isEnabled()
+    tab._change_preview_page(1)
+    assert len(tab.selected_references()) == 12
+    tab._change_preview_page(1)
+    assert len(tab.selected_references()) == 1
+    assert not tab.next_button.isEnabled()
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (8, 8), (51, 102, 153)).save(buffer, format="JPEG")
+    jpeg = buffer.getvalue()
+    previews = [
+        {"reference": reference, "data": jpeg}
+        for reference in tab.sample_refs[:25]
+    ]
+    tab.add_previews(previews)
+    assert len(tab._thumbnail_cache) == 24
+    tab.close()
 
 
 def test_image_analysis_zip_classes_corrupt_and_preview(tmp_path):
@@ -246,6 +560,10 @@ def test_vision_analysis_sqlite_persistence_and_project_reopening(tmp_path):
     assert by_project["results"] == result
     assert by_path["recommendations"] == recommendations
     assert by_path["dataset_metadata"] == {"total_samples": 2}
+
+    recognition = {"model": "MobileNetV2 ImageNet-1K", "classified_count": 2}
+    reopened.update_results(analysis_id, {**result, "recognition": recognition})
+    assert reopened.get_latest_by_path(dataset_path, "image")["results"]["recognition"] == recognition
 
 
 def test_qthread_worker_keeps_event_loop_responsive_and_cancels(monkeypatch, tmp_path):

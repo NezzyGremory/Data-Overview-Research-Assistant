@@ -139,6 +139,12 @@ class VisionAnalysisRepository:
             (self._json(analysis_config), self._json(recommendations), int(analysis_id)),
         )
 
+    def update_results(self, analysis_id: int, results: dict[str, Any]) -> None:
+        self.database.execute(
+            "UPDATE vision_analyses SET results_json = ? WHERE id = ?",
+            (self._json(results), int(analysis_id)),
+        )
+
     def get_latest_by_path(self, dataset_path: str | Path, dataset_type: str) -> dict[str, Any] | None:
         row = self.database.fetch_one(
             """

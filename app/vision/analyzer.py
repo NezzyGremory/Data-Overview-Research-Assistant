@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import io
+import itertools
 import math
 import os
 import random
@@ -25,6 +26,7 @@ VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv"}
 MAX_IMAGE_PIXELS = 25_000_000
 MAX_SAMPLE_REFERENCES = 48
 MAX_STATISTICS_SAMPLE = 20_000
+IMAGE_BATCH_SIZE = 25
 MAX_ERROR_LOGS = 100
 MAX_ZIP_MEMBER_BYTES = 16 * 1024 * 1024 * 1024
 SPLIT_DIRECTORIES = {"train", "training", "val", "valid", "validation", "test", "testing"}
@@ -109,6 +111,16 @@ def _iter_archive_media(infos) -> Iterable[_MediaRef]:
             PurePosixPath(info.filename).as_posix(),
             info.filename,
         )
+
+
+def _iter_batched_refs(references: Iterable[_MediaRef], batch_size: int = IMAGE_BATCH_SIZE):
+    """Enumerate lightweight media references in bounded batches, without decoding a batch into RAM."""
+    iterator = iter(references)
+    while True:
+        batch = list(itertools.islice(iterator, max(1, int(batch_size))))
+        if not batch:
+            return
+        yield from batch
 
 
 def _source_kind(path: str | Path) -> tuple[Path, str]:
@@ -285,7 +297,6 @@ def _file_size_bucket(value: int) -> str:
 def _image_quality_metrics(image: Image.Image) -> tuple[float, float, float, bool]:
     """Return thumbnail luminance mean/std and Laplacian variance proxies."""
     gray = ImageOps.grayscale(image)
-    gray.thumbnail((64, 64), Image.Resampling.BILINEAR)
     gray_pixels = np.asarray(gray, dtype=np.float32)
     brightness = float(gray_pixels.mean()) if gray_pixels.size else 0.0
     contrast = float(gray_pixels.std()) if gray_pixels.size else 0.0
@@ -302,9 +313,7 @@ def _image_quality_metrics(image: Image.Image) -> tuple[float, float, float, boo
     else:
         laplacian_variance = 0.0
 
-    rgb = image.copy()
-    rgb.thumbnail((64, 64), Image.Resampling.BILINEAR)
-    color_pixels = np.asarray(rgb.convert("RGB"), dtype=np.uint8)
+    color_pixels = np.asarray(image.convert("RGB"), dtype=np.uint8)
     channel_spread = color_pixels.max(axis=2) - color_pixels.min(axis=2)
     grayscale_content = bool(np.mean(channel_spread <= 2) >= 0.99)
     return brightness, contrast, laplacian_variance, grayscale_content
@@ -377,8 +386,11 @@ def analyze_image_dataset(
     total_size_bytes = 0
     media_size_bytes = 0
     valid_file_size_sum = 0
+    file_size_min = file_size_max = None
     valid_count = 0
     width_sum = height_sum = 0
+    resolution_pixel_sum = 0
+    resolution_pixel_min = resolution_pixel_max = None
     width_min = height_min = None
     width_max = height_max = 0
     ratio_min = ratio_max = None
@@ -387,7 +399,7 @@ def analyze_image_dataset(
     brightness_min = contrast_min = sharpness_min = None
     brightness_max = contrast_max = sharpness_max = 0.0
     grayscale_content_count = 0
-    statistics_samples: list[tuple[int, int, float, int, float, float, float]] = []
+    statistics_samples: list[tuple[int, int, float, int, float, float, float, int]] = []
     statistics_rng = random.Random(20261110)
 
     archive = zipfile.ZipFile(source, "r") if source_type == "zip" else None
@@ -415,7 +427,7 @@ def analyze_image_dataset(
                     pass
 
         _emit_progress(progress, 2, "Memeriksa daftar file gambar")
-        for processed, ref in enumerate(refs, start=1):
+        for processed, ref in enumerate(_iter_batched_refs(refs), start=1):
             _check_cancel(cancel_event)
             if source_type == "zip" and ref.size_bytes > MAX_ZIP_MEMBER_BYTES:
                 unreadable_count += 1
@@ -433,6 +445,7 @@ def analyze_image_dataset(
                         image_format = (image.format or Path(ref.relative_path).suffix.lstrip(".")).upper()
                         image_mode = image.mode
                         channel_count = len(image.getbands())
+                        image.thumbnail((64, 64), Image.Resampling.BILINEAR)
                         brightness, contrast, sharpness, is_grayscale = _image_quality_metrics(image)
                         small_image = image.copy()
                         small_image.thumbnail((24, 24), Image.Resampling.BILINEAR)
@@ -461,6 +474,10 @@ def analyze_image_dataset(
                 near_uniform_count += int(deviation < 1.5)
                 width_sum += width
                 height_sum += height
+                resolution_pixels = width * height
+                resolution_pixel_sum += resolution_pixels
+                resolution_pixel_min = resolution_pixels if resolution_pixel_min is None else min(resolution_pixel_min, resolution_pixels)
+                resolution_pixel_max = max(resolution_pixel_max or 0, resolution_pixels)
                 width_min = width if width_min is None else min(width_min, width)
                 height_min = height if height_min is None else min(height_min, height)
                 width_max = max(width_max, width)
@@ -469,6 +486,8 @@ def analyze_image_dataset(
                 ratio_min = ratio if ratio_min is None else min(ratio_min, ratio)
                 ratio_max = ratio if ratio_max is None else max(ratio_max, ratio)
                 valid_file_size_sum += ref.size_bytes
+                file_size_min = ref.size_bytes if file_size_min is None else min(file_size_min, ref.size_bytes)
+                file_size_max = max(file_size_max or 0, ref.size_bytes)
                 brightness_sum += brightness
                 contrast_sum += contrast
                 sharpness_sum += sharpness
@@ -480,7 +499,7 @@ def analyze_image_dataset(
                 sharpness_max = max(sharpness_max, sharpness)
                 _reservoir_add(
                     statistics_samples,
-                    (width, height, ratio, ref.size_bytes, brightness, contrast, sharpness),
+                    (width, height, ratio, ref.size_bytes, brightness, contrast, sharpness, resolution_pixels),
                     valid_count,
                     statistics_rng,
                     limit=MAX_STATISTICS_SAMPLE,
@@ -508,46 +527,124 @@ def analyze_image_dataset(
     ordered_labels = dict(sorted(labels.items(), key=lambda item: item[0].casefold()))
     class_sizes = list(ordered_labels.values())
     imbalance_ratio = max(class_sizes) / min(class_sizes) if class_sizes else None
+    labeled_count = sum(class_sizes)
+    width_samples = [sample[0] for sample in statistics_samples]
+    height_samples = [sample[1] for sample in statistics_samples]
+    ratio_samples = [sample[2] for sample in statistics_samples]
+    file_size_samples = [sample[3] for sample in statistics_samples]
+    brightness_samples = [sample[4] for sample in statistics_samples]
+    contrast_samples = [sample[5] for sample in statistics_samples]
+    sharpness_samples = [sample[6] for sample in statistics_samples]
+    resolution_pixel_samples = [sample[7] for sample in statistics_samples]
+    class_mean = sum(class_sizes) / len(class_sizes) if class_sizes else 0.0
+    class_count_cv = (
+        math.sqrt(sum((count - class_mean) ** 2 for count in class_sizes) / len(class_sizes)) / class_mean
+        if class_sizes and class_mean
+        else None
+    )
+    label_source = _label_source(metadata_label_count, folder_label_count)
+    label_source_description = {
+        "metadata_csv": "Label diambil dari CSV yang cocok ke file media.",
+        "folder_structure": "Nama folder dipakai sebagai label sementara; validasi bahwa folder memang mewakili kelas target.",
+        "metadata_csv+folder_structure": "Label berasal dari CSV bila cocok, lalu folder dipakai sebagai fallback; validasi sumber setiap label.",
+    }.get(label_source, "Label belum terdeteksi dari CSV atau struktur folder.")
     result = {
         "dataset_type": "image",
         "source_path": str(source),
         "source_kind": source_type,
+        "processing_batch_size": IMAGE_BATCH_SIZE,
         "total_files": total_candidates,
         "total_samples": valid_count,
         "class_count": len(ordered_labels),
         "has_labels": bool(ordered_labels),
-        "label_source": _label_source(metadata_label_count, folder_label_count),
+        "labeled_count": labeled_count,
+        "label_source": label_source,
+        "label_source_description": label_source_description,
+        "annotation_readiness": {
+            "bounding_box": "not_checked",
+            "segmentation_mask": "not_checked",
+            "note": "Berkas YOLO/COCO dan mask tidak diperiksa oleh pemindai gambar; konfirmasi anotasi secara terpisah sebelum memilih task detection atau segmentation.",
+        },
         "label_column": label_column,
         "metadata_files": metadata_files,
         "class_distribution": ordered_labels,
-        "unlabeled_count": max(0, valid_count - sum(class_sizes)),
+        "unlabeled_count": max(0, valid_count - labeled_count),
         "class_imbalance_ratio": imbalance_ratio,
+        "class_count_coefficient_of_variation": round(class_count_cv, 4) if class_count_cv is not None else None,
+        "class_balance_method": "Rasio kelas maksimum/minimum dan CV populasi dari jumlah sampel per kelas; rasio 3:1 hanya ambang triase, bukan aturan universal.",
         "source_size_bytes": total_size_bytes,
+        "media_size_bytes": media_size_bytes,
+        "file_size_bytes": {
+            "min": file_size_min,
+            "mean": round(valid_file_size_sum / valid_count, 2),
+            "median": round(statistics.median(file_size_samples), 2),
+            "max": file_size_max,
+            "statistics_sample_size": len(statistics_samples),
+            "median_is_sampled": valid_count > len(statistics_samples),
+        },
         "formats": dict(sorted(formats.items())),
+        "image_modes": dict(sorted(mode_counts.items())),
+        "channel_counts": dict(sorted(band_counts.items(), key=lambda item: int(item[0]))),
+        "grayscale_content_count": grayscale_content_count,
+        "color_content_count": valid_count - grayscale_content_count,
         "invalid_files": unreadable_count,
         "duplicate_count": duplicate_count,
         "near_uniform_count": near_uniform_count,
         "resolution_buckets": dict(resolutions),
+        "width_distribution": dict(sorted(width_buckets.items())),
+        "height_distribution": dict(sorted(height_buckets.items())),
+        "file_size_distribution": dict(sorted(file_size_buckets.items())),
         "aspect_ratio_buckets": dict(aspects),
         "dimensions": {
             "width_min": width_min,
             "width_mean": round(width_sum / valid_count, 2),
+            "width_median": round(statistics.median(width_samples), 2),
             "width_max": width_max,
             "height_min": height_min,
             "height_mean": round(height_sum / valid_count, 2),
+            "height_median": round(statistics.median(height_samples), 2),
             "height_max": height_max,
+            "resolution_pixels_min": resolution_pixel_min,
+            "resolution_pixels_mean": round(resolution_pixel_sum / valid_count, 2),
+            "resolution_pixels_median": round(statistics.median(resolution_pixel_samples), 2),
+            "resolution_pixels_max": resolution_pixel_max,
+            "median_is_sampled": valid_count > len(statistics_samples),
+            "statistics_sample_size": len(statistics_samples),
         },
         "aspect_ratio": {
             "min": round(ratio_min, 4),
             "mean": round(ratio_sum / valid_count, 4),
+            "median": round(statistics.median(ratio_samples), 4),
             "max": round(ratio_max, 4),
+            "median_is_sampled": valid_count > len(statistics_samples),
         },
         "visual_characteristics": {
             "mean_brightness_0_255": round(brightness_sum / valid_count, 2),
-            "brightness_min_0_255": round(brightness_min, 2),
+            "brightness_min_0_255": round(float(brightness_min), 2),
+            "brightness_median_0_255": round(statistics.median(brightness_samples), 2),
             "brightness_max_0_255": round(brightness_max, 2),
+            "mean_contrast_luminance_std_0_255": round(contrast_sum / valid_count, 2),
+            "contrast_min_luminance_std_0_255": round(float(contrast_min), 2),
+            "contrast_median_luminance_std_0_255": round(statistics.median(contrast_samples), 2),
+            "contrast_max_luminance_std_0_255": round(contrast_max, 2),
+            "mean_laplacian_variance_64px": round(sharpness_sum / valid_count, 3),
+            "laplacian_variance_min_64px": round(float(sharpness_min), 3),
+            "laplacian_variance_median_64px": round(statistics.median(sharpness_samples), 3),
+            "laplacian_variance_max_64px": round(sharpness_max, 3),
+            "statistics_sample_size": len(statistics_samples),
             "near_uniform_images": near_uniform_count,
-            "note": "Brightness dan variasi tonal dihitung dari pratinjau 24×24; bukan penilaian blur atau kualitas perseptual menyeluruh.",
+            "grayscale_content_count": grayscale_content_count,
+            "grayscale_content_rule": "Konten disebut grayscale bila setidaknya 99% piksel thumbnail 64x64 memiliki rentang kanal RGB <= 2.",
+            "sharpness_method": "Varians Laplacian 4-neighbor pada luminans thumbnail maksimal 64x64; nilai bergantung pada konten dan resize, tanpa ambang blur universal.",
+            "brightness_contrast_method": "Rata-rata dan simpangan baku luminans pada thumbnail maksimal 64x64, skala 0-255.",
+            "noise_estimation": "Tidak dihitung: estimasi noise umum memerlukan asumsi sensor/jenis gambar atau flat-region yang tervalidasi.",
+            "note": "Brightness, contrast, dan sharpness merupakan indikator thumbnail 64×64; bukan penilaian kualitas visual menyeluruh.",
+        },
+        "statistics_method": {
+            "exact_count": valid_count,
+            "median_sample_size": len(statistics_samples),
+            "median_is_sampled": valid_count > len(statistics_samples),
+            "median_description": "Median exact untuk dataset sampai 20.000 gambar; di atasnya memakai reservoir deterministik maksimal 20.000 gambar. Mean, min, max, dan histogram dihitung streaming dari semua file valid.",
         },
         "sample_references": samples,
         "error_log": errors,

@@ -12,12 +12,17 @@ IMAGE_TASKS = (
     ("object_detection", "Object detection"),
     ("segmentation", "Image segmentation"),
     ("image_similarity", "Image similarity"),
+    ("image_clustering", "Image clustering"),
 )
 VIDEO_TASKS = (
     ("video_classification", "Video classification"),
     ("action_recognition", "Action recognition"),
     ("video_similarity", "Video similarity"),
 )
+
+
+def _decimal_display(value: float, places: int = 1) -> str:
+    return f"{value:.{places}f}".replace(".", ",")
 
 
 def detect_hardware() -> dict[str, Any]:
@@ -111,10 +116,11 @@ def _image_recommendations(task: str, analysis: dict[str, Any], hardware: dict[s
     min_class_count = min(class_distribution.values()) if class_distribution else 0
     imbalance = float(analysis.get("class_imbalance_ratio") or 1.0)
     has_labels = bool(analysis.get("has_labels"))
+    unlabeled_count = int(analysis.get("unlabeled_count") or max(0, sample_count - sum(class_distribution.values())))
     gpu = hardware.get("gpu_available") is True
     small_data = sample_count < 2_000 or (class_count and min_class_count < 100)
     imbalance_note = (
-        f"Rasio jumlah kelas terbesar/terkecil sekitar {imbalance:.1f}:1; gunakan stratified split, "
+        f"Rasio jumlah kelas terbesar/terkecil sekitar {_decimal_display(imbalance)}:1; gunakan stratified split, "
         "class weights atau sampling yang terkontrol."
         if class_count > 1 and imbalance >= 3
         else "Distribusi kelas belum menunjukkan ketimpangan besar dari pemeriksaan sederhana ini."
@@ -147,19 +153,56 @@ def _image_recommendations(task: str, analysis: dict[str, Any], hardware: dict[s
         ]
         return primary, alternatives, None
 
+    if task == "image_clustering":
+        primary = _recommendation(
+            name="Image embeddings + MiniBatchKMeans/HDBSCAN",
+            task="Image clustering",
+            reason=(
+                f"Clustering dapat dimulai tanpa label pada {sample_count:,} gambar valid. "
+                "Embeddings menyediakan representasi awal; pilihan jumlah cluster dan interpretasi harus divalidasi pada domain.") ,
+            pros=["Tidak memerlukan label kelas", "Embedding dapat diproses batch dan disimpan bertahap", "Berguna untuk eksplorasi dan sampling anotasi"],
+            cons=["Cluster tidak otomatis menjadi kategori yang benar", "Hasil sensitif pada backbone, metric, dan parameter cluster"],
+            compute="CPU dapat menjalankan MiniBatchKMeans pada embedding; GPU opsional untuk ekstraksi embedding. Batasi batch dan resolusi sesuai RAM.",
+            complexity="Sedang",
+            suitable="Koleksi gambar dengan variasi yang ingin dieksplorasi sebelum/di luar supervised labeling.",
+            limitations="Silhouette/internal score tidak membuktikan makna cluster; validasi visual dan pengetahuan domain tetap diperlukan.",
+        )
+        alternative = _recommendation(
+            name="PCA/UMAP untuk visualisasi embedding",
+            task="Exploratory image clustering",
+            reason="Proyeksi dimensi membantu meninjau sebaran sampel setelah embedding dihitung secara bertahap.",
+            pros=["Mendukung inspeksi kelompok dan outlier", "Dapat menggunakan subset representatif"],
+            cons=["Proyeksi 2D dapat mendistorsi jarak", "Bukan algoritma label atau bukti cluster terpisah"],
+            compute="CPU untuk subset kecil; biaya bergantung jumlah embedding dan parameter proyeksi.",
+            complexity="Sedang",
+            suitable="Eksplorasi setelah jumlah sampel, preprocessing, dan embedding ditentukan.",
+            limitations="Visualisasi tidak menggantikan pengujian stabilitas cluster atau validasi manusia.",
+        )
+        return primary, [alternative], None
+
     if task in {"object_detection", "segmentation"}:
         annotation = "bounding box" if task == "object_detection" else "pixel-level mask"
         task_name = "Object detection" if task == "object_detection" else "Image segmentation"
+        candidate = (
+            "Faster R-CNN or RetinaNet"
+            if task == "object_detection"
+            else "U-Net or DeepLabv3"
+        )
+        compute = (
+            "GPU disarankan untuk fine-tuning; mulai dari batch dan resolusi rendah yang sesuai memori."
+            if gpu
+            else "GPU belum terkonfirmasi. CPU cukup untuk anotasi dan uji pipeline kecil; fine-tuning penuh dapat lambat."
+        )
         primary = _recommendation(
-            name=f"Anotasi {annotation} lalu fine-tuning model pralatih",
+            name=f"Anotasi {annotation}, lalu uji kandidat {candidate}",
             task=task_name,
-            reason=f"Struktur folder hanya memberi label gambar. Tugas ini memerlukan anotasi {annotation} per objek/area; label kelas folder tidak cukup sebagai target.",
-            pros=["Target sesuai dengan kebutuhan lokasi objek atau area", "Backbone pralatih dapat mengurangi kebutuhan data dibanding training dari nol"],
+            reason=f"Struktur folder/CSV label gambar tidak membuktikan anotasi {annotation}. Setelah format, cakupan, dan label anotasi diverifikasi, {candidate} dapat dijadikan kandidat eksperimen; scanner belum memastikan dataset cocok untuk task ini.",
+            pros=["Target sesuai dengan kebutuhan lokasi objek atau area", "Backbone pralatih dapat mengurangi kebutuhan belajar dari nol", "Candidate model dapat dibandingkan memakai split dan metrik task yang sama"],
             cons=["Anotasi memerlukan waktu dan pedoman konsisten", "Evaluasi harus memperhitungkan objek kecil, batas mask, dan variasi antar anotator"],
-            compute="GPU disarankan untuk fine-tuning dan resolusi besar. CPU dapat dipakai untuk menyiapkan anotasi dan uji pipeline kecil.",
+            compute=compute + " Tentukan resize/crop setelah memeriksa resolusi dataset.",
             complexity="Tinggi",
             suitable=f"Dataset yang memiliki atau akan diberi anotasi {annotation}; split harus dipisah berdasarkan sumber/pasien bila relevan.",
-            limitations="Belum ada pemeriksaan berkas anotasi di tahap ini. Rekomendasi model belum merupakan hasil training atau evaluasi.",
+            limitations="Belum ada pemeriksaan berkas anotasi di tahap ini. Kandidat bukan model terbaik yang telah dibuktikan; lakukan pilot dan evaluasi task-specific.",
         )
         alternatives = [
             _recommendation(
@@ -217,8 +260,16 @@ def _image_recommendations(task: str, analysis: dict[str, Any], hardware: dict[s
 
     backbone_reason = (
         f"Terdapat {sample_count:,} gambar valid dan {class_count:,} kelas berlabel. "
+        + (f"{unlabeled_count:,} gambar belum berlabel; batasi supervised training ke subset berlabel atau lengkapi anotasi. " if unlabeled_count else "Seluruh gambar valid memiliki label kelas terdeteksi. ")
         + (f"Data per kelas masih kecil (minimum {min_class_count:,}); transfer learning mengurangi kebutuhan belajar fitur dari nol." if small_data else "Ukuran data memungkinkan pembandingan beberapa backbone dengan split yang benar.")
         + " " + imbalance_note
+        + " " + str(analysis.get("label_source_description") or "Validasi label sebelum training.")
+    )
+    dimensions = analysis.get("dimensions") or {}
+    maximum_dimension = max(int(dimensions.get("width_max") or 0), int(dimensions.get("height_max") or 0))
+    resolution_note = (
+        f"Resolusi maksimum {maximum_dimension:,} px pada sisi terpanjang; tentukan resize/crop eksplisit dan ukur kebutuhan memori."
+        if maximum_dimension else "Resolusi belum tersedia; ukur biaya preprocessing sebelum menentukan backbone."
     )
     primary = _recommendation(
         name="Transfer learning dengan ResNet atau EfficientNet",
@@ -226,7 +277,7 @@ def _image_recommendations(task: str, analysis: dict[str, Any], hardware: dict[s
         reason=backbone_reason,
         pros=["Baseline kuat untuk data kecil-menengah", "Backbone pralatih mengurangi biaya dibanding CNN dari nol", "Mudah dibandingkan dengan metrik per kelas"],
         cons=["Preprocessing dan domain pralatih memengaruhi hasil", "Ketimpangan label dapat membuat akurasi agregat menyesatkan"],
-        compute="GPU " + ("tersedia menurut PyTorch; gunakan batch sesuai memori." if gpu else "belum terkonfirmasi; mulai dari batch kecil pada CPU atau periksa GPU/CUDA sebelum fine-tuning."),
+        compute=("GPU " + ("tersedia menurut PyTorch; gunakan batch sesuai memori." if gpu else "belum terkonfirmasi; mulai dari batch kecil pada CPU atau periksa GPU/CUDA sebelum fine-tuning.")) + " " + resolution_note,
         complexity="Sedang",
         suitable="Label kelas valid, split stratified, dan minimal beberapa contoh per kelas. Mulai dengan resolusi yang tersedia lalu ukur biaya resize.",
         limitations="Ini rekomendasi pendekatan, bukan skor eksperimen. Laporkan holdout terpisah, macro-F1, confusion matrix, dan variasi seed.",
@@ -256,7 +307,12 @@ def _image_recommendations(task: str, analysis: dict[str, Any], hardware: dict[s
             suitable="Data berlabel cukup, GPU terverifikasi, dan alasan tugas mendukung konteks global.",
             limitations="Tidak otomatis lebih baik dari CNN; lakukan perbandingan pada protokol split yang sama.",
         ))
-    return primary, alternatives, None
+    warning = (
+        f"{unlabeled_count:,} gambar valid belum memiliki label terpetakan; hasil supervised hanya dapat memakai subset berlabel sampai cakupan diperiksa."
+        if unlabeled_count
+        else None
+    )
+    return primary, alternatives, warning
 
 
 def _video_recommendations(task: str, analysis: dict[str, Any], hardware: dict[str, Any]):
@@ -267,7 +323,7 @@ def _video_recommendations(task: str, analysis: dict[str, Any], hardware: dict[s
     has_labels = bool(analysis.get("has_labels"))
     gpu = hardware.get("gpu_available") is True
     imbalance = float(analysis.get("class_imbalance_ratio") or 1.0)
-    imbalance_note = f"Periksa ketimpangan kelas sekitar {imbalance:.1f}:1 dan gunakan macro-F1." if class_count > 1 and imbalance >= 3 else "Laporkan metrik per kelas selain skor agregat."
+    imbalance_note = f"Periksa ketimpangan kelas sekitar {_decimal_display(imbalance)}:1 dan gunakan macro-F1." if class_count > 1 and imbalance >= 3 else "Laporkan metrik per kelas selain skor agregat."
 
     if task == "video_similarity":
         primary = _recommendation(
@@ -407,7 +463,10 @@ def recommend_approaches(
         warnings.append("Dataset berukuran besar; analisis membaca satu media per langkah. Untuk mengecek keterwakilan lebih cepat, mulai dari subfolder sampel yang representatif.")
     ram_available = hardware_info.get("ram_available_gb")
     if ram_available is not None and float(ram_available) < 4:
-        warnings.append(f"RAM tersedia sekitar {float(ram_available):.1f} GiB. Gunakan subset kecil dan sampling video 1–2 frame per video sebelum eksperimen model.")
+        if dataset_type == "image":
+            warnings.append(f"RAM tersedia sekitar {_decimal_display(float(ram_available))} GiB. Gunakan subset gambar, resolusi, dan batch kecil saat menyiapkan eksperimen model.")
+        else:
+            warnings.append(f"RAM tersedia sekitar {_decimal_display(float(ram_available))} GiB. Gunakan subset kecil dan sampling video 1–2 frame per video sebelum eksperimen model.")
     dimensions = analysis.get("dimensions") or {}
     if max(int(dimensions.get("width_max") or 0), int(dimensions.get("height_max") or 0)) >= 4096:
         warnings.append("Ada media beresolusi sangat tinggi; turunkan resolusi pada pipeline training dan uji satu file dulu untuk membatasi kebutuhan RAM/GPU.")
