@@ -68,12 +68,18 @@ class AdapterRuntimeService:
 
         if peft_type != "LORA":
             issues.append(f"Adapter type {peft_type or 'unknown'} is not LoRA.")
-        if task_type and task_type not in {"CAUSAL_LM", "SEQ_2_SEQ_LM"}:
-            issues.append(f"Adapter task type {task_type} is not supported for chat inference.")
+        if task_type and task_type != "CAUSAL_LM":
+            issues.append(f"Adapter task type {task_type} is not supported for causal chat inference.")
+        elif not task_type:
+            warnings.append("Adapter metadata omits task_type; the local PEFT merge remains the final compatibility check.")
         if not model_type:
             issues.append("Base model config.json does not declare model_type.")
         if not adapter_config.get("target_modules"):
             issues.append("Adapter metadata does not declare target_modules.")
+        else:
+            warnings.append(
+                "target_modules are declared in adapter metadata; PEFT validates them against instantiated base layers during merge."
+            )
         if adapter_format == "unknown":
             issues.append("Adapter weights must use adapter_model.safetensors or adapter_model.bin.")
         if model_config.get("quantization_config"):
@@ -102,6 +108,9 @@ class AdapterRuntimeService:
         missing = tuple(name for name in self.REQUIRED_MERGE_PACKAGES if importlib.util.find_spec(name) is None)
         if missing:
             warnings.append("Local merge runtime packages are missing: " + ", ".join(missing))
+        ollama_cli_available = shutil.which("ollama") is not None
+        if not ollama_cli_available:
+            warnings.append("Ollama CLI is not available on PATH; the merged model cannot be imported yet.")
         return AdapterCompatibilityReport(
             version_id=version.version_id,
             base_model_path=str(base_dir),
@@ -111,7 +120,7 @@ class AdapterRuntimeService:
             training_quantization=training_quantization,
             compatible=not issues,
             ollama_import_supported=model_type in self.OLLAMA_SAFETENSORS_MODEL_TYPES,
-            runtime_ready=not missing,
+            runtime_ready=not missing and ollama_cli_available,
             missing_dependencies=missing,
             issues=tuple(issues),
             warnings=tuple(warnings),
@@ -141,9 +150,11 @@ class AdapterRuntimeService:
                 "Use a compatible Transformers runtime or convert the merged model with a supported GGUF tool."
             )
         if not report.runtime_ready:
-            raise AdapterRuntimeError(
-                "Install the optional local merge dependencies first: " + ", ".join(report.missing_dependencies)
-            )
+            if report.missing_dependencies:
+                raise AdapterRuntimeError(
+                    "Install the optional local merge dependencies first: " + ", ".join(report.missing_dependencies)
+                )
+            raise AdapterRuntimeError("Ollama CLI was not found. Install/start Ollama before importing this model.")
         ollama = shutil.which("ollama")
         if not ollama:
             raise AdapterRuntimeError("Ollama CLI was not found. Install/start Ollama before importing this model.")

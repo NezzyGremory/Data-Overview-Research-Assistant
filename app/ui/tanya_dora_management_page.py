@@ -1274,7 +1274,7 @@ class EvaluationStudioTab(QWidget):
         model_row.addWidget(QLabel("Fine-tuned Ollama model")); self.ft_model = QComboBox(); model_row.addWidget(self.ft_model, 1)
         self.embedding = QComboBox(); self.embedding.addItem("RAG keyword FTS5", None); model_row.addWidget(self.embedding); root.addLayout(model_row)
         self.run_button = _button("Jalankan perbandingan 5 kondisi", self.run_comparison, primary=True); self.stop_button = _button("Stop", self.stop_comparison); self.stop_button.setEnabled(False)
-        action = QHBoxLayout(); action.addWidget(self.run_button); action.addWidget(self.stop_button); action.addWidget(_button("Ekspor hasil JSON", self.export_results)); action.addStretch(1); root.addLayout(action)
+        action = QHBoxLayout(); action.addWidget(self.run_button); action.addWidget(self.stop_button); action.addWidget(_button("Review hasil terpilih", self.review_selected_run)); action.addWidget(_button("Ekspor hasil JSON", self.export_results)); action.addStretch(1); root.addLayout(action)
         self.progress = QLabel("Impor benchmark terpisah, pilih TDID untuk leakage check, lalu pilih model lokal."); self.progress.setObjectName("tanyaDoraStudioHint"); self.progress.setWordWrap(True); root.addWidget(self.progress)
         self.table = _table(("Kondisi", "Model", "Status", "Kasus", "Exact match¹", "Term recall¹", "Latency", "Run ID")); root.addWidget(self.table, 1)
         self.disclaimer = QLabel("¹ Metrik otomatis ini proxy lexical. Factual accuracy, reasoning, citation faithfulness, hallucination dan kualitas tools membutuhkan review manusia.")
@@ -1292,8 +1292,6 @@ class EvaluationStudioTab(QWidget):
         if selected_benchmark:
             index = self.benchmark_combo.findData(selected_benchmark)
             if index >= 0: self.benchmark_combo.setCurrentIndex(index)
-        if hasattr(self, "builder"):
-            self.progress.setText(f"{len(self.builder.cases)} kasus benchmark belum disimpan.")
 
     def refresh_models(self) -> None:
         try: models = self.manager.refresh_models()
@@ -1413,6 +1411,98 @@ class EvaluationStudioTab(QWidget):
             _set_cell(self.table, row, 5, summary.get("required_term_recall"))
             _set_cell(self.table, row, 6, summary.get("mean_latency_seconds"))
             _set_cell(self.table, row, 7, run.run_id)
+
+    def review_selected_run(self) -> None:
+        row_index = self.table.currentRow()
+        run_id_item = self.table.item(row_index, 7) if row_index >= 0 else None
+        if run_id_item is None:
+            QMessageBox.information(self, "Human review", "Pilih hasil benchmark pada tabel terlebih dahulu.")
+            return
+        run_id = run_id_item.text()
+        run = next((item for item in self.benchmark_store.list_runs() if item.run_id == run_id), None)
+        if run is None or not run.case_results:
+            QMessageBox.information(self, "Human review", "Run terpilih belum memiliki hasil kasus untuk ditinjau.")
+            return
+        try:
+            benchmark_cases = self.benchmark_store.load_version(run.version_id)
+        except Exception as error:
+            QMessageBox.warning(self, "Human review", f"Snapshot benchmark tidak dapat dimuat: {error}")
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Review jawaban benchmark")
+        dialog.resize(ui_px(760), ui_px(760))
+        layout = QVBoxLayout(dialog)
+        form = QFormLayout()
+        case_combo = QComboBox()
+        case_by_id = {case.case_id: case for case in run.case_results}
+        prompt_by_id = {case.case_id: case.prompt for case in benchmark_cases}
+        for case in run.case_results:
+            case_combo.addItem(f"{case.case_id} · {case.latency_seconds:.2f} s", case.case_id)
+        form.addRow("Kasus", case_combo)
+        layout.addLayout(form)
+        response_preview = QPlainTextEdit()
+        response_preview.setReadOnly(True)
+        response_preview.setMaximumBlockCount(200)
+        layout.addWidget(response_preview, 1)
+
+        criteria = (
+            ("Factual accuracy", "factual_accuracy"),
+            ("Instruction following", "instruction_following"),
+            ("Reasoning", "reasoning"),
+            ("Coding", "coding"),
+            ("Mathematics", "mathematics"),
+            ("Data science", "data_science"),
+            ("Research methodology", "research_methodology"),
+            ("Citation accuracy", "citation_accuracy"),
+            ("Tool calling", "tool_calling"),
+            ("Latency quality", "latency_quality"),
+        )
+        score_widgets: dict[str, QSpinBox] = {}
+        score_form = QFormLayout()
+        for label, key in criteria:
+            score = QSpinBox(); score.setRange(1, 5); score.setValue(3)
+            score_widgets[key] = score; score_form.addRow(label, score)
+        layout.addLayout(score_form)
+        hallucination = QCheckBox("Jawaban mengandung halusinasi")
+        notes = QPlainTextEdit(); notes.setPlaceholderText("Catatan review manusia"); notes.setMaximumHeight(ui_px(90))
+        layout.addWidget(hallucination); layout.addWidget(notes)
+
+        saved_reviews = self.benchmark_store.get_reviews(run_id)
+
+        def load_case(case_id: str) -> None:
+            result = case_by_id[case_id]
+            response_preview.setPlainText(
+                f"PROMPT\n{prompt_by_id.get(case_id, '')}"
+                f"\n\nJAWABAN\n{result.answer}\n\nCITATIONS\n"
+                f"{chr(10).join(result.citations) or '(tidak ada)'}\n\nTOOL CALLS\n"
+                f"{', '.join(result.tool_calls) or '(tidak ada)'}\n\nERROR\n{result.error or '(tidak ada)'}"
+            )
+            review = saved_reviews.get(case_id, {})
+            scores = review.get("scores", {})
+            for key, widget in score_widgets.items(): widget.setValue(int(scores.get(key, 3)))
+            hallucination.setChecked(bool(review.get("hallucination_observed", False)))
+            notes.setPlainText(str(review.get("notes", "")))
+
+        case_combo.currentIndexChanged.connect(lambda _index: load_case(str(case_combo.currentData() or "")))
+        if case_combo.count(): load_case(str(case_combo.currentData()))
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dialog.accept); buttons.rejected.connect(dialog.reject); layout.addWidget(buttons)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        case_id = str(case_combo.currentData() or "")
+        try:
+            self.benchmark_store.review_case(
+                run_id,
+                case_id,
+                scores={key: widget.value() for key, widget in score_widgets.items()},
+                hallucination_observed=hallucination.isChecked(),
+                notes=notes.toPlainText(),
+            )
+        except Exception as error:
+            QMessageBox.warning(self, "Human review", str(error))
+        else:
+            self.progress.setText(f"Human review tersimpan untuk {case_id} · {run.model_name}.")
 
     def export_results(self) -> None:
         version_id = self._selected_benchmark_version()

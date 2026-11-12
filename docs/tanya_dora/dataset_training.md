@@ -2,7 +2,7 @@
 
 ## Cakupan
 
-`app/ai/tdid_dataset.py` menyediakan builder layanan untuk import JSONL/CSV, validasi, tambah/edit/hapus record, statistik kategori dan kesulitan, pemeriksaan duplikasi, grouped split, export, serta snapshot versi immutable di SQLite. Ini belum menjadi halaman Dataset Builder di UI.
+`app/ai/tdid_dataset.py` menyediakan builder layanan untuk import JSONL/CSV, validasi, tambah/edit/hapus record, statistik kategori dan kesulitan, pemeriksaan duplikasi, grouped split, export, serta snapshot versi immutable di SQLite. Tanya DORA Studio → Dataset TDID menghubungkan operasi tersebut ke UI.
 
 Tidak ada percakapan DORA yang dimasukkan ke TDID secara otomatis. Data percakapan dan TDID disimpan terpisah. Salin contoh secara manual hanya setelah persetujuan dan anonimisasi yang sesuai.
 
@@ -43,4 +43,4 @@ Default: `get_data_dir()/tanya_dora/tdid/`. Metadata versi berada di `tdid.db`; 
 
 ## Status implementasi
 
-Service dan unit test tersedia. UI builder, proses review multi-user, mekanisme anonimisasi percakapan, serta anotasi kontradiksi semantik belum tersedia.
+Service dan UI builder terintegrasi, dan fixture enam record terverifikasi sudah disimpan serta diekspor pada storage sementara sebagai plumbing check. Review multi-user, anonimisasi percakapan, dan anotasi kontradiksi semantik belum tersedia. Fixture kecil ini bukan dataset training yang memadai.

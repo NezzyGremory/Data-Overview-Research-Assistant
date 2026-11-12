@@ -13,4 +13,4 @@
 
 Fingerprint base model saat ini merangkum hash `config.json` serta nama/ukuran file bobot, bukan hash isi setiap bobot. Ia mendeteksi perubahan konfigurasi dan susunan/ukuran file, tetapi tidak membuktikan identitas kriptografis semua bobot.
 
-Pemilihan tersimpan di registry; Tanya DORA saat ini masih menjalankan model chat melalui Ollama dan belum memuat adapter Transformers yang dipilih. Karena runtime adapter belum terhubung, pilihan registry belum mengubah model produksi. Jangan menyebut adapter terpilih sebagai model inference aktif sampai runtime tersebut diintegrasikan dan diuji.
+Pemilihan versi adapter di registry tidak dengan sendirinya mengaktifkan inference. Tanya DORA Studio memeriksa kompatibilitas, lalu dapat menggabungkan LoRA ke model penuh lokal dan meminta Ollama mengimpornya. Aktivasi model runtime, deactivation, dan rollback memerlukan konfirmasi eksplisit dan dicatat terpisah dari seleksi registry. Lihat [adapter runtime](adapter_runtime.md). Jalur merge/import sudah terintegrasi tetapi belum dijalankan karena Ollama CLI dan training dependencies tidak ada di environment saat ini.

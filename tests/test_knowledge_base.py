@@ -57,6 +57,16 @@ average, and it can move when outliers are present. Quartiles summarize spread.
         self.assertGreaterEqual(document.chunk_count, 1)
         self.assertTrue((self.root / "kb" / "sources" / f"{document.document_id}.md").is_file())
 
+    def test_duplicate_source_bytes_are_rejected_without_creating_a_second_document(self):
+        first_source = self.write_source("first.md", "Identical source content for duplicate checking.")
+        duplicate_source = self.write_source("copy.md", "Identical source content for duplicate checking.")
+        first = self.kb.import_document(first_source, KnowledgeDocumentMetadata(title="First copy"))
+
+        with self.assertRaisesRegex(KnowledgeBaseError, "already been indexed"):
+            self.kb.import_document(duplicate_source, KnowledgeDocumentMetadata(title="Second copy"))
+
+        self.assertEqual(tuple(item.document_id for item in self.kb.list_documents()), (first.document_id,))
+
     def test_search_returns_real_chunk_and_source_citation(self):
         source = self.write_source()
         document = self.kb.import_document(

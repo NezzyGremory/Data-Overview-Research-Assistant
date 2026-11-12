@@ -18,11 +18,11 @@ Model yang terpasang tidak selalu merupakan model embedding. Pilih model yang me
 
 ## PDF/DOCX tidak dapat diindeks
 
-Parser opsional memerlukan `PyMuPDF` dan `python-docx` dari `requirements_ai.txt`. PDF hasil scan belum memiliki OCR. Tidak ada dokumen uji nyata atau OCR yang disertakan pada fase ini.
+Parser opsional memerlukan `PyMuPDF` dan `python-docx` dari `requirements_ai.txt`. PDF hasil scan belum memiliki OCR. Parser PDF telah diperiksa dengan fixture PDF dua halaman di global Python 3.12; parser tersebut tidak menggantikan uji terhadap dokumen penelitian independen. Package PDF/DOCX tetap tidak ada di project `.venv`.
 
 ## Batas yang diketahui
 
-Tidak ada live Ollama inference atau benchmark kualitas yang sudah dijalankan. TDID builder, fine-tuning engine, model version registry, dan TDEB service tersedia; UI khusus dataset/training/evaluasi belum tersedia. Fine-tuning akan berhenti di preflight bila dependency, model lokal, split TDID, RAM/VRAM, atau ruang disk tidak memadai. Adapter yang diregistrasi belum digunakan oleh runtime chat. Lihat `fine_tuning_guide.md`, `training_hardware.md`, `model_versioning.md`, dan `evaluation_benchmark.md` untuk batas rinci.
+Tidak ada live Ollama inference, merge adapter, fine-tuning, atau benchmark kualitas yang sudah dijalankan pada mesin ini. Tanya DORA Studio menyediakan UI untuk dataset, training, model/adapter, history, dan evaluasi. Fine-tuning akan berhenti di preflight bila dependency, model lokal, split TDID, RAM/VRAM, atau ruang disk tidak memadai. Adapter perlu di-merge dan diimpor menjadi model penuh sebelum dapat dipakai oleh runtime chat. Lihat `ollama_verification.md`, `adapter_runtime.md`, `training_studio.md`, dan `evaluation_studio.md` untuk status serta batas rinci.
 
 ## Training dependencies tidak ada
 

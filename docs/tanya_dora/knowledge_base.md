@@ -12,7 +12,7 @@ TXT, Markdown, RST, dan HTML dapat diproses dengan standard library Python. PDF 
 python -m pip install -r requirements_ai.txt
 ```
 
-Dokumen PDF berbasis gambar memerlukan OCR dan belum dapat diindeks. PDF/DOCX yang terenkripsi atau rusak ditolak dengan error. Extraction PDF/DOCX belum diuji terhadap dokumen nyata dalam fase ini karena parser opsional belum ada di `.venv`.
+Dokumen PDF berbasis gambar memerlukan OCR dan belum dapat diindeks. PDF/DOCX yang terenkripsi atau rusak ditolak dengan error. Parser PDF dicoba pada fixture dua halaman yang dibuat untuk audit; PDF/DOCX terhadap dokumen independen dan DOCX nyata belum diuji. `.venv` tidak memiliki PyMuPDF atau python-docx meskipun PyMuPDF tersedia di global Python.
 
 ## Metadata
 
@@ -51,7 +51,7 @@ Operasi service:
 
 Nilai awal adalah 3.200 karakter per chunk dan overlap 480 karakter. Ukuran ini adalah pendekatan yang dapat dikonfigurasi, bukan hitungan tokenizer. Nilai optimal perlu diuji pada korpus Bahasa Indonesia dan model embedding yang dipilih.
 
-Retrieval fase ini hanya memakai keyword SQLite FTS5; belum ada embedding, reranker, atau jawaban RAG. Hasil pencarian menyediakan teks sumber dan metadata yang dibutuhkan untuk context assembly berikutnya. Citation harus dibentuk hanya dari metadata dokumen yang ada; field kosong tidak boleh diisi dengan tebakan.
+Default retrieval memakai keyword SQLite FTS5. `embed_document()` dan `search_hybrid()` mendukung optional local Ollama embeddings; RAGPipeline menyusun context terbatas, citation dari chunk yang ditemukan, dan refusal tanpa sumber. Tidak ada Ollama di mesin audit sehingga embeddings/hybrid dan jawaban RAG berbasis model belum diverifikasi. Citation harus dibentuk hanya dari metadata dokumen yang ada; field kosong tidak boleh diisi dengan tebakan. Pengelolaan visual tersedia di Tanya DORA Studio → Knowledge Base.
 
 ## Uji lokal
 

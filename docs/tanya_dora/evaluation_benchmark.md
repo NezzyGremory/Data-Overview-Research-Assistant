@@ -14,4 +14,6 @@
 
 Engine mencatat latency per kasus, error, exact-match bila reference answer diberikan, required-term recall, citation ID recall, dan expected-tool coverage. Metrik lexical itu proxy sederhana dan **bukan** factual accuracy, reasoning quality, atau hallucination rate. `human_rated_quality` tetap `null` pada summary otomatis; nilai yang diberikan peninjau tersimpan terpisah. RAM/VRAM adalah snapshot sistem sebelum/sesudah seluruh run, bukan peak usage proses.
 
-Tidak ada live Ollama, base-vs-fine-tuned inference, atau angka kualitas nyata yang dijalankan di fase ini. Target `mode` hanyalah label; pastikan callback target benar-benar menjalankan kondisi Local, RAG, adapter, atau tools yang disebut.
+AI Evaluation Studio menyediakan import benchmark JSONL, leakage check terhadap versi TDID, target untuk lima kondisi, hasil simpan/ekspor, serta dialog human review per kasus. Target `mode` hanyalah label; callback UI harus benar-benar menjalankan kondisi Local, RAG, adapter/model penuh hasil merge, atau tools yang disebut. Otomatisasi hanya menghitung lexical proxy dan latency; human reviewers menilai kualitas jawaban.
+
+Tidak ada live Ollama, base-vs-fine-tuned inference, atau angka kualitas nyata yang dihasilkan pada mesin ini. Ollama dan model base/fine-tuned yang berbeda harus terpasang sebelum perbandingan dijalankan. Lihat [evaluation_studio.md](evaluation_studio.md) untuk batas validasi.

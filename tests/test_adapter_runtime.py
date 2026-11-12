@@ -9,7 +9,13 @@ from app.ai.adapter_runtime import AdapterRuntimeError, AdapterRuntimeService
 from app.ai.model_versioning import ModelVersionStore
 
 
-def _registered_adapter(root: Path, *, model_type: str = "llama", peft_type: str = "LORA"):
+def _registered_adapter(
+    root: Path,
+    *,
+    model_type: str = "llama",
+    peft_type: str = "LORA",
+    task_type: str = "CAUSAL_LM",
+):
     base = root / "base"
     base.mkdir(parents=True)
     (base / "config.json").write_text(json.dumps({"model_type": model_type}), encoding="utf-8")
@@ -20,7 +26,7 @@ def _registered_adapter(root: Path, *, model_type: str = "llama", peft_type: str
         json.dumps({
             "base_model_name_or_path": str(base),
             "peft_type": peft_type,
-            "task_type": "CAUSAL_LM",
+            "task_type": task_type,
             "r": 8,
             "lora_alpha": 16,
             "target_modules": ["q_proj", "v_proj"],
@@ -42,7 +48,8 @@ def test_compatibility_report_checks_peft_base_format_and_local_runtime(tmp_path
     assert report.peft_type == "LORA"
     assert report.adapter_format == "safetensors"
     assert report.ollama_import_supported
-    assert report.runtime_ready == (not report.missing_dependencies)
+    import shutil
+    assert report.runtime_ready == (not report.missing_dependencies and shutil.which("ollama") is not None)
 
 
 def test_unsupported_ollama_family_is_not_marked_importable(tmp_path: Path):
@@ -57,6 +64,13 @@ def test_non_lora_adapter_is_rejected_before_runtime_activation(tmp_path: Path):
     report = AdapterRuntimeService(store).inspect(version.version_id)
     assert not report.compatible
     assert any("not LoRA" in issue for issue in report.issues)
+
+
+def test_seq2seq_adapter_is_rejected_for_ollama_causal_chat_path(tmp_path: Path):
+    store, version = _registered_adapter(tmp_path, task_type="SEQ_2_SEQ_LM")
+    report = AdapterRuntimeService(store).inspect(version.version_id)
+    assert not report.compatible
+    assert any("not supported for causal chat" in issue for issue in report.issues)
 
 
 def test_model_creation_requires_explicit_confirmation(tmp_path: Path):

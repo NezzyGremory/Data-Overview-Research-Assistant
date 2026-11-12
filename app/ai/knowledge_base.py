@@ -294,6 +294,22 @@ class DoraKnowledgeBase:
                 f"Document is larger than the configured limit of {self.max_file_bytes:,} bytes."
             )
 
+        source_digest = hashlib.sha256(content).hexdigest()
+        connection = self._connect()
+        try:
+            duplicate = connection.execute(
+                """SELECT document_id, title FROM knowledge_documents
+                   WHERE source_sha256 = ? ORDER BY indexed_at DESC LIMIT 1""",
+                (source_digest,),
+            ).fetchone()
+        finally:
+            connection.close()
+        if duplicate is not None:
+            raise KnowledgeBaseError(
+                f"This file has already been indexed as '{duplicate['title']}' "
+                f"(document {duplicate['document_id']})."
+            )
+
         normalized_metadata = self._normalize_metadata(metadata, source.stem)
         document_id = uuid4().hex
         relative_path = f"sources/{document_id}{suffix}"
@@ -323,7 +339,7 @@ class DoraKnowledgeBase:
                         chunk_count=len(chunks),
                         source_name=source.name,
                         source_relative_path=relative_path,
-                        source_sha256=hashlib.sha256(content).hexdigest(),
+                        source_sha256=source_digest,
                         source_size_bytes=len(content),
                     )
                     self._insert_chunks(connection, document_id, normalized_metadata, chunks)
@@ -895,7 +911,9 @@ class DoraKnowledgeBase:
             ) from error
 
         segments: list[_TextSegment] = []
-        with pymupdf.open(path) as document:
+        # Parse from bytes so a parser error (for example, a corrupt PDF) cannot
+        # retain an open handle to the staged source on Windows.
+        with pymupdf.open(stream=path.read_bytes(), filetype="pdf") as document:
             if getattr(document, "is_encrypted", False):
                 raise KnowledgeBaseError("Encrypted PDFs cannot be indexed.")
             if document.page_count > self.MAX_PDF_PAGES:

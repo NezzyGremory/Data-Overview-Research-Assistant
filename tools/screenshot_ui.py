@@ -327,9 +327,10 @@ def main() -> int:
     output.parent.mkdir(parents=True, exist_ok=True)
 
     capture_attempts = 0
+    studio_capture_prepared = False
 
     def capture() -> None:
-        nonlocal capture_attempts
+        nonlocal capture_attempts, studio_capture_prepared
         capture_attempts += 1
         if args.page == "vision":
             page = window.vision_intelligence_page
@@ -359,6 +360,24 @@ def main() -> int:
             model_tab = page.model_tab
             if model_tab and model_tab._status_thread is not None and model_tab._status_thread.isRunning() and capture_attempts < 50:
                 QTimer.singleShot(100, capture)
+                return
+            if not studio_capture_prepared:
+                studio_capture_prepared = True
+                if page.layout() is not None:
+                    page.layout().activate()
+                page.updateGeometry()
+                page.repaint()
+                host = window.page_hosts.get(id(page))
+                if host is not None:
+                    host.repaint()
+                window.page_stack.repaint()
+                window.repaint()
+                QApplication.processEvents()
+                page.grab().save(str(temporary_data_dir / "tanya_dora_studio_page_grab.png"))
+                if host is not None:
+                    host.grab().save(str(temporary_data_dir / "tanya_dora_studio_host_grab.png"))
+                window.page_stack.grab().save(str(temporary_data_dir / "tanya_dora_studio_stack_grab.png"))
+                QTimer.singleShot(120, capture)
                 return
         if args.debug_layout and args.page == "overview":
             for name, widget in (

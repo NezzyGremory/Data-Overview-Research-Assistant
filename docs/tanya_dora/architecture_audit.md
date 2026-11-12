@@ -145,4 +145,10 @@ Repository sudah memiliki audit umum DORA di `docs/dora_comprehensive_audit.md` 
 
 - Targeted suite terbaru: 84 passed, 5 subtests passed pada Local LLM, DKB/RAG, conversation, tools, TDID, training preflight, model registry, benchmark, Tanya DORA UI, dan Vision UI.
 - Full regression suite: 388 passed, 2 failed, 5 subtests passed. Dua kegagalan tetap pada `tests/test_sinta_batch_worker.py`: ekspektasi prefix cache `sinta-parser:v4|` padahal kode memakai v5, dan label `SINTA 2` padahal kode mengembalikan `Perlu Diperiksa Ulang`. Keduanya juga muncul pada full run sebelum pekerjaan Tanya DORA; tidak ada file SINTA yang diubah di sesi ini.
-- Definition of Done belum tercapai: live Ollama belum diuji, training stack tidak ada, fine-tuned adapter belum bisa dipakai oleh runtime chat, dan halaman management/benchmark belum tersedia.
+- Definition of Done belum tercapai pada audit awal: live Ollama belum diuji, training stack tidak ada, fine-tuned adapter belum bisa dipakai oleh runtime chat, dan halaman management/benchmark belum tersedia.
+
+## Addendum integrasi — 2026-11-12
+
+The earlier phase/status notes above are the historical architecture audit. Since then, the six-tab Tanya DORA Management Studio has been routed into `MainWindow`, and its Knowledge Base, TDID, Fine-Tuning, Model Manager, Training History, and AI Evaluation tabs call the existing local services. The chat page is linked to explicitly confirmed runtime model selection. A local PEFT-to-Ollama merge/import path, human-review UI, duplicate-document rejection, and verified TDID workspace export were added.
+
+Automated tests and local generated-PDF/TDID plumbing checks pass as detailed in [completion_audit.md](completion_audit.md). Live Ollama inference, real-model RAG/embeddings, adapter conversion and activation, training, checkpoint reload, and five-condition TDEB remain unverified because this machine has no Ollama service/model or fine-tuning dependencies. Those DoD items remain outstanding.

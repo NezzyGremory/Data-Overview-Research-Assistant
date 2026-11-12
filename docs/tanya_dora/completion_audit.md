@@ -75,3 +75,33 @@ These two failures were already recorded in the pre-completion implementation re
 | Full regression | **Tested baseline**, with the two documented SINTA failures |
 
 Do not report the Definition of Done as complete until the blocked runtime, document, training, adapter, and model-comparison checks are performed on a compatible machine.
+
+## Completion and integration update — 2026-11-12
+
+The implementation pass added a six-tab PySide6 Management Studio, a local model inference panel, explicit model activation/history/rollback, adapter compatibility and PEFT merge/import orchestration, human-review controls for TDEB cases, verified-only TDID workspace export, and local duplicate-source rejection. Chat selection is linked to Studio activation and does not fall back to the first installed model. The two page screenshots are `screenshots/tanya_dora_page.png` and `screenshots/tanya_dora_management_studio.png`.
+
+| Requirement | Implemented | Integrated | Tested / verified on this machine |
+| --- | --- | --- | --- |
+| Ollama detection, models/running status, timed streaming inference and stop | Yes | Model Manager and Tanya DORA chat | Mocked client/UI tests pass. **No Ollama executable/server or local model was available; live inference is not verified.** Numeric pre-download model-size lookup is still missing; the UI instructs users to check the exact tag and free disk before installing. |
+| Adapter compatibility and runtime path | Yes: strict local PEFT LoRA validation, safe merge to full Safetensors, `ollama create`, explicit activation/deactivation and history rollback | Adapter Registry actions and chat model selection | Unit tests cover compatibility/confirmation/history. **No merge, Ollama import, adapter inference or live switch was possible** because Ollama and merge packages are absent. |
+| Six-tab Management Studio | Yes | Lazy-routed into the active MainWindow page stack | Qt page construction test passes; the Studio and chat pages were captured and visually checked at 1440×900. Backend controls call their service methods. |
+| Knowledge Base document management | Yes, including metadata, FTS search, preview, update, re-index, delete, and duplicate-byte rejection | Uses the same knowledge store as RAG | Automated tests pass. Manual generated two-page PDF check (global Python 3.12/PyMuPDF) indexed three chunks, retrieved Indonesian/English terms with stored Page 1/Page 2 citations, returned no result for an irrelevant term, and rejected duplicate, empty-text, and corrupt PDFs. This was **not** a test against an independently sourced research paper. `.venv` lacks PyMuPDF and python-docx. |
+| Real grounded RAG answer, embeddings and citation faithfulness | Existing pipeline remains connected | Tanya DORA chat calls RAG | **Not verified**: there was no Ollama model. PDF parser/FTS retrieval is not an LLM answer, semantic embedding run, or hybrid-quality test. |
+| TDID sample and verified split export | Six reviewed local-doc examples are included in `examples/tdid_trial_verified.jsonl` | Fine-Tuning Studio consumes versioned TDID and exports a portable workspace | Fixture had zero validation issues; all six were verified; source-group split 4/1/1; final version saved/reloaded in temporary storage and exported to a 3,180-byte ZIP. |
+| Tokenization, fine-tuning, loss, checkpoint and model reload | Real trainer and progress logging are wired; preflight and portable export are available | Fine-Tuning Studio start/stop/history | **Not run**: `.venv` lacks PyTorch, Transformers, Datasets, PEFT, TRL, Accelerate and bitsandbytes; no local base checkpoint. No loss, checkpoint, reload or quality result is claimed. |
+| TDEB five-condition comparison and human review | Yes: same held-out snapshot, leakage gate, persisted outputs/latency, export and case review dialog | AI Evaluation tab calls model, RAG and tool targets | Service and Qt tests pass. **No live comparison**: base and fine-tuned Ollama tags are absent. Automated lexical scores remain proxies. |
+
+### Regression after integration
+
+Full command, using the project Python and an isolated temporary pytest directory:
+
+```powershell
+$base = Join-Path $env:TEMP 'pytest_tanya_completion_final_full2_20261112'
+.venv\Scripts\python.exe -m pytest tests\ -q --tb=short -p no:cacheprovider --basetemp $base
+```
+
+Result: **398 passed, 2 failed, 5 subtests passed** in 72.50 seconds. The two failures are the same SINTA failures present at the 388-pass baseline: the stale `sinta-parser:v4|` test expectation vs current v5 key, and expected `SINTA 2` vs current `Perlu Diperiksa Ulang` status. No SINTA files were changed. Targeted Tanya DORA tests passed (**48 passed, 5 subtests passed**). `py_compile` succeeded for edited service/UI files and `git diff --check` reported no whitespace errors (only Git's LF-to-CRLF notices).
+
+## Final Definition-of-Done assessment
+
+**Not complete.** The local service was unavailable and the training environment/model checkpoint were missing. Accordingly, requirements for successful real Ollama inference, model-grounded RAG, a real model comparison, adapter merge/import/activation, and a real fine-tuning/checkpoint/reload remain **not verified or blocked**. Continue on a compatible machine, record actual model tags, environment, and outputs, and rerun the full suite. Do not infer the Definition of Done from the UI, mock tests, generated-PDF parsing, or sample dataset export.

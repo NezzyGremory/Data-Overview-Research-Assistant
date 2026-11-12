@@ -15,9 +15,9 @@ Tanya DORA adalah asisten desktop lokal yang memisahkan inferensi bahasa, sumber
 | Tanya DORA desktop | `app/ui/tanya_dora_page.py` | Terpasang: lazy-loaded PySide6 page, worker chat, streaming, stop, model/status, temperature, history, references. |
 | Wiring aplikasi | `app/ui/main_window.py` | Route lazily loaded pada sidebar; handler dataset dan halaman lain tidak diubah. |
 | DORA read-only tools dan online search opsional | `app/ai/tool_calling.py` | Tersedia di tool loop; online OpenAlex/Crossref hanya terdaftar jika checkbox aktif. |
-| TDID builder dan snapshot | `app/ai/tdid_dataset.py` | Service import/validasi/split/versioning tersedia; belum ada Dataset Builder UI. |
-| SFT + LoRA/QLoRA | `app/ai/fine_tuning.py` | Engine dan preflight tersedia; stack training opsional tidak terpasang di environment ini. Belum ada run nyata atau Studio UI. |
-| Adapter registry dan TDEB | `app/ai/model_versioning.py`, `evaluation_benchmark.py` | Local import/export/version/review tersedia; belum terhubung ke runtime adapter Tanya DORA. Belum ada hasil live benchmark. |
+| TDID builder dan snapshot | `app/ai/tdid_dataset.py` | Service import/validasi/split/versioning tersedia dan terhubung ke Dataset Manager. |
+| SFT + LoRA/QLoRA | `app/ai/fine_tuning.py` | Engine, preflight, callback progress, workspace export, dan Fine-Tuning Studio terhubung; stack training opsional tidak terpasang di environment ini, belum ada run nyata. |
+| Adapter registry dan TDEB | `app/ai/model_versioning.py`, `evaluation_benchmark.py` | Registry terhubung ke Model Manager dan jalur merge/import Ollama; TDEB terhubung ke AI Evaluation Studio. Belum ada merge atau hasil live benchmark. |
 
 ## Alur chat saat ini
 
@@ -42,16 +42,16 @@ Jika retrieval tidak menemukan sumber, pipeline mengembalikan pesan yang menyata
 - Dua penyimpanan ini terpisah dari SQLite proyek dan tidak dimasukkan ke training set otomatis.
 - Semua inferensi dan embedding pada fase ini hanya menuju loopback Ollama. Modul tidak mengunduh model.
 
-## Integrasi yang belum selesai
+## Management Studio dan batas integrasi
 
-Tanya DORA sudah memasang tool read-only untuk snapshot dataset/hasil analyzer, pencarian DKB, dan pencarian paper opsional. TDID, SFT runner, adapter registry, dan TDEB tersedia sebagai service, tetapi belum memiliki halaman kelola khusus. Hasil training adapter belum dapat dipakai sebagai inference model dari halaman chat karena runtime chat yang tersambung saat ini Ollama. Import/management dokumen DKB juga belum ada di UI.
+Tanya DORA memasang tool read-only untuk snapshot dataset/hasil analyzer, pencarian DKB, dan pencarian paper opsional. Tanya DORA Studio menyediakan enam tab untuk pengelolaan DKB, TDID, SFT, model/adapter, training history, dan TDEB. Adapter PEFT dijalankan melalui merge ke model penuh lokal sebelum import ke Ollama; tidak dimuat langsung sebagai adapter. Jalur conversion dan pilihan model masih menunggu validasi pada Ollama/model nyata.
 
 Research gap/novelty belum mempunyai workflow dedicated; model harus menyebut hasil sebagai potensi, menampilkan paper yang benar-benar ditemukan, dan menyampaikan coverage terbatas. Lihat `research_intelligence.md`.
 
 ## Pengujian
 
-Tes service berjalan tanpa Ollama menggunakan HTTP mock, vector synthetic, SQLite temporary, dokumen synthetic, dan callback benchmark yang terkontrol. UI Tanya DORA diuji saat service lokal tidak tersedia. Tidak ada klaim kualitas jawaban nyata sebelum live inference/evaluation.
+Tes service berjalan tanpa Ollama menggunakan HTTP mock, vector synthetic, SQLite temporary, dokumen synthetic, dan callback benchmark yang terkontrol. UI Tanya DORA serta enam tab Studio diuji saat service lokal tidak tersedia. Fixture PDF dua halaman yang dibuat untuk audit berhasil diproses melalui PyMuPDF global Python dan memberikan citation page yang tersimpan; dokumen itu bukan paper penelitian independen. Tidak ada klaim kualitas jawaban nyata sebelum live inference/evaluation.
 
 ## Batas penggunaan versi
 
-`ModelVersionStore.select_version()` hanya merekam pilihan adapter setelah boolean konfirmasi eksplisit; halaman Tanya DORA belum memuat pilihan itu. Fingerprint base model adalah fingerprint struktural (hash config + nama/ukuran bobot), bukan hash isi bobot. TDEB menghitung lexical proxy dan latency; factuality/reasoning/hallucination memerlukan human review.
+Model switch, aktivasi adapter hasil merge, deactivation, dan rollback memerlukan konfirmasi eksplisit. Fingerprint base model adalah fingerprint struktural (hash config + nama/ukuran bobot), bukan hash isi bobot. TDEB menghitung lexical proxy dan latency; factuality/reasoning/hallucination memerlukan human review. Lihat [completion audit](completion_audit.md) untuk hasil mesin dan status DoD.
