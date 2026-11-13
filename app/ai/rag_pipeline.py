@@ -34,10 +34,11 @@ class RAGResponse:
 
 
 class RAGPipeline:
-    """Retrieve DKB chunks, assemble a bounded prompt, and call local Ollama.
+    """Optionally retrieve DKB chunks, assemble a prompt, and call local Ollama.
 
-    When retrieval returns no source, this pipeline returns that fact directly
-    instead of asking a language model to fill the gap from unverified memory.
+    Source-grounded calls stop when retrieval finds no evidence. Local chat
+    calls can opt into a general model answer while keeping the result marked
+    as ungrounded.
     """
 
     DEFAULT_SYSTEM_PROMPT = """Anda adalah Tanya DORA, asisten riset dan Data Science.
@@ -47,6 +48,14 @@ Jangan mengarang angka, paper, DOI, URL, kutipan, atau hasil eksperimen.
 Gunakan penanda sumber [S1], [S2], dan seterusnya hanya untuk sumber yang sesuai.
 Jika konteks tidak cukup untuk menjawab, nyatakan bagian yang belum didukung sumber.
 Jangan mengklaim bahwa jawaban berasal dari sumber yang tidak ada dalam konteks."""
+
+    DEFAULT_LOCAL_CHAT_SYSTEM_PROMPT = """Anda adalah Tanya DORA, asisten lokal untuk riset, data science, dan pertanyaan umum.
+Jawab pertanyaan secara langsung dalam Bahasa Indonesia yang jelas, kecuali pengguna meminta bahasa lain.
+Ikuti arahan tambahan pengguna selama tetap jujur dan aman.
+Jika konteks DKB atau hasil tool DORA tersedia, gunakan sebagai bukti yang relevan dan tandai sumber DKB dengan [S#].
+Jika sumber atau tool tidak tersedia, tetap bantu berdasarkan pengetahuan model lokal dan jelaskan ketidakpastian bila perlu.
+Jangan mengarang angka analisis dataset, paper, DOI, URL, kutipan, atau hasil eksperimen.
+Jangan mengaku telah mencari dokumen, menjalankan analisis, atau memeriksa fakta yang tidak benar-benar dilakukan."""
 
     NO_SOURCE_ANSWER = (
         "DKB belum menemukan sumber terindeks yang relevan untuk pertanyaan ini. "
@@ -85,6 +94,9 @@ Jangan mengklaim bahwa jawaban berasal dari sumber yang tidak ada dalam konteks.
         category: str | None = None,
         max_sources: int = 5,
         conversation_history: Sequence[Mapping[str, str]] = (),
+        include_knowledge_base: bool = True,
+        allow_general_answers: bool = False,
+        custom_instructions: str = "",
         on_delta: Callable[[str], None] | None = None,
         on_tool_call: Callable[[str, Mapping[str, Any]], None] | None = None,
         cancel_event: threading.Event | None = None,
@@ -94,7 +106,10 @@ Jangan mengklaim bahwa jawaban berasal dari sumber yang tidak ada dalam konteks.
             raise ValueError("Question must contain text.")
         safe_source_count = max(1, min(int(max_sources), 10))
 
-        if self.embedding_model:
+        if not include_knowledge_base:
+            results = ()
+            retrieval_mode = "local_chat"
+        elif self.embedding_model:
             query_embedding = self.llm_manager.embed_texts(
                 [normalized_question],
                 model=self.embedding_model,
@@ -127,7 +142,7 @@ Jangan mengklaim bahwa jawaban berasal dari sumber yang tidak ada dalam konteks.
             )
 
         has_tools = self.tool_registry is not None and self.tool_registry.has_tools()
-        if not results and not has_tools:
+        if not results and not has_tools and not allow_general_answers:
             return RAGResponse(
                 answer=self.NO_SOURCE_ANSWER,
                 sources=(),
@@ -141,15 +156,40 @@ Jangan mengklaim bahwa jawaban berasal dari sumber yang tidak ada dalam konteks.
             for index, result in enumerate(results, start=1)
         )
         context = self._assemble_context(sources) if sources else "DKB tidak menemukan sumber relevan."
-        user_content = (
-            f"Pertanyaan pengguna:\n{normalized_question}\n\n"
-            "Gunakan hanya bukti dari chunk DKB yang disertakan dan hasil tool lokal yang benar-benar "
-            "dipanggil. Angka dataset hanya boleh berasal dari tool DORA. Jangan menebak jika bukti "
-            "tidak tersedia. Cantumkan penanda [S#] untuk sumber DKB yang relevan.\n\n"
-            f"{context}"
+        if allow_general_answers:
+            user_content = f"Pertanyaan pengguna:\n{normalized_question}"
+            if sources:
+                user_content += (
+                    "\n\nGunakan potongan DKB sebagai konteks bila relevan. Jawab pertanyaan secara langsung; "
+                    "jangan membatasi jawaban hanya pada dokumen jika pertanyaan memerlukan penjelasan umum. "
+                    "Cantumkan [S#] hanya untuk klaim yang didukung sumber tersebut.\n\n"
+                    f"{context}"
+                )
+            else:
+                user_content += (
+                    "\n\nJawab secara langsung memakai kemampuan model lokal. Jika pertanyaan meminta "
+                    "fakta terkini, angka dataset, atau rujukan yang tidak tersedia dari tool/sumber, "
+                    "jelaskan keterbatasannya dan jangan mengarang."
+                )
+        else:
+            user_content = (
+                f"Pertanyaan pengguna:\n{normalized_question}\n\n"
+                "Gunakan hanya bukti dari chunk DKB yang disertakan dan hasil tool lokal yang benar-benar "
+                "dipanggil. Angka dataset hanya boleh berasal dari tool DORA. Jangan menebak jika bukti "
+                "tidak tersedia. Cantumkan penanda [S#] untuk sumber DKB yang relevan.\n\n"
+                f"{context}"
+            )
+        base_system_prompt = (
+            self.DEFAULT_LOCAL_CHAT_SYSTEM_PROMPT
+            if allow_general_answers and self.system_prompt == self.DEFAULT_SYSTEM_PROMPT
+            else self.system_prompt
         )
+        extra_instructions = str(custom_instructions or "").strip()[:4000]
+        effective_system_prompt = base_system_prompt
+        if extra_instructions:
+            effective_system_prompt += f"\n\nArahan tambahan dari pengguna:\n{extra_instructions}"
         messages: list[dict[str, str]] = [
-            {"role": "system", "content": self.system_prompt},
+            {"role": "system", "content": effective_system_prompt},
         ]
         messages.extend(self._normalize_history(conversation_history))
         messages.append({"role": "user", "content": user_content})
@@ -168,7 +208,7 @@ Jangan mengklaim bahwa jawaban berasal dari sumber yang tidak ada dalam konteks.
                 messages,
                 model=self.chat_model,
                 temperature=self.temperature,
-                on_delta=on_delta if sources else None,
+                on_delta=on_delta if (sources or allow_general_answers) else None,
                 on_tool_call=on_tool_call,
                 cancel_event=cancel_event,
                 tool_registry=self.tool_registry,
@@ -197,11 +237,11 @@ Jangan mengklaim bahwa jawaban berasal dari sumber yang tidak ada dalam konteks.
         has_tool_evidence = any(item.provides_evidence for item in tool_results)
         if cancelled and not sources and not has_tool_evidence:
             answer = ""
-        elif not sources and not has_tool_evidence:
+        elif not sources and not has_tool_evidence and not allow_general_answers:
             answer = self.NO_SOURCE_ANSWER
         elif not answer and not cancelled:
-            answer = "Model lokal tidak menghasilkan jawaban teks untuk sumber yang ditemukan."
-        if not sources and grounded and on_delta is not None and answer:
+            answer = "Model lokal tidak menghasilkan jawaban teks."
+        if not sources and grounded and on_delta is not None and answer and not allow_general_answers:
             on_delta(answer)
         return RAGResponse(
             answer=answer,

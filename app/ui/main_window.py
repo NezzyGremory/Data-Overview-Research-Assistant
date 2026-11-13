@@ -14824,6 +14824,7 @@ class MainWindow(QMainWindow):
             "gap_tool_page": ("_explanation_thread",),
             "report_tool_page": ("_report_thread",),
             "vision_intelligence_page": ("_thread",),
+            "tanya_dora_page": ("_chat_thread", "_model_thread"),
         }
         active = []
         for page_name, attributes in worker_fields.items():
@@ -15726,14 +15727,12 @@ class MainWindow(QMainWindow):
         self.report_tool_page = None
         self.vision_intelligence_page = None
         self.tanya_dora_page = None
-        self.tanya_dora_studio_page = None
         self._ml_page_build_scheduled = False
         self._research_page_build_scheduled = False
         self._insights_page_build_scheduled = False
         self._report_page_build_scheduled = False
         self._vision_page_build_scheduled = False
         self._tanya_dora_page_build_scheduled = False
-        self._tanya_dora_studio_build_scheduled = False
 
         self._ml_placeholder = deferred_page(
             "mlLoadingPlaceholder", "ML Intelligence"
@@ -15752,9 +15751,6 @@ class MainWindow(QMainWindow):
         )
         self._tanya_dora_placeholder = deferred_page(
             "tanyaDoraLoadingPlaceholder", "Tanya DORA"
-        )
-        self._tanya_dora_studio_placeholder = deferred_page(
-            "tanyaDoraStudioLoadingPlaceholder", "Tanya DORA Studio"
         )
         self._startup_checkpoint("Menyiapkan halaman bantuan…")
         self.about_page = AboutPage()
@@ -15779,7 +15775,6 @@ class MainWindow(QMainWindow):
             "report": self._report_placeholder,
             "vision": self._vision_placeholder,
             "tanya_dora": self._tanya_dora_placeholder,
-            "tanya_dora_studio": self._tanya_dora_studio_placeholder,
             "about": self.about_page,
             "copyright": self.copyright_page,
             "help": self.help_page,
@@ -15827,7 +15822,6 @@ class MainWindow(QMainWindow):
             "report": "Research Report",
             "vision": "Vision Intelligence",
             "tanya_dora": "Tanya DORA",
-            "tanya_dora_studio": "Tanya DORA Management Studio",
             "about": "Tentang DORA",
             "copyright": "Credits",
             "help": "Bantuan",
@@ -15954,7 +15948,6 @@ class MainWindow(QMainWindow):
         optional_tools = [
             ("editor_analysis", "editor-analysis.svg", "Editor Analysis"),
             ("tanya_dora", "tanya-dora.svg", "Tanya DORA"),
-            ("tanya_dora_studio", "tanya-dora.svg", "Tanya DORA Studio"),
         ]
         if NODE_EDITOR_UI_ENABLED:
             optional_tools.append(("node_editor", "node-editor.svg", "Node Editor"))
@@ -16052,7 +16045,6 @@ class MainWindow(QMainWindow):
                 "ml": (24, 24),
                 "vision": (24, 24),
                 "tanya_dora": (24, 24),
-                "tanya_dora_studio": (24, 24),
                 "dashboard": (26, 26),
                 "research": (30, 24),
                 "papers": (30, 30),
@@ -16088,7 +16080,6 @@ class MainWindow(QMainWindow):
             "ml": self.open_ml_page,
             "vision": self.open_vision_page,
             "tanya_dora": self.open_tanya_dora_page,
-            "tanya_dora_studio": self.open_tanya_dora_studio_page,
             "research": self.open_research_page,
             "papers": self.open_papers_tool,
             "landscape": self.open_landscape_tool,
@@ -16677,6 +16668,9 @@ class MainWindow(QMainWindow):
             self._navigation_loading_pending = False
             self._navigation_loading_started_at = None
             self._start_navigation_feedback(elapsed_ms)
+        tanya_chat = getattr(self, "tanya_dora_page", None)
+        if tanya_chat is not None and tanya_chat.isVisible():
+            tanya_chat.raise_()
 
     def _start_page_transition(self):
         if (
@@ -16817,13 +16811,19 @@ class MainWindow(QMainWindow):
         page.restore_project(self.current_project_id)
 
     def open_tanya_dora_page(self):
-        if self.tanya_dora_page is None:
-            self._show_page("tanya_dora")
-            if not self._tanya_dora_page_build_scheduled:
-                self._tanya_dora_page_build_scheduled = True
-                QTimer.singleShot(40, self._create_tanya_dora_page)
+        if self.tanya_dora_page is not None:
+            if self.tanya_dora_page.isVisible():
+                self.tanya_dora_page._close_compact_overlay()
+                return
+            self.tanya_dora_page._position_compact_overlay()
+            self.tanya_dora_page.show()
+            self.tanya_dora_page.raise_()
+            self.tanya_dora_page.message_input.setFocus()
+            self.set_active_button("tanya_dora")
             return
-        self._show_page("tanya_dora")
+        if not self._tanya_dora_page_build_scheduled:
+            self._tanya_dora_page_build_scheduled = True
+            QTimer.singleShot(40, self._create_tanya_dora_page)
 
     def _create_tanya_dora_page(self):
         self._tanya_dora_page_build_scheduled = False
@@ -16831,33 +16831,17 @@ class MainWindow(QMainWindow):
             return
         from app.ui.tanya_dora_page import TanyaDoraPage
 
-        page = TanyaDoraPage(tool_context_provider=self._tanya_dora_tool_context)
+        page = TanyaDoraPage(
+            tool_context_provider=self._tanya_dora_tool_context,
+            compact_mode=True,
+            parent=self.page_stack,
+        )
         self.tanya_dora_page = page
-        self._replace_lazy_page("tanya_dora", page)
-
-    def open_tanya_dora_studio_page(self):
-        if self.tanya_dora_studio_page is None:
-            self._show_page("tanya_dora_studio")
-            if not self._tanya_dora_studio_build_scheduled:
-                self._tanya_dora_studio_build_scheduled = True
-                QTimer.singleShot(40, self._create_tanya_dora_studio_page)
-            return
-        self._show_page("tanya_dora_studio")
-
-    def _create_tanya_dora_studio_page(self):
-        self._tanya_dora_studio_build_scheduled = False
-        if self.tanya_dora_studio_page is not None:
-            return
-        from app.ui.tanya_dora_management_page import TanyaDoraManagementPage
-
-        page = TanyaDoraManagementPage(tool_context_provider=self._tanya_dora_tool_context)
-        page.model_activated.connect(self._on_tanya_dora_model_activated)
-        self.tanya_dora_studio_page = page
-        self._replace_lazy_page("tanya_dora_studio", page)
-
-    def _on_tanya_dora_model_activated(self, model_name: str):
-        if self.tanya_dora_page is not None:
-            self.tanya_dora_page.set_active_model(str(model_name))
+        page._position_compact_overlay()
+        page.show()
+        page.raise_()
+        page.message_input.setFocus()
+        self.set_active_button("tanya_dora")
 
     def _tanya_dora_tool_context(self):
         """Copy bounded, read-only DORA context for the local tool registry."""

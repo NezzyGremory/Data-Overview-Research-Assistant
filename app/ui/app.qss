@@ -2509,6 +2509,202 @@ QLineEdit#visionDatasetPath:focus, QComboBox#visionTaskSelector:focus {
     padding: 0 @px(8);
 }
 #tanyaDoraControls QComboBox::drop-down { border: none; width: @px(24); }
+#tanyaDoraSettingsToggle {
+    background: #F7FAFE;
+    border: @px(1) solid #D9E5F2;
+    border-radius: @px(8);
+    color: #376487;
+    font-size: @px(11);
+    font-weight: 650;
+    min-height: @px(34);
+    padding: 0 @px(12);
+}
+#tanyaDoraSettingsToggle:hover { background: #EEF5FF; border-color: #B8D1EF; }
+#tanyaDoraInstructions {
+    background: #FBFDFF;
+    border: @px(1) solid #D7E2EE;
+    border-radius: @px(8);
+    color: #29394E;
+    font-size: @px(12);
+    padding: @px(8);
+}
+#tanyaDoraInstructions:focus { border-color: #5B9CDB; }
+#tanyaDoraIncludeDkb { color: #50627A; font-size: @px(11); spacing: @px(7); }
+#tanyaDoraSettingsNote { color: #7A899C; font-size: @px(11); }
+
+/* ═══════════════════════════════════════════════════════════════════
+   Compact floating chat  –  Tanya DORA (navigation item overlay)
+   ═══════════════════════════════════════════════════════════════════ */
+
+#tanyaDoraPage[compactMode="true"] {
+    background: #FFFFFF;
+    border: @px(1) solid #BDD0E5;
+    border-radius: @px(20);
+}
+
+/* Thin separator below header */
+#tanyaDoraHeaderSep {
+    background: #E2EDF7;
+    border: none;
+    max-height: @px(1);
+}
+
+/* ── Header ── */
+#tanyaDoraPage[compactMode="true"] #tanyaDoraTitle {
+    color: #102240;
+    font-size: @px(15);
+    font-weight: 700;
+    letter-spacing: 0.01em;
+}
+
+#tanyaDoraAvatar {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 #D8EEFF, stop:1 #BCD7F5);
+    border: @px(1) solid #A8C8E8;
+    border-radius: @px(21);
+}
+
+/* Header icon buttons (menu, +, ×) */
+#tanyaDoraMenuButton, #tanyaDoraHeaderButton, #tanyaDoraCloseButton {
+    background: transparent;
+    border: none;
+    border-radius: @px(19);
+    color: #5B7898;
+    font-size: @px(19);
+    font-weight: 400;
+    min-width: @px(36);
+    min-height: @px(36);
+    padding: 0;
+}
+#tanyaDoraMenuButton:hover {
+    background: #EEF4FB;
+    color: #0B5FA0;
+}
+#tanyaDoraHeaderButton:hover {
+    background: #EDF6EC;
+    color: #1E7A3C;
+}
+#tanyaDoraCloseButton:hover {
+    background: #FFF0EF;
+    color: #B03030;
+}
+
+/* ── Chat panel container ── */
+#tanyaDoraPage[compactMode="true"] #tanyaDoraChatPanel {
+    background: transparent;
+    border: none;
+    border-radius: 0;
+}
+
+/* ── Message scroll area & host ── */
+#tanyaDoraMessagesScroll {
+    background: #F5F9FD;
+    border: none;
+}
+#tanyaDoraMessagesScroll QScrollBar:vertical {
+    background: transparent;
+    width: @px(4);
+    margin: 0;
+}
+#tanyaDoraMessagesScroll QScrollBar::handle:vertical {
+    background: #C8D8E8;
+    border-radius: @px(2);
+    min-height: @px(32);
+}
+#tanyaDoraMessagesScroll QScrollBar::handle:vertical:hover {
+    background: #9AB6CF;
+}
+#tanyaDoraMessagesScroll QScrollBar::add-line:vertical,
+#tanyaDoraMessagesScroll QScrollBar::sub-line:vertical { height: 0; }
+
+#tanyaDoraMessageList {
+    background: #F5F9FD;
+    border: none;
+}
+
+/* ── Chat bubbles ── */
+#tanyaDoraUserBubble {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 #1B87CC, stop:1 #0A6BB0);
+    border: none;
+    border-radius: @px(18);
+    border-bottom-right-radius: @px(5);
+}
+#tanyaDoraAssistantBubble {
+    background: #FFFFFF;
+    border: @px(1) solid #DDE9F5;
+    border-radius: @px(18);
+    border-bottom-left-radius: @px(5);
+}
+
+#tanyaDoraUserBubble QLabel#tanyaDoraBubbleText {
+    color: #FFFFFF;
+    font-size: @px(13);
+    line-height: 1.4;
+}
+#tanyaDoraAssistantBubble QLabel#tanyaDoraBubbleText {
+    color: #1A2E42;
+    font-size: @px(13);
+    line-height: 1.4;
+}
+
+#tanyaDoraDemoTag {
+    color: #7A98B0;
+    font-size: @px(9);
+    font-weight: 700;
+    letter-spacing: 0.06em;
+}
+
+/* ── Typing indicator bubble ── */
+#tanyaDoraTypingBubble {
+    background: #FFFFFF;
+    border: @px(1) solid #DDE9F5;
+    border-radius: @px(18);
+    border-bottom-left-radius: @px(5);
+    min-width: @px(60);
+    max-width: @px(80);
+}
+#tanyaDoraTypingDot {
+    color: #BDD0E0;
+    font-size: @px(10);
+}
+#tanyaDoraTypingDot[active="true"] {
+    color: #2F88C8;
+}
+
+/* ── Input area ── */
+#tanyaDoraPage[compactMode="true"] #tanyaDoraInput {
+    background: #FFFFFF;
+    border: @px(1.5) solid #C8D8EB;
+    border-radius: @px(22);
+    color: #1A2E42;
+    font-size: @px(13);
+    padding: @px(9) @px(14);
+}
+#tanyaDoraPage[compactMode="true"] #tanyaDoraInput:focus {
+    border-color: #4D9CD6;
+    background: #FAFCFF;
+}
+
+/* ── Send button ── */
+#tanyaDoraPage[compactMode="true"] QPushButton#primaryButton {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #2893D4, stop:1 #0A6BB0);
+    border: none;
+    border-radius: @px(22);
+    color: #FFFFFF;
+    font-size: @px(18);
+    padding: 0;
+}
+#tanyaDoraPage[compactMode="true"] QPushButton#primaryButton:hover {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 #3BA0E0, stop:1 #1278BE);
+}
+#tanyaDoraPage[compactMode="true"] QPushButton#primaryButton:disabled {
+    background: #C0D4E6;
+    color: #EAF1F8;
+}
+
 
 #tanyaDoraManagementPage { background: #F1F7FF; }
 #tanyaDoraStudioTitle {

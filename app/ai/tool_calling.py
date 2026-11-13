@@ -189,6 +189,7 @@ def build_dora_tool_registry(
     knowledge_base: Any,
     *,
     allow_online_research: bool = False,
+    include_knowledge_base: bool = True,
 ) -> DoraToolRegistry:
     """Build the read-only tool set from a UI-thread snapshot of DORA state."""
     snapshot = dict(context) if isinstance(context, Mapping) else {}
@@ -270,52 +271,53 @@ def build_dora_tool_registry(
         "correlations",
     )
 
-    categories = sorted(getattr(knowledge_base, "CATEGORIES", ()))
+    if include_knowledge_base:
+        categories = sorted(getattr(knowledge_base, "CATEGORIES", ()))
 
-    def search_knowledge(arguments):
-        query = str(arguments.get("query") or "").strip()
-        if not query:
-            raise ValueError("Query pencarian DKB tidak boleh kosong.")
-        category = str(arguments.get("category") or "").strip() or None
-        limit = max(1, min(int(arguments.get("limit", 3)), 5))
-        results = knowledge_base.search(query, category=category, limit=limit)
-        return {
-            "query": query,
-            "result_count": len(results),
-            "sources": [
-                {
-                    "citation": result.citation,
-                    "title": result.title,
-                    "author_or_org": result.author_or_org,
-                    "year": result.publication_year,
-                    "category": result.category,
-                    "page_or_section": result.page_or_section,
-                    "doi": result.doi,
-                    "url": result.source_url,
-                    "excerpt": result.text[:1800],
-                }
-                for result in results
-            ],
-        }
+        def search_knowledge(arguments):
+            query = str(arguments.get("query") or "").strip()
+            if not query:
+                raise ValueError("Query pencarian DKB tidak boleh kosong.")
+            category = str(arguments.get("category") or "").strip() or None
+            limit = max(1, min(int(arguments.get("limit", 3)), 5))
+            results = knowledge_base.search(query, category=category, limit=limit)
+            return {
+                "query": query,
+                "result_count": len(results),
+                "sources": [
+                    {
+                        "citation": result.citation,
+                        "title": result.title,
+                        "author_or_org": result.author_or_org,
+                        "year": result.publication_year,
+                        "category": result.category,
+                        "page_or_section": result.page_or_section,
+                        "doi": result.doi,
+                        "url": result.source_url,
+                        "excerpt": result.text[:1800],
+                    }
+                    for result in results
+                ],
+            }
 
-    category_schema: dict[str, Any] = {"type": "string"}
-    if categories:
-        category_schema["enum"] = categories
-    registry.register(
-        DoraTool(
-            "search_knowledge_base",
-            "Search locally indexed DKB documents. Use returned source metadata for citations.",
-            _object_schema(
-                {
-                    "query": {"type": "string", "description": "Short search query."},
-                    "category": {**category_schema, "description": "Optional DKB category slug."},
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 5},
-                },
-                required=("query",),
-            ),
-            search_knowledge,
+        category_schema: dict[str, Any] = {"type": "string"}
+        if categories:
+            category_schema["enum"] = categories
+        registry.register(
+            DoraTool(
+                "search_knowledge_base",
+                "Search locally indexed DKB documents. Use returned source metadata for citations.",
+                _object_schema(
+                    {
+                        "query": {"type": "string", "description": "Short search query."},
+                        "category": {**category_schema, "description": "Optional DKB category slug."},
+                        "limit": {"type": "integer", "minimum": 1, "maximum": 5},
+                    },
+                    required=("query",),
+                ),
+                search_knowledge,
+            )
         )
-    )
 
     if allow_online_research:
         registry.register(
